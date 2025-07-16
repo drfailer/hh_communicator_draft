@@ -98,18 +98,14 @@ public:
     while (true) {
       INFO("wait for reception (rank = " << rank << ")");
       MPI_Recv(buffer.data(), buffer.size(), MPI_BYTE, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
-      // auto id = serializer::tools::getId<TypesIDs>(buffer);
+      auto id = serializer::tools::getId<TypesIDs>(buffer);
 
-      // INFO("package received (rank = " << rank << ", data id = " << id << ").");
-      INFO("package received (rank = " << rank << ", data id = " << 0 << ").");
-      // serializer::tools::applyId(id, TypesIDs(), [&]<typename T>() {
-      //   std::shared_ptr<T> data = std::make_shared<T>();
-      //   // serializer::deserializeWithId<serializer::Serializer<serializer::Bytes, TypesIDs>, T>(buffer, 0, *data);
-      //   *data = 1;
-      //   task_->addResult(data);
-      // });
-      if (rank == 1)
-          task_->addResult(std::make_shared<int>(0));
+      INFO("package received (rank = " << rank << ", data id = " << id << ").");
+      serializer::tools::applyId(id, TypesIDs(), [&]<typename T>() {
+        std::shared_ptr<T> data;
+        serializer::deserializeWithId<serializer::Serializer<serializer::Bytes, TypesIDs>, T>(buffer, 0, data);
+        task_->addResult(data);
+      });
     }
   }
 
@@ -118,8 +114,7 @@ public:
     volatile bool canTerminate = false;
 
     // Actual computation loop
-    // while (!this->canTerminate()) {
-    while (true) {
+    while (!this->canTerminate()) {
       // Wait for a data to arrive or termination
       this->nvtxProfiler()->startRangeWaiting();
       start = std::chrono::system_clock::now();

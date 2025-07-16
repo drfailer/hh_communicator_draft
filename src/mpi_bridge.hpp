@@ -78,15 +78,9 @@ public:
   MPIBridgeExecute(std::vector<int> const &receivers_ranks) : receiversRanks_(receivers_ranks) {}
 
   void execute(std::shared_ptr<Input> data) override {
-    if (data == nullptr) {
-      return; // return on automatic start
-    }
     serializer::Bytes buffer(1024);
+    serializer::serializeWithId<serializer::Serializer<serializer::Bytes, TypeTable>, Input>(buffer, 0, data);
 
-    auto id = serializer::tools::getId<Input>(TypeTable());
-    buffer.append(0, reinterpret_cast<std::byte*>(&id), sizeof(id));
-    buffer.append(sizeof(id), reinterpret_cast<std::byte*>(data.get()), sizeof(int));
-    // serializer::serializeWithId<serializer::Serializer<serializer::Bytes, TypeTable>, Input>(buffer, 0, *data);
     for (auto receiver_rank : receiversRanks_) {
       INFO("sending package to " << receiver_rank << " (rank = " << mpi_rank() << ").");
       MPI_Send(buffer.data(), buffer.size(), MPI_BYTE, receiver_rank, 0, MPI_COMM_WORLD);
