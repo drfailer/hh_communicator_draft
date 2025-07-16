@@ -1,0 +1,6 @@
+[submodule "lib/serializer-cpp"]
+	path = lib/serializer-cpp
+	url = git@github.com:drfailer/serializer-cpp.git
+[submodule "lib/hedgehog"]
+	path = lib/hedgehog
+	url = https://github.com/usnistgov/hedgehog.git
