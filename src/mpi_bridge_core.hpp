@@ -101,9 +101,8 @@ public:
     MPI_Status status;
     ser::Bytes buffer(1024, 1024);
     auto rank = mpi_rank();
-    volatile bool canTerminate = false;
 
-    while (!canTerminate) {
+    while (true) {
       INFO("wait for reception (rank = " << rank << ")");
       MPI_Recv(buffer.data(), buffer.size(), MPI_BYTE, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
       WARN("data received (rank = " << rank << ")");
@@ -114,18 +113,11 @@ public:
       DBG(senderId);
       DBG(typeId);
 
-      // verify that the sender is correct
-      if (senderId != this->taskId_) {
-        if (senderId == 0) {
-          WARN("termination signal received (rank = " << rank << ").");
-          canTerminate = true;
+      // look for termination signal or verify if the sender's identity
+      if (senderId == 0) {
           break;
-        } else {
-          ERROR("messaged received from the wrong class");
-          // the message comes from the wrong sender, therefore, we don't
-          // process the message
+      } else if (senderId != this->taskId_) {
           continue;
-        }
       }
 
       // deserialize and transmit the result to the connected nodes
