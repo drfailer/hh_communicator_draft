@@ -8,6 +8,13 @@ inline int mpi_rank() {
   return rank;
 }
 
+inline int mpi_nb_processes() {
+  int nb_processes = -1;
+  MPI_Comm_size(MPI_COMM_WORLD, &nb_processes);
+  return nb_processes;
+}
+
+
 inline void init_mpi(int argc, char **argv) {
   MPI_Init(&argc, &argv);
   // int provided;

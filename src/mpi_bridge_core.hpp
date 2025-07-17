@@ -2,8 +2,10 @@
 #define MPI_BRIDGE_CORE
 #include "log.hpp"
 #include "mpi.hpp"
-#include "serializer/serializer.hpp"
+#include "serializer/serialize.hpp"
+#include "serializer/tools/type_table.hpp"
 #include <ostream>
+#include <serializer/serializer.hpp>
 #include <sstream>
 
 #include <hedgehog/hedgehog.h>
@@ -20,6 +22,8 @@ template <typename... Types> class MPIBridge;
 
 /// @brief Hedgehog core namespace
 namespace core {
+
+struct MPITerminate {};
 
 /// @brief Type alias for an TaskInputsManagementAbstraction from the list of template parameters
 template <typename... Types>
@@ -44,9 +48,14 @@ class MPIBridgeCore : public abstraction::TaskNodeAbstraction,
 private:
   using MPIBridgeType = MPIBridge<Types...>;
   using SelfType = MPIBridgeCore<Types...>;
-  using TypesIDs = serializer::tools::TypeTable<Types...>;
-  MPIBridgeType *const task_ = nullptr; ///< User defined task
+  using TypesIds = typename MPIBridgeType::TypesIds;
 
+  // TODO: what if a custom serializer is used?
+  template <typename Table = serializer::tools::TypeTable<>>
+  using Serializer = serializer::Serializer<serializer::Bytes, Table>;
+
+  MPIBridgeType *const task_ = nullptr; ///< User defined task
+  int taskId_ = -1;
   std::vector<int> receiversRanks_ = {};
 
 public:
@@ -56,11 +65,11 @@ public:
   /// @param name Task's name
   /// @param numberThreads Number of threads
   /// @param automaticStart Flag for automatic start
-  MPIBridgeCore(MPIBridgeType *const task, std::vector<int> const receiversRanks, std::string const &name = "MPIBridge")
+  MPIBridgeCore(MPIBridgeType *const task, int taskId, std::vector<int> const &receiversRanks, std::string const &name = "MPIBridge")
       : TaskNodeAbstraction(name, task), CleanableAbstraction(static_cast<behavior::Cleanable *>(task)),
-        abstraction::GroupableAbstraction<MPIBridgeType, SelfType>(task, 1),
-        BridgeTIM<Types...>(task, this), BridgeTOM<Types...>(), task_(task),
-        receiversRanks_(receiversRanks) {
+        abstraction::GroupableAbstraction<MPIBridgeType, SelfType>(task, 1), BridgeTIM<Types...>(task, this),
+        BridgeTOM<Types...>(),
+        task_(task), taskId_(taskId), receiversRanks_(receiversRanks) {
     if (this->numberThreads() == 0) {
       throw std::runtime_error("A task needs at least one thread.");
     }
@@ -90,23 +99,51 @@ public:
   }
 
   void runAsReceiver() {
+    namespace ser = serializer;
     MPI_Status status;
-    serializer::Bytes buffer(1024, 1024);
+    ser::Bytes buffer(1024, 1024);
     auto rank = mpi_rank();
+    volatile bool canTerminate = false;
 
-    // while (!this->canTerminate()) {
-    while (true) {
+    while (!canTerminate) {
       INFO("wait for reception (rank = " << rank << ")");
       MPI_Recv(buffer.data(), buffer.size(), MPI_BYTE, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
-      auto id = serializer::tools::getId<TypesIDs>(buffer);
+      WARN("data received (rank = " << rank << ")");
+      int senderId = -1;
+      auto pos = ser::deserialize<Serializer<>>(buffer, 0, senderId);
+      auto typeId = ser::tools::getId<TypesIds>(buffer, pos);
 
-      INFO("package received (rank = " << rank << ", data id = " << id << ").");
-      serializer::tools::applyId(id, TypesIDs(), [&]<typename T>() {
-        std::shared_ptr<T> data;
-        serializer::deserializeWithId<serializer::Serializer<serializer::Bytes, TypesIDs>, T>(buffer, 0, data);
-        task_->addResult(data);
+      DBG(senderId);
+      DBG(typeId);
+
+      // verify that the sender is correct
+      if (senderId != this->taskId_) {
+          if (senderId == 0) {
+              WARN("termination signal received (rank = " << rank << ").");
+              canTerminate = true;
+              break;
+          } else {
+              ERROR("messaged received from the wrong class");
+              // the message comes from the wrong sender, therefore, we don't
+              // process the message
+              continue;
+          }
+      }
+
+      // deserialize and transmit the result to the connected nodes
+      INFO("package received (rank = " << rank << ", data id = " << typeId << ").");
+      serializer::tools::applyId(typeId, TypesIds(), [&]<typename T>() {
+        if constexpr (std::is_same_v<T, MPITerminate>) {
+          WARN("can terminate");
+          canTerminate = true;
+        } else {
+          std::shared_ptr<T> data = nullptr;
+          ser::deserializeWithId<Serializer<TypesIds>, T>(buffer, pos, data);
+          task_->addResult(data);
+        }
       });
     }
+    WARN("Receiver is terminating (rank = " << rank << ").");
   }
 
   void runAsSender() {
