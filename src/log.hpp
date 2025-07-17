@@ -103,6 +103,11 @@ template <Iterable Container>
 std::ostream &operator<<(std::ostream &os, Container const &container) {
   auto it = container.cbegin();
 
+  if (it == container.cend()) {
+      os << "[]";
+      return os;
+  }
+
   os << "[" << *it++;
   for (; it != container.cend(); it++) {
     os << ", " << *it;
