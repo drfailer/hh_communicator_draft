@@ -8,64 +8,6 @@
 #include <serializer/serializer.hpp>
 #include <serializer/tools/macros.hpp>
 
-// Refactor:
-// - new idea: we should have a foreign task that runs on a separated node; this
-//   way we would truely have a distributed graph
-
-// Interface:
-// - A task can inherit from MPITask
-// - when the `addResult` method is used, the data is serialized an transmitted
-//   to all the receivers
-// - when data is received, the buffer is deserialized and the corresponding
-//   `execute` method is called
-//
-// Requirements:
-// - we should know the senders
-// - all rank communications -> in that case, we need a package id to make sure
-//   that the received package is processed only if the package sender is
-//   connected to the task
-//
-// Issues:
-// - How does it work if the current task is multi-threaded? (need to rewrite
-//   some HH core components in order for it to work)
-//
-// Plan:
-//
-// Send data:
-// - serialize the data
-// - add the sender ID
-// - broadcast
-//
-// Receive data:
-// - wait for the reception from any rank
-// - if the package does not come from one of my senders: continue
-// - deserialize the data
-// - transmit the data to the next task and continue waiting
-
-// The idea is to have a class that starts up automatically and runs
-// indefinitely until it receives the end signal. When a execute function runs,
-// it serializes the objects and sends it to another process. The other process
-// receives it, deserializes the data and add the result like a normal task.
-//
-// We need two threads and two execute functions:
-// - one thread will wait for data to be sent
-// - the second one will be stuck in waiting data to arrive (that would be great
-//   to rewrite the receiver for this)
-//
-//
-// All the nodes should run the same graph. In receiver mode the bridge waits
-// for data to be received (it never leaves the execute function until the end
-// of the execution), in sender mode, it acts like a normal taks the sends data
-// using MPI instead of addResult.
-//
-// WARN:
-// - only the main process should send data to the graph
-// - the other processes are only triggerd by the bridges:
-//   - some data commes through the bridge from another process and the
-//     execution is done in the current process until we found another bridge
-//     that sends new data to other processes.
-//   - only a portion of the graph will be executed!
-
 namespace hh {
 
 template <typename TypesIds, typename Input>
