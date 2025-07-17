@@ -118,10 +118,10 @@ class MPIBridge : public behavior::TaskNode,
                   public behavior::Cleanable,
                   public behavior::Copyable<MPIBridge<Types...>>,
                   public tool::BehaviorMultiReceiversTypeDeducer_t<std::tuple<Types...>>,
-                  public MPIBridgeMultiExecute<serializer::tools::TypeTable<core::MPITerminate, Types...>, std::tuple<Types...>>,
+                  public MPIBridgeMultiExecute<serializer::tools::TypeTable<Types...>, std::tuple<Types...>>,
                   public tool::BehaviorTaskMultiSendersTypeDeducer_t<std::tuple<Types...>> {
 private:
-  using TypesIds = serializer::tools::TypeTable<core::MPITerminate, Types...>;
+  using TypesIds = serializer::tools::TypeTable<Types...>;
   using CoreTaskType = core::MPIBridgeCore<Types...>;
   using SelfType = MPIBridge<Types...>;
   using Inputs = std::tuple<Types...>;

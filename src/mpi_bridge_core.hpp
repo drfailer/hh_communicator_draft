@@ -23,8 +23,6 @@ template <typename... Types> class MPIBridge;
 /// @brief Hedgehog core namespace
 namespace core {
 
-struct MPITerminate {};
-
 /// @brief Type alias for an TaskInputsManagementAbstraction from the list of template parameters
 template <typename... Types>
 using BridgeTIM =
@@ -65,11 +63,11 @@ public:
   /// @param name Task's name
   /// @param numberThreads Number of threads
   /// @param automaticStart Flag for automatic start
-  MPIBridgeCore(MPIBridgeType *const task, int taskId, std::vector<int> const &receiversRanks, std::string const &name = "MPIBridge")
+  MPIBridgeCore(MPIBridgeType *const task, int taskId, std::vector<int> const &receiversRanks,
+                std::string const &name = "MPIBridge")
       : TaskNodeAbstraction(name, task), CleanableAbstraction(static_cast<behavior::Cleanable *>(task)),
         abstraction::GroupableAbstraction<MPIBridgeType, SelfType>(task, 1), BridgeTIM<Types...>(task, this),
-        BridgeTOM<Types...>(),
-        task_(task), taskId_(taskId), receiversRanks_(receiversRanks) {
+        BridgeTOM<Types...>(), task_(task), taskId_(taskId), receiversRanks_(receiversRanks) {
     if (this->numberThreads() == 0) {
       throw std::runtime_error("A task needs at least one thread.");
     }
@@ -118,29 +116,24 @@ public:
 
       // verify that the sender is correct
       if (senderId != this->taskId_) {
-          if (senderId == 0) {
-              WARN("termination signal received (rank = " << rank << ").");
-              canTerminate = true;
-              break;
-          } else {
-              ERROR("messaged received from the wrong class");
-              // the message comes from the wrong sender, therefore, we don't
-              // process the message
-              continue;
-          }
+        if (senderId == 0) {
+          WARN("termination signal received (rank = " << rank << ").");
+          canTerminate = true;
+          break;
+        } else {
+          ERROR("messaged received from the wrong class");
+          // the message comes from the wrong sender, therefore, we don't
+          // process the message
+          continue;
+        }
       }
 
       // deserialize and transmit the result to the connected nodes
       INFO("package received (rank = " << rank << ", data id = " << typeId << ").");
       serializer::tools::applyId(typeId, TypesIds(), [&]<typename T>() {
-        if constexpr (std::is_same_v<T, MPITerminate>) {
-          WARN("can terminate");
-          canTerminate = true;
-        } else {
-          std::shared_ptr<T> data = nullptr;
-          ser::deserializeWithId<Serializer<TypesIds>, T>(buffer, pos, data);
-          task_->addResult(data);
-        }
+        std::shared_ptr<T> data = nullptr;
+        ser::deserializeWithId<Serializer<TypesIds>, T>(buffer, pos, data);
+        task_->addResult(data);
       });
     }
     WARN("Receiver is terminating (rank = " << rank << ").");
