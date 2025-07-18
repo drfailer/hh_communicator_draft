@@ -144,7 +144,6 @@ public:
         continue;
       }
 
-      connections[status.MPI_SOURCE] = true;
       if (signal == MPISignal::Terminate) {
         ERROR("terminate from sender");
         break;

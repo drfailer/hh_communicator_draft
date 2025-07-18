@@ -18,11 +18,6 @@ inline int getMPINbProcesses() {
 
 inline void initMPI(int argc, char **argv) {
   MPI_Init(&argc, &argv);
-  // int provided;
-  // MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
-  // if (provided != MPI_THREAD_MULTIPLE) {
-  //     throw std::runtime_error("MPI_THREAD_MULTIPLE not supported");
-  // }
 }
 
 enum class MPISignal {
