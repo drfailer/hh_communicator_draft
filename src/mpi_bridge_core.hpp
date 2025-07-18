@@ -82,6 +82,15 @@ public:
     return this->task_->memoryManager();
   }
 
+  [[nodiscard]] bool isConnected(std::vector<bool> const &connections) const {
+      for (bool connection : connections) {
+          if (connection) {
+              return true;
+          }
+      }
+      return false;
+  }
+
   /// @brief Initialize the task
   /// @details Call user define initialize, initialise memory manager if present
   void preRun() override {
@@ -92,6 +101,7 @@ public:
       this->task_->memoryManager()->deviceId(this->deviceId());
       this->task_->memoryManager()->initialize();
     }
+    task_->setGraphId();
     this->nvtxProfiler()->endRangeInitializing();
     this->setInitialized();
   }
@@ -100,35 +110,67 @@ public:
     namespace ser = serializer;
     MPI_Status status;
     ser::Bytes buffer(1024, 1024);
-    auto rank = mpi_rank();
+    auto rank = getMPIRank();
+    std::vector<bool> connections(getMPINbProcesses(), true);
+
+    // each receiver is connected to all the senders
+    for (auto receiverRank : receiversRanks_) {
+        connections[receiverRank] = false;
+    }
 
     while (true) {
-      INFO("wait for reception (rank = " << rank << ")");
+      INFO("wait for reception (rank = " << rank << ", taskId = " << taskId_ << ")");
       MPI_Recv(buffer.data(), buffer.size(), MPI_BYTE, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
-      WARN("data received (rank = " << rank << ")");
-      int senderId = -1;
-      auto pos = ser::deserialize<Serializer<>>(buffer, 0, senderId);
-      auto typeId = ser::tools::getId<TypesIds>(buffer, pos);
 
-      DBG(senderId);
-      DBG(typeId);
+      // get package infos
+      int graphId = -1, senderId = -1;
+      MPISignal signal;
+      size_t pos = ser::deserialize<Serializer<>>(buffer, 0, graphId, senderId, signal);
+      INFO("package received (rank = " << rank << ", senderId = " << senderId << ", signal = " << (int)signal << ").");
 
-      // look for termination signal or verify if the sender's identity
-      if (senderId == 0) {
+      if (graphId != (int)this->graphId()) {
+        WARN("wrong graph " << graphId << " != " << this->graphId());
+        continue;
+      }
+
+      if (senderId != this->taskId_) {
+        if (senderId == 0) {
+          if (signal == MPISignal::Terminate) {
+            ERROR("terminate from master");
+            break;
+          }
+        }
+        WARN("wrong task");
+        continue;
+      }
+
+      connections[status.MPI_SOURCE] = true;
+      if (signal == MPISignal::Terminate) {
+        ERROR("terminate from sender");
+        break;
+      } else if (signal == MPISignal::Disconnect) {
+        INFO("disconnect");
+        connections[status.MPI_SOURCE] = false;
+        if (!isConnected(connections)) {
+          WARN("stop, no connections");
           break;
-      } else if (senderId != this->taskId_) {
-          continue;
+        }
+        continue;
+      } else if (signal != MPISignal::Data) {
+        WARN("no data signal received");
+        continue;
       }
 
       // deserialize and transmit the result to the connected nodes
-      INFO("package received (rank = " << rank << ", data id = " << typeId << ").");
+      auto typeId = ser::tools::getId<TypesIds>(buffer, pos);
+      INFO("transmit data (rank = " << rank << ", data id = " << typeId << ").");
       serializer::tools::applyId(typeId, TypesIds(), [&]<typename T>() {
         std::shared_ptr<T> data = nullptr;
         ser::deserializeWithId<Serializer<TypesIds>, T>(buffer, pos, data);
         task_->addResult(data);
       });
     }
-    WARN("Receiver is terminating (rank = " << rank << ").");
+    WARN("Receiver is terminating (rank = " << rank << ", taskId = " << taskId_ << ").");
   }
 
   void runAsSender() {
@@ -160,10 +202,12 @@ public:
     this->nvtxProfiler()->initialize(this->threadId(), this->graphId());
     this->preRun();
 
-    if (std::find(receiversRanks_.begin(), receiversRanks_.end(), mpi_rank()) != receiversRanks_.end()) {
+    if (std::find(receiversRanks_.begin(), receiversRanks_.end(), getMPIRank()) != receiversRanks_.end()) {
       runAsReceiver();
     } else {
       runAsSender();
+      ERROR("sender finish (rank = " << getMPIRank() << ", taskId = " << this->taskId_ << ").");
+      sendSignal({receiversRanks_}, this->graphId(), this->taskId_, MPISignal::Disconnect);
     }
 
     // Do the shutdown phase

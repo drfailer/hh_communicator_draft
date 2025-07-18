@@ -10,47 +10,52 @@
 
 namespace hh {
 
-template <typename TypesIds, typename Input>
+template <typename TaskType, typename TypesIds, typename Input>
 struct MPIBridgeExecute : tool::BehaviorMultiExecuteTypeDeducer_t<std::tuple<Input>> {
 private:
+  int graphId_ = -1;
   int taskId_ = -1;
   std::vector<int> receiversRanks_;
+  int rankIdx_ = 0;
+  TaskType *task_ = nullptr;
 
   // TODO: what if a custom serializer is used?
   template <typename Table = serializer::tools::TypeTable<>>
   using Serializer = serializer::Serializer<serializer::Bytes, Table>;
 
 public:
-  MPIBridgeExecute(int taskId, std::vector<int> const &receivers_ranks)
-      : taskId_(taskId), receiversRanks_(receivers_ranks) {}
+  MPIBridgeExecute(TaskType *task, int taskId, std::vector<int> const &receivers_ranks)
+      : taskId_(taskId), receiversRanks_(receivers_ranks), task_(task) {}
 
   void execute(std::shared_ptr<Input> data) override {
-    namespace ser = serializer;
-    ser::Bytes buffer(1024);
-    size_t pos = ser::serialize<Serializer<>>(buffer, 0, taskId_);
-    DBG(pos);
-    pos = ser::serializeWithId<Serializer<TypesIds>, Input>(buffer, pos, data);
-    DBG(pos);
-    DBG(buffer.size());
-
-    for (auto receiver_rank : receiversRanks_) {
-      INFO("sending package to " << receiver_rank << " (rank = " << mpi_rank() << ").");
-      MPI_Send(buffer.data(), buffer.size(), MPI_BYTE, receiver_rank, 0, MPI_COMM_WORLD);
+    int receiverRank = receiversRanks_[rankIdx_];
+    rankIdx_ = (rankIdx_ + 1) % receiversRanks_.size();
+    if (receiverRank == getMPIRank()) {
+        // use add result when we are in the same process
+        task_->addResult(data);
+    } else {
+        sendData<Serializer<TypesIds>>({receiverRank}, graphId_, taskId_, data);
     }
   }
 
   void updateReceiversRanks(std::vector<int> ranks) { receiversRanks_ = ranks; }
+
+  void graphId(int graphId) { this->graphId_ = graphId; }
 };
 
-template <typename TypeTable, typename... Inputs> struct MPIBridgeMultiExecute;
+template <typename TasType, typename TypeTable, typename... Inputs> struct MPIBridgeMultiExecute;
 
-template <typename TypeTable, typename... Inputs>
-struct MPIBridgeMultiExecute<TypeTable, std::tuple<Inputs...>> : MPIBridgeExecute<TypeTable, Inputs>... {
-  MPIBridgeMultiExecute(int taskId, std::vector<int> const &receivers_ranks)
-      : MPIBridgeExecute<TypeTable, Inputs>(taskId, receivers_ranks)... {}
+template <typename TaskType, typename TypeTable, typename... Inputs>
+struct MPIBridgeMultiExecute<TaskType, TypeTable, std::tuple<Inputs...>> : MPIBridgeExecute<TaskType, TypeTable, Inputs>... {
+  MPIBridgeMultiExecute(TaskType *task, int taskId, std::vector<int> const &receivers_ranks)
+      : MPIBridgeExecute<TaskType, TypeTable, Inputs>(task, taskId, receivers_ranks)... {}
 
-  void update_ranks(std::vector<int> ranks) {
-    (static_cast<MPIBridgeExecute<TypeTable, Inputs> *>(this)->updateReceiversRanks(ranks), ...);
+  void updateAllReceiversRanks(std::vector<int> ranks) {
+    (static_cast<MPIBridgeExecute<TaskType, TypeTable, Inputs> *>(this)->updateReceiversRanks(ranks), ...);
+  }
+
+  void updateAllGraphIds(int graphId) {
+    (static_cast<MPIBridgeExecute<TaskType, TypeTable, Inputs> *>(this)->graphId(graphId), ...);
   }
 };
 
@@ -60,7 +65,7 @@ class MPIBridge : public behavior::TaskNode,
                   public behavior::Cleanable,
                   public behavior::Copyable<MPIBridge<Types...>>,
                   public tool::BehaviorMultiReceiversTypeDeducer_t<std::tuple<Types...>>,
-                  public MPIBridgeMultiExecute<serializer::tools::TypeTable<Types...>, std::tuple<Types...>>,
+                  public MPIBridgeMultiExecute<MPIBridge<Types...>, serializer::tools::TypeTable<Types...>, std::tuple<Types...>>,
                   public tool::BehaviorTaskMultiSendersTypeDeducer_t<std::tuple<Types...>> {
 private:
   using TypesIds = serializer::tools::TypeTable<Types...>;
@@ -81,7 +86,7 @@ private:
       : behavior::TaskNode(std::make_shared<CoreTaskType>(this, taskId, receiversRanks, name)),
         behavior::Copyable<SelfType>(1),
         tool::BehaviorTaskMultiSendersTypeDeducer_t<Outputs>((std::dynamic_pointer_cast<CoreTaskType>(this->core()))),
-        MPIBridgeMultiExecute<TypesIds, Inputs>(taskId, receiversRanks),
+        MPIBridgeMultiExecute<MPIBridge<Types...>, TypesIds, Inputs>(this, taskId, receiversRanks),
         receiversRanks_(receiversRanks),
         coreTask_(std::dynamic_pointer_cast<CoreTaskType>(this->core())),
         taskId_(taskId) {
@@ -98,6 +103,13 @@ public:
 
   [[nodiscard]] size_t graphId() const { return coreTask_->graphId(); }
 
+  [[nodiscard]] int taskId() const { return taskId_; }
+
+  void setGraphId() {
+    using MPIBME = MPIBridgeMultiExecute<MPIBridge<Types...>, TypesIds, std::tuple<Types...>>;
+    static_cast<MPIBME*>(this)->updateAllGraphIds(this->graphId());
+  }
+
   [[nodiscard]] bool canTerminate() const override {
     return !coreTask_->hasNotifierConnected() && coreTask_->receiversEmpty();
   }
@@ -109,6 +121,9 @@ public:
       // return std::make_shared<MPIBridge<Types...>>(taskId_, receiversRanks_,
       //         this->name());
   }
+
+  using
+      tool::BehaviorTaskMultiSendersTypeDeducer_t<std::tuple<Types...>>::addResult;
 };
 } // namespace hh
 
