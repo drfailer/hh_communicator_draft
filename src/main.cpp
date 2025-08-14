@@ -86,6 +86,6 @@ int main(int argc, char **argv) {
     DBG(results);
   }
 
-  MPI_Finalize();
+  hh::comm::commFinalize();
   return 0;
 }

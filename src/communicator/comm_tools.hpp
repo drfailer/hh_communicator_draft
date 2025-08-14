@@ -57,6 +57,8 @@ inline CommHandle commCreate() {
 
 inline void commInit(int argc, char **argv) { MPI_Init(&argc, &argv); }
 
+inline void commFinalize() { MPI_Finalize(); }
+
 inline void sendSignal(std::vector<int> const &dests, int graphId, int taskId, CommSignal signal) {
   namespace ser = serializer;
   ser::Bytes buffer(1024);
