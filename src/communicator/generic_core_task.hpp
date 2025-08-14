@@ -1,11 +1,7 @@
-#ifndef MPI_BRIDGE_CORE
-#define MPI_BRIDGE_CORE
-#include "log.hpp"
-#include "mpi.hpp"
-#include "serializer/serialize.hpp"
-#include "serializer/tools/type_table.hpp"
+#ifndef HEDGEHOG_GENERIC_CORE_TASK_H
+#define HEDGEHOG_GENERIC_CORE_TASK_H
+
 #include <ostream>
-#include <serializer/serializer.hpp>
 #include <sstream>
 
 #include <hedgehog/hedgehog.h>
@@ -13,82 +9,110 @@
 /// @brief Hedgehog main namespace
 namespace hh {
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-/// @brief Forward declaration MPIBridge
-/// @tparam Separator Separator position between input types and output types
-/// @tparam AllTypes List of input and output types
-template <typename... Types> class MPIBridge;
-#endif // DOXYGEN_SHOULD_SKIP_THIS
-
 /// @brief Hedgehog core namespace
 namespace core {
 
 /// @brief Type alias for an TaskInputsManagementAbstraction from the list of template parameters
-template <typename... Types>
-using BridgeTIM =
-    tool::TaskInputsManagementAbstractionTypeDeducer_t<tool::Inputs<sizeof...(Types), Types..., Types...>>;
+template<size_t Separator, class ...AllTypes>
+using TIM = tool::TaskInputsManagementAbstractionTypeDeducer_t<tool::Inputs<Separator, AllTypes...>>;
 
 /// @brief Type alias for an TaskOutputsManagementAbstraction from the list of template parameters
-template <typename... Types>
-using BridgeTOM =
-    tool::TaskOutputsManagementAbstractionTypeDeducer_t<tool::Outputs<sizeof...(Types), Types..., Types...>>;
+template<size_t Separator, class ...AllTypes>
+using TOM = tool::TaskOutputsManagementAbstractionTypeDeducer_t<tool::Outputs<Separator, AllTypes...>>;
 
 /// @brief Task core
 /// @tparam Separator Separator position between input types and output types
 /// @tparam AllTypes List of input and output types
-template <typename... Types>
-class MPIBridgeCore : public abstraction::TaskNodeAbstraction,
-                      public abstraction::ClonableAbstraction,
-                      public abstraction::CleanableAbstraction,
-                      public abstraction::GroupableAbstraction<MPIBridge<Types...>, MPIBridgeCore<Types...>>,
-                      public BridgeTIM<Types...>,
-                      public BridgeTOM<Types...> {
-private:
-  using MPIBridgeType = MPIBridge<Types...>;
-  using SelfType = MPIBridgeCore<Types...>;
-  using TypesIds = typename MPIBridgeType::TypesIds;
+template<class TaskType, size_t Separator, class ...AllTypes>
+class GenericCoreTask
+    : public abstraction::TaskNodeAbstraction,
+      public abstraction::ClonableAbstraction,
+      public abstraction::CleanableAbstraction,
+      public abstraction::GroupableAbstraction<TaskType, GenericCoreTask<TaskType, Separator, AllTypes...>>,
+      public TIM<Separator, AllTypes...>,
+      public TOM<Separator, AllTypes...> {
 
-  // TODO: what if a custom serializer is used?
-  template <typename Table = serializer::tools::TypeTable<>>
-  using Serializer = serializer::Serializer<serializer::Bytes, Table>;
+ private:
+  TaskType *const
+      task_ = nullptr; ///< User defined task
 
-  MPIBridgeType *const task_ = nullptr; ///< User defined task
-  int taskId_ = -1;
-  std::vector<int> receiversRanks_ = {};
+  bool const
+      automaticStart_ = false; ///< Flag for automatic start
 
-public:
-  /// @brief Create a MPIBridgeCore from a user-defined MPIBridge, its  name, the number of threads and the automatic
+ public:
+  /// @brief Create a GenericCoreTask from a user-defined TaskType with one thread
+  /// @param task User-defined TaskType
+  explicit GenericCoreTask(TaskType *const task) :
+      TaskNodeAbstraction("Task", task),
+      CleanableAbstraction(static_cast<behavior::Cleanable *>(task)),
+      abstraction::GroupableAbstraction<TaskType, GenericCoreTask<TaskType, Separator, AllTypes...>>(
+          task, 1
+      ),
+      TIM<Separator, AllTypes...>(task, this),
+      TOM<Separator, AllTypes...>(),
+      task_(task),
+      automaticStart_(false) {}
+
+  /// @brief Create a GenericCoreTask from a user-defined TaskType, its  name, the number of threads and the automatic
   /// start flag
-  /// @param task User-defined MPIBridge
+  /// @param task User-defined TaskType
   /// @param name Task's name
   /// @param numberThreads Number of threads
   /// @param automaticStart Flag for automatic start
-  MPIBridgeCore(MPIBridgeType *const task, int taskId, std::vector<int> const &receiversRanks,
-                std::string const &name = "MPIBridge")
-      : TaskNodeAbstraction(name, task), CleanableAbstraction(static_cast<behavior::Cleanable *>(task)),
-        abstraction::GroupableAbstraction<MPIBridgeType, SelfType>(task, 1), BridgeTIM<Types...>(task, this),
-        BridgeTOM<Types...>(), task_(task), taskId_(taskId), receiversRanks_(receiversRanks) {
-    if (this->numberThreads() == 0) {
-      throw std::runtime_error("A task needs at least one thread.");
-    }
+  GenericCoreTask(TaskType *const task,
+           std::string const &name, size_t const numberThreads, bool const automaticStart) :
+      TaskNodeAbstraction(name, task),
+      CleanableAbstraction(static_cast<behavior::Cleanable *>(task)),
+      abstraction::GroupableAbstraction<TaskType, GenericCoreTask<TaskType, Separator, AllTypes...>>(
+          task, numberThreads
+      ),
+      TIM<Separator, AllTypes...>(task, this),
+      TOM<Separator, AllTypes...>(),
+      task_(task),
+      automaticStart_(automaticStart) {
+    if (this->numberThreads() == 0) { throw std::runtime_error("A task needs at least one thread."); }
+  }
+
+  /// @brief Construct a task from the user-defined task and its concrete abstraction's implementations
+  /// @tparam ConcreteMultiReceivers Type of concrete implementation of ReceiverAbstraction for multiple types
+  /// @tparam ConcreteMultiExecutes Type of concrete implementation of ExecuteAbstraction for multiple types
+  /// @tparam ConcreteMultiSenders Type of concrete implementation of SenderAbstraction for multiple types
+  /// @param task User-defined task
+  /// @param name Task's name
+  /// @param numberThreads Number of threads for the task
+  /// @param automaticStart Flag for automatic start
+  /// @param concreteSlot Concrete implementation of SlotAbstraction
+  /// @param concreteMultiReceivers Concrete implementation of ReceiverAbstraction for multiple types
+  /// @param concreteMultiExecutes Concrete implementation of ExecuteAbstraction for multiple type
+  /// @param concreteNotifier Concrete implementation of NotifierAbstraction
+  /// @param concreteMultiSenders Concrete implementation of SenderAbstraction for multiple types
+  /// @throw std::runtime_error if the number of threads is 0
+  template<class ConcreteMultiReceivers, class ConcreteMultiExecutes, class ConcreteMultiSenders>
+  GenericCoreTask(TaskType *const task,
+           std::string const &name, size_t const numberThreads, bool const automaticStart,
+           std::shared_ptr<implementor::ImplementorSlot> concreteSlot,
+           std::shared_ptr<ConcreteMultiReceivers> concreteMultiReceivers,
+           std::shared_ptr<ConcreteMultiExecutes> concreteMultiExecutes,
+           std::shared_ptr<implementor::ImplementorNotifier> concreteNotifier,
+           std::shared_ptr<ConcreteMultiSenders> concreteMultiSenders) :
+      TaskNodeAbstraction(name, task),
+      CleanableAbstraction(static_cast<behavior::Cleanable *>(task)),
+      abstraction::GroupableAbstraction<TaskType, GenericCoreTask<TaskType, Separator, AllTypes...>>
+          (task, numberThreads),
+      TIM<Separator, AllTypes...>(task, this, concreteSlot, concreteMultiReceivers, concreteMultiExecutes),
+      TOM<Separator, AllTypes...>(concreteNotifier, concreteMultiSenders),
+      task_(task),
+      automaticStart_(automaticStart) {
+    if (this->numberThreads() == 0) { throw std::runtime_error("A task needs at least one thread."); }
   }
 
   /// @brief Default destructor
-  ~MPIBridgeCore() override = default;
+  ~GenericCoreTask() override = default;
 
   /// @brief Accessor to the memory manager
   /// @return The attached memory manager
   [[nodiscard]] std::shared_ptr<AbstractMemoryManager> memoryManager() const override {
     return this->task_->memoryManager();
-  }
-
-  [[nodiscard]] bool isConnected(std::vector<bool> const &connections) const {
-      for (bool connection : connections) {
-          if (connection) {
-              return true;
-          }
-      }
-      return false;
   }
 
   /// @brief Initialize the task
@@ -101,80 +125,33 @@ public:
       this->task_->memoryManager()->deviceId(this->deviceId());
       this->task_->memoryManager()->initialize();
     }
-    task_->setGraphId();
     this->nvtxProfiler()->endRangeInitializing();
     this->setInitialized();
   }
 
-  void runAsReceiver() {
-    namespace ser = serializer;
-    MPI_Status status;
-    ser::Bytes buffer(1024, 1024);
-    auto rank = getMPIRank();
-    std::vector<bool> connections(getMPINbProcesses(), true);
+  /// @brief Main core task logic
+  /// @details
+  /// - if automatic start
+  ///     - call user-defined task's execute method with nullptr
+  /// - while the task runs
+  ///     - wait for data or termination
+  ///     - if can terminate, break
+  ///     - get a piece of data from the queue
+  ///     - call user-defined state's execute method with data
+  /// - shutdown the task
+  /// - notify successors task terminated
+  void run() override {
+    std::chrono::time_point<std::chrono::system_clock>
+        start,
+        finish;
 
-    // each receiver is connected to all the senders
-    for (auto receiverRank : receiversRanks_) {
-        connections[receiverRank] = false;
-    }
-
-    while (true) {
-      INFO("wait for reception (rank = " << rank << ", taskId = " << taskId_ << ")");
-      MPI_Recv(buffer.data(), buffer.size(), MPI_BYTE, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
-
-      // get package infos
-      int graphId = -1, senderId = -1;
-      MPISignal signal;
-      size_t pos = ser::deserialize<Serializer<>>(buffer, 0, graphId, senderId, signal);
-      INFO("package received (rank = " << rank << ", senderId = " << senderId << ", signal = " << (int)signal << ").");
-
-      if (graphId != (int)this->graphId()) {
-        WARN("wrong graph " << graphId << " != " << this->graphId());
-        continue;
-      }
-
-      if (senderId != this->taskId_) {
-        if (senderId == 0) {
-          if (signal == MPISignal::Terminate) {
-            ERROR("terminate from master");
-            break;
-          }
-        }
-        WARN("wrong task");
-        continue;
-      }
-
-      if (signal == MPISignal::Terminate) {
-        ERROR("terminate from sender");
-        break;
-      } else if (signal == MPISignal::Disconnect) {
-        INFO("disconnect");
-        connections[status.MPI_SOURCE] = false;
-        if (!isConnected(connections)) {
-          WARN("stop, no connections");
-          break;
-        }
-        continue;
-      } else if (signal != MPISignal::Data) {
-        WARN("no data signal received");
-        continue;
-      }
-
-      // deserialize and transmit the result to the connected nodes
-      auto typeId = ser::tools::getId<TypesIds>(buffer, pos);
-      INFO("transmit data (rank = " << rank << ", data id = " << typeId << ").");
-      serializer::tools::applyId(typeId, TypesIds(), [&]<typename T>() {
-        std::shared_ptr<T> data = nullptr;
-        ser::deserializeWithId<Serializer<TypesIds>, T>(buffer, pos, data);
-        task_->addResult(data);
-      });
-    }
-    WARN("Receiver is terminating (rank = " << rank << ", taskId = " << taskId_ << ").");
-  }
-
-  void runAsSender() {
-    std::chrono::time_point<std::chrono::system_clock> start, finish;
     volatile bool canTerminate = false;
+
+    this->isActive(true);
+    this->nvtxProfiler()->initialize(this->threadId(), this->graphId());
+    this->preRun();
+
+    if (this->automaticStart_) {  this->callAllExecuteWithNullptr(); }
 
     // Actual computation loop
     while (!this->canTerminate()) {
@@ -187,26 +164,10 @@ public:
       this->incrementWaitDuration(std::chrono::duration_cast<std::chrono::nanoseconds>(finish - start));
 
       // If loop can terminate break the loop early
-      if (canTerminate) {
-        break;
-      }
+      if (canTerminate) { break; }
 
       // Operate the connectedReceivers to get a data and send it to execute
       this->operateReceivers();
-    }
-  }
-
-  void run() override {
-    this->isActive(true);
-    this->nvtxProfiler()->initialize(this->threadId(), this->graphId());
-    this->preRun();
-
-    if (std::find(receiversRanks_.begin(), receiversRanks_.end(), getMPIRank()) != receiversRanks_.end()) {
-      runAsReceiver();
-    } else {
-      runAsSender();
-      ERROR("sender finish (rank = " << getMPIRank() << ", taskId = " << this->taskId_ << ").");
-      sendSignal({receiversRanks_}, this->graphId(), this->taskId_, MPISignal::Disconnect);
     }
 
     // Do the shutdown phase
@@ -238,21 +199,21 @@ public:
       if (taskCopy == nullptr) {
         std::ostringstream oss;
         oss << "A copy for the task \"" << this->name()
-            << "\" has been invoked but return nullptr. To fix this error, overload the MPIBridge::copy function and "
+            << "\" has been invoked but return nullptr. To fix this error, overload the TaskType::copy function and "
                "return a valid object.";
-        throw(std::runtime_error(oss.str()));
+        throw (std::runtime_error(oss.str()));
       }
 
       // Copy the memory manager
       taskCopy->connectMemoryManager(this->task_->memoryManager());
 
-      auto taskCoreCopy = dynamic_cast<SelfType *>(taskCopy->core().get());
+      auto taskCoreCopy = dynamic_cast<GenericCoreTask<TaskType, Separator, AllTypes...> *>(taskCopy->core().get());
 
       if (taskCoreCopy == nullptr) {
         std::ostringstream oss;
         oss << "A copy for the task \"" << this->name()
             << "\" does not have the same type of cores than the original task.";
-        throw(std::runtime_error(oss.str()));
+        throw (std::runtime_error(oss.str()));
       }
 
       // Deal with the group registration in the graph
@@ -285,11 +246,13 @@ public:
     }
   }
 
-  [[nodiscard]] std::vector<int> receiversRanks() const { return receiversRanks_; }
-
   /// @brief Test if a memory manager is attached
   /// @return True if there is a memory manager attached, else false
   [[nodiscard]] bool hasMemoryManagerAttached() const override { return this->memoryManager() != nullptr; }
+
+  /// @brief Accessor to the automatic start flag
+  /// @return true if the core start automatically, else false
+  [[nodiscard]] bool automaticStart() const { return automaticStart_; }
 
   /// @brief Accessor to user-defined extra information for the task
   /// @return User-defined extra information for the task
@@ -299,9 +262,9 @@ public:
 
   /// @brief Copy task's inner structure
   /// @param copyableCore Task to copy from
-  void copyInnerStructure(SelfType *copyableCore) override {
-    BridgeTIM<Types...>::copyInnerStructure(copyableCore);
-    BridgeTOM<Types...>::copyInnerStructure(copyableCore);
+  void copyInnerStructure(GenericCoreTask<TaskType, Separator, AllTypes...> *copyableCore) override {
+    TIM<Separator, AllTypes...>::copyInnerStructure(copyableCore);
+    TOM<Separator, AllTypes...>::copyInnerStructure(copyableCore);
   }
 
   /// @brief Node ids [nodeId, nodeGroupId] accessor
@@ -314,19 +277,17 @@ public:
   void visit(Printer *printer) override {
     if (printer->registerNode(this)) {
       printer->printNodeInformation(this);
-      BridgeTIM<Types...>::printEdgesInformation(printer);
+      TIM<Separator, AllTypes...>::printEdgesInformation(printer);
     }
   }
 
   /// @brief Clone method, to duplicate a task when it is part of another graph in an execution pipeline
   /// @param correspondenceMap Correspondence map of belonging graph's node
   /// @return Clone of this task
-  std::shared_ptr<abstraction::NodeAbstraction>
-  clone([[maybe_unused]] std::map<NodeAbstraction *, std::shared_ptr<NodeAbstraction>> &correspondenceMap) override {
-    auto clone = std::dynamic_pointer_cast<MPIBridgeType>(this->callCopy());
-    if (this->hasMemoryManagerAttached()) {
-      clone->connectMemoryManager(this->memoryManager()->copy());
-    }
+  std::shared_ptr<abstraction::NodeAbstraction> clone(
+      [[maybe_unused]] std::map<NodeAbstraction *, std::shared_ptr<NodeAbstraction>> &correspondenceMap) override {
+    auto clone = std::dynamic_pointer_cast<TaskType>(this->callCopy());
+    if (this->hasMemoryManagerAttached()) { clone->connectMemoryManager(this->memoryManager()->copy()); }
     return clone->core();
   }
 
@@ -353,8 +314,12 @@ public:
   [[nodiscard]] std::map<std::string, std::chrono::nanoseconds> const &dequeueExecutionDurationPerInput() const final {
     return this->dequeueExecutionDurationPerInput_;
   }
-};
-} // namespace core
-} // namespace hh
 
-#endif // HEDGEHOG_CORE_TASK_H
+  /// @brief Accessor to the task for sub classes
+  /// @return Task
+  [[nodiscard]] TaskType *task() { return this->task_; }
+};
+}
+}
+
+#endif //HEDGEHOG_CORE_TASK_H

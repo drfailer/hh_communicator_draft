@@ -1,45 +1,46 @@
-#include "mpi.hpp"
-#include "mpi_bridge.hpp"
+#include "communicator/comm_tools.hpp"
+#include "communicator/communicator_task.hpp"
 #include <hedgehog/hedgehog.h>
 #include <iostream>
 #include <mpi.h>
 #include <mutex>
+#include "log.hpp"
 
 std::mutex stdout_mutex;
 
 struct TestGraph1 : hh::Graph<1, int, int> {
-  TestGraph1() : hh::Graph<1, int, int>("TestGraph1") {
+  TestGraph1(hh::comm::CommHandle const &commHandle) : hh::Graph<1, int, int>("TestGraph1") {
     auto in = std::make_shared<hh::LambdaTask<1, int, int>>("input", 1);
-    auto b01 = std::make_shared<hh::MPIBridge<int>>(std::vector<int>({1}));
+    auto b01 = std::make_shared<hh::CommunicatorTask<int>>(commHandle, std::vector<int>({1}));
     DBG(b01->taskId());
-    auto b02 = std::make_shared<hh::MPIBridge<int>>(std::vector<int>({2}));
+    auto b02 = std::make_shared<hh::CommunicatorTask<int>>(commHandle, std::vector<int>({2}));
     DBG(b02->taskId());
     auto frgn1 = std::make_shared<hh::LambdaTask<1, int, int>>("foreign task", 1);
     auto frgn2 = std::make_shared<hh::LambdaTask<1, int, int>>("foreign task", 1);
-    auto bn0 = std::make_shared<hh::MPIBridge<int>>(std::vector<int>({0}));
+    auto bn0 = std::make_shared<hh::CommunicatorTask<int>>(commHandle, std::vector<int>({0}));
     DBG(bn0->taskId());
     auto out = std::make_shared<hh::LambdaTask<1, int, int>>("output", 1);
 
-    in->setLambda<int>([](std::shared_ptr<int> data, auto self) {
-      std::cout << "[TASK] in -> " << getMPIRank() << std::endl;
+    in->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
+      std::cout << "[TASK] in -> " << commHandle.rank << std::endl;
       *data += 1;
       DBG(*data);
       self.addResult(data);
     });
-    frgn1->setLambda<int>([](std::shared_ptr<int> data, auto self) {
-      std::cout << "[TASK] frng1 -> " << getMPIRank() << std::endl;
+    frgn1->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
+      std::cout << "[TASK] frng1 -> " << commHandle.rank << std::endl;
       *data += 1;
       DBG(*data);
       self.addResult(data);
     });
-    frgn2->setLambda<int>([](std::shared_ptr<int> data, auto self) {
-      std::cout << "[TASK] frng2 -> " << getMPIRank() << std::endl;
+    frgn2->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
+      std::cout << "[TASK] frng2 -> " << commHandle.rank << std::endl;
       *data *= 2;
       DBG(*data);
       self.addResult(data);
     });
-    out->setLambda<int>([](std::shared_ptr<int> data, auto self) {
-      std::cout << "[TASK] out -> " << getMPIRank() << std::endl;
+    out->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
+      std::cout << "[TASK] out -> " << commHandle.rank << std::endl;
       *data += 1;
       DBG(*data);
       self.addResult(data);
@@ -58,17 +59,18 @@ struct TestGraph1 : hh::Graph<1, int, int> {
 };
 
 int main(int argc, char **argv) {
+  hh::comm::commInit(argc, argv);
+  hh::comm::CommHandle ch = hh::comm::commCreate();
   auto data = std::make_shared<int>(4);
-  TestGraph1 graph;
+  TestGraph1 graph(ch);
   std::vector<int> results;
 
-  initMPI(argc, argv);
 
-  std::cout << "rank = " << getMPIRank() << std::endl;
+  std::cout << "rank = " << ch.rank << std::endl;
 
   graph.executeGraph(true);
 
-  if (getMPIRank() == 0) {
+  if (ch.rank == 0) {
     graph.pushData(data);
     graph.finishPushingData();
     while (auto result = graph.getBlockingResult()) {
@@ -79,7 +81,7 @@ int main(int argc, char **argv) {
   graph.finishPushingData(); // we have to make sure that all the ranks are done
   graph.waitForTermination();
 
-  if (getMPIRank() == 0) {
+  if (ch.rank == 0) {
     graph.createDotFile("test.dot");
     DBG(results);
   }
