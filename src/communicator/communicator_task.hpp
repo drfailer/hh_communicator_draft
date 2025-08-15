@@ -21,7 +21,7 @@ public:
     if (receiverRank == task_->commHandle()->rank) {
       task_->addResult(data);
     } else {
-      comm::sendData<TypesIds>({receiverRank}, task_->graphId(), task_->taskId(), data);
+      comm::sendData<TypesIds>(task_->commId(), {receiverRank}, data);
     }
   }
 };
@@ -54,8 +54,7 @@ private:
 private:
   std::shared_ptr<CoreTaskType> const coreTask_ = nullptr;
   std::vector<int> receiversRanks_ = {};
-  int taskId_ = -1;
-  inline static size_t idGenerator_ = 0;
+  int commId_ = -1;
   comm::CommHandle *commHandle_;
 
 public:
@@ -64,7 +63,7 @@ public:
       : behavior::TaskNode(std::make_shared<CoreTaskType>(this, name)), behavior::Copyable<SelfType>(1),
         tool::BehaviorTaskMultiSendersTypeDeducer_t<Outputs>((std::dynamic_pointer_cast<CoreTaskType>(this->core()))),
         CommunicatorMultiSend<CommunicatorTask<Types...>, TypesIds, Inputs>(this), receiversRanks_(receiversRanks),
-        coreTask_(std::dynamic_pointer_cast<CoreTaskType>(this->core())), taskId_(++commHandle->idGenerator), commHandle_(commHandle) {
+        coreTask_(std::dynamic_pointer_cast<CoreTaskType>(this->core())), commId_(++commHandle->idGenerator), commHandle_(commHandle) {
     if (coreTask_ == nullptr) {
       throw std::runtime_error("The core used by the task should be a CoreTask.");
     }
@@ -72,9 +71,7 @@ public:
 
   ~CommunicatorTask() override = default;
 
-  [[nodiscard]] size_t graphId() const { return coreTask_->graphId(); }
-
-  [[nodiscard]] int taskId() const { return taskId_; }
+  [[nodiscard]] int commId() const { return commId_; }
 
   [[nodiscard]] comm::CommHandle *commHandle() const { return commHandle_; }
 

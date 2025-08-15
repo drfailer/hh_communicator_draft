@@ -34,10 +34,9 @@ inline Buffer bufferCreate(auto &&...args) {
 // Comm ////////////////////////////////////////////////////////////////////////
 
 enum class CommSignal {
-  Data,
-  Terminate,
-  Disconnect,
   None,
+  Data,
+  Disconnect,
 };
 
 struct CommHandle {
@@ -57,40 +56,38 @@ inline CommHandle *commCreate() {
   return handle;
 }
 
-inline void commDestroy(CommHandle *handle) {
-    delete handle;
-}
+inline void commDestroy(CommHandle *handle) { delete handle; }
 
 inline void commInit(int argc, char **argv) { MPI_Init(&argc, &argv); }
 
 inline void commFinalize() { MPI_Finalize(); }
 
-inline void sendSignal(std::vector<int> const &dests, int graphId, int taskId, CommSignal signal) {
+inline void sendSignal(int commId, std::vector<int> const &dests, CommSignal signal) {
   namespace ser = serializer;
   ser::Bytes buffer(1024);
-  ser::serialize<ser::Serializer<ser::Bytes>>(buffer, 0, graphId, taskId, signal);
+  ser::serialize<ser::Serializer<ser::Bytes>>(buffer, 0, signal);
   for (int dest : dests) {
-    MPI_Send(buffer.data(), buffer.size(), MPI_BYTE, dest, 0, MPI_COMM_WORLD);
+    MPI_Send(buffer.data(), buffer.size(), MPI_BYTE, dest, commId, MPI_COMM_WORLD);
   }
 }
 
 template <typename TypeTable, typename T>
-void sendData(std::vector<int> const &dests, int graphId, int taskId, std::shared_ptr<T> data) {
+void sendData(int commId, std::vector<int> const &dests, std::shared_ptr<T> data) {
   namespace ser = serializer;
   ser::Bytes buf(1024);
-  size_t pos = ser::serialize<ser::Serializer<ser::Bytes>>(buf, 0, graphId, taskId, CommSignal::Data);
+  size_t pos = ser::serialize<ser::Serializer<ser::Bytes>>(buf, 0, CommSignal::Data);
   pos = ser::serializeWithId<ser::Serializer<ser::Bytes, TypeTable>, T>(buf, pos, data);
   for (int dest : dests) {
-    MPI_Send(buf.data(), buf.size(), MPI_BYTE, dest, 0, MPI_COMM_WORLD);
+    MPI_Send(buf.data(), buf.size(), MPI_BYTE, dest, commId, MPI_COMM_WORLD);
   }
 }
 
-inline void recvSignal(Buffer &buf, int &senderRank, int &graphId, int &taskId, CommSignal &signal) {
+inline void recvSignal(int commId, Buffer &buf, int &senderRank, CommSignal &signal) {
   namespace ser = serializer;
   MPI_Status status;
-  MPI_Recv(buf.data.data(), buf.data.size(), MPI_BYTE, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
+  MPI_Recv(buf.data.data(), buf.data.size(), MPI_BYTE, MPI_ANY_SOURCE, commId, MPI_COMM_WORLD, &status);
   senderRank = status.MPI_SOURCE;
-  buf.pos = ser::deserialize<ser::Serializer<ser::Bytes>>(buf.data, 0, graphId, taskId, signal);
+  buf.pos = ser::deserialize<ser::Serializer<ser::Bytes>>(buf.data, 0, signal);
 }
 
 template <typename TypeTable> void unpackData(Buffer &buf, auto cb) {

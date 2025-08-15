@@ -41,8 +41,7 @@ public:
       runAsReceiver();
     } else {
       runAsSender();
-      sendSignal({this->task()->receiversRanks()}, this->graphId(), this->task()->taskId(),
-                 comm::CommSignal::Disconnect);
+      sendSignal(this->task()->commId(), {this->task()->receiversRanks()}, comm::CommSignal::Disconnect);
     }
 
     // Do the shutdown phase
@@ -64,26 +63,11 @@ private:
     }
 
     while (true) {
-      int graphId = -1, senderId = -1, senderRank = -1;
+      int senderRank = -1;
       comm::CommSignal signal;
-      comm::recvSignal(buf, senderRank, graphId, senderId, signal);
+      comm::recvSignal(this->task()->commId(), buf, senderRank, signal);
 
-      if (graphId != (int)this->graphId()) {
-        continue;
-      }
-
-      if (senderId != this->task()->taskId()) {
-        if (senderId == 0) {
-          if (signal == comm::CommSignal::Terminate) {
-            break;
-          }
-        }
-        continue;
-      }
-
-      if (signal == comm::CommSignal::Terminate) {
-        break;
-      } else if (signal == comm::CommSignal::Disconnect) {
+      if (signal == comm::CommSignal::Disconnect) {
         connections[senderRank] = false;
         if (!isConnected(connections)) {
           break;
@@ -93,9 +77,7 @@ private:
         continue;
       }
 
-      comm::unpackData<TypesIds>(buf, [&]<typename T>(std::shared_ptr<T> data) {
-          this->task()->addResult(data);
-      });
+      comm::unpackData<TypesIds>(buf, [&]<typename T>(std::shared_ptr<T> data) { this->task()->addResult(data); });
     }
   }
 

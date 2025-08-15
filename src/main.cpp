@@ -13,13 +13,13 @@ struct TestGraph1 : hh::Graph<1, int, int> {
     assert(commHandle->nbProcesses == 3);
     auto in = std::make_shared<hh::LambdaTask<1, int, int>>("input", 1);
     auto b01 = std::make_shared<hh::CommunicatorTask<int>>(commHandle, std::vector<int>({1}));
-    DBG(b01->taskId());
+    DBG(b01->commId());
     auto b02 = std::make_shared<hh::CommunicatorTask<int>>(commHandle, std::vector<int>({2}));
-    DBG(b02->taskId());
+    DBG(b02->commId());
     auto frgn1 = std::make_shared<hh::LambdaTask<1, int, int>>("foreign task", 1);
     auto frgn2 = std::make_shared<hh::LambdaTask<1, int, int>>("foreign task", 1);
     auto bn0 = std::make_shared<hh::CommunicatorTask<int>>(commHandle, std::vector<int>({0}));
-    DBG(bn0->taskId());
+    DBG(bn0->commId());
     auto out = std::make_shared<hh::LambdaTask<1, int, int>>("output", 1);
 
     in->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
