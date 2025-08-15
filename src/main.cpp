@@ -78,6 +78,7 @@ int main(int argc, char **argv) {
     }
   }
 
+  // TODO: create a helper function that adds a barrier before ending the graph
   graph.finishPushingData(); // we have to make sure that all the ranks are done
   graph.waitForTermination();
 
