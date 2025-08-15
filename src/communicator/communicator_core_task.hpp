@@ -37,7 +37,7 @@ public:
     // TODO: add a way to implement a 2 threads version in case a process has to
     // operate both as sender and receiver
     if (std::find(this->task()->receiversRanks().begin(), this->task()->receiversRanks().end(),
-                  this->task()->commHandle().rank) != this->task()->receiversRanks().end()) {
+                  this->task()->commHandle()->rank) != this->task()->receiversRanks().end()) {
       runAsReceiver();
     } else {
       runAsSender();
@@ -53,8 +53,10 @@ public:
 
 private:
   void runAsReceiver() {
+    // TODO: we need to be able to resize this buffer dynamically, the easiest way would be to send the buffer size in
+    // the request
     comm::Buffer buf = comm::bufferCreate(1024, 1024);
-    std::vector<bool> connections(this->task()->commHandle().nb_processes, true);
+    std::vector<bool> connections(this->task()->commHandle()->nbProcesses, true);
 
     // each receiver is connected to all the senders
     for (auto receiverRank : this->task()->receiversRanks()) {

@@ -1,15 +1,16 @@
 #include "communicator/comm_tools.hpp"
 #include "communicator/communicator_task.hpp"
+#include "log.hpp"
 #include <hedgehog/hedgehog.h>
 #include <iostream>
 #include <mpi.h>
 #include <mutex>
-#include "log.hpp"
 
 std::mutex stdout_mutex;
 
 struct TestGraph1 : hh::Graph<1, int, int> {
-  TestGraph1(hh::comm::CommHandle const &commHandle) : hh::Graph<1, int, int>("TestGraph1") {
+  TestGraph1(hh::comm::CommHandle *commHandle) : hh::Graph<1, int, int>("TestGraph1") {
+    assert(commHandle->nbProcesses == 3);
     auto in = std::make_shared<hh::LambdaTask<1, int, int>>("input", 1);
     auto b01 = std::make_shared<hh::CommunicatorTask<int>>(commHandle, std::vector<int>({1}));
     DBG(b01->taskId());
@@ -22,25 +23,25 @@ struct TestGraph1 : hh::Graph<1, int, int> {
     auto out = std::make_shared<hh::LambdaTask<1, int, int>>("output", 1);
 
     in->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
-      std::cout << "[TASK] in -> " << commHandle.rank << std::endl;
+      std::cout << "[TASK] in -> " << commHandle->rank << std::endl;
       *data += 1;
       DBG(*data);
       self.addResult(data);
     });
     frgn1->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
-      std::cout << "[TASK] frng1 -> " << commHandle.rank << std::endl;
+      std::cout << "[TASK] frng1 -> " << commHandle->rank << std::endl;
       *data += 1;
       DBG(*data);
       self.addResult(data);
     });
     frgn2->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
-      std::cout << "[TASK] frng2 -> " << commHandle.rank << std::endl;
+      std::cout << "[TASK] frng2 -> " << commHandle->rank << std::endl;
       *data *= 2;
       DBG(*data);
       self.addResult(data);
     });
     out->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
-      std::cout << "[TASK] out -> " << commHandle.rank << std::endl;
+      std::cout << "[TASK] out -> " << commHandle->rank << std::endl;
       *data += 1;
       DBG(*data);
       self.addResult(data);
@@ -60,17 +61,16 @@ struct TestGraph1 : hh::Graph<1, int, int> {
 
 int main(int argc, char **argv) {
   hh::comm::commInit(argc, argv);
-  hh::comm::CommHandle ch = hh::comm::commCreate();
+  hh::comm::CommHandle *ch = hh::comm::commCreate();
   auto data = std::make_shared<int>(4);
   TestGraph1 graph(ch);
   std::vector<int> results;
 
-
-  std::cout << "rank = " << ch.rank << std::endl;
+  std::cout << "rank = " << ch->rank << std::endl;
 
   graph.executeGraph(true);
 
-  if (ch.rank == 0) {
+  if (ch->rank == 0) {
     graph.pushData(data);
     graph.finishPushingData();
     while (auto result = graph.getBlockingResult()) {
@@ -81,11 +81,12 @@ int main(int argc, char **argv) {
   graph.finishPushingData(); // we have to make sure that all the ranks are done
   graph.waitForTermination();
 
-  if (ch.rank == 0) {
+  if (ch->rank == 0) {
     graph.createDotFile("test.dot");
     DBG(results);
   }
 
+  hh::comm::commDestroy(ch);
   hh::comm::commFinalize();
   return 0;
 }

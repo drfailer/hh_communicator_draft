@@ -42,17 +42,23 @@ enum class CommSignal {
 
 struct CommHandle {
   int rank;
-  int nb_processes;
+  int nbProcesses;
+  int idGenerator;
 };
 
-inline CommHandle commCreate() {
-  CommHandle handle = {
-      .rank = -1,
-      .nb_processes = -1,
-  };
-  MPI_Comm_rank(MPI_COMM_WORLD, &handle.rank);
-  MPI_Comm_size(MPI_COMM_WORLD, &handle.nb_processes);
+inline CommHandle *commCreate() {
+  CommHandle *handle;
+  handle = new CommHandle();
+  handle->rank = -1;
+  handle->nbProcesses = -1;
+  handle->idGenerator = 0;
+  MPI_Comm_rank(MPI_COMM_WORLD, &handle->rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &handle->nbProcesses);
   return handle;
+}
+
+inline void commDestroy(CommHandle *handle) {
+    delete handle;
 }
 
 inline void commInit(int argc, char **argv) { MPI_Init(&argc, &argv); }
