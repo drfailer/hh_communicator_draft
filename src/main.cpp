@@ -9,7 +9,9 @@
 std::mutex stdout_mutex;
 
 struct TestGraph1 : hh::Graph<1, int, int> {
-  TestGraph1(hh::comm::CommHandle *commHandle) : hh::Graph<1, int, int>("TestGraph1") {
+  hh::comm::CommHandle *commHandle_;
+
+  TestGraph1(hh::comm::CommHandle *commHandle) : hh::Graph<1, int, int>("TestGraph1"), commHandle_(commHandle) {
     assert(commHandle->nbProcesses == 3);
     auto in = std::make_shared<hh::LambdaTask<1, int, int>>("input", 1);
     auto b01 = std::make_shared<hh::CommunicatorTask<int>>(commHandle, std::vector<int>({1}));
@@ -57,6 +59,13 @@ struct TestGraph1 : hh::Graph<1, int, int> {
     this->edges(bn0, out);
     this->outputs(out);
   }
+
+  // helper function of a builtin "DistributedGraph" ?
+  template <typename T> void pushData(std::shared_ptr<T> data) {
+    if (commHandle_->rank == 0) {
+      hh::Graph<1, int, int>::template pushData<T>(data);
+    }
+  }
 };
 
 int main(int argc, char **argv) {
@@ -69,17 +78,16 @@ int main(int argc, char **argv) {
   std::cout << "rank = " << ch->rank << std::endl;
 
   graph.executeGraph(true);
+  graph.pushData(data);
+  graph.finishPushingData();
 
   if (ch->rank == 0) {
-    graph.pushData(data);
-    graph.finishPushingData();
     while (auto result = graph.getBlockingResult()) {
       results.push_back(*std::get<std::shared_ptr<int>>(*result));
     }
   }
 
-  // TODO: create a helper function that adds a barrier before ending the graph
-  graph.finishPushingData(); // we have to make sure that all the ranks are done
+  hh::comm::barrier();
   graph.waitForTermination();
 
   if (ch->rank == 0) {

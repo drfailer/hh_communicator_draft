@@ -58,7 +58,10 @@ inline CommHandle *commCreate() {
 
 inline void commDestroy(CommHandle *handle) { delete handle; }
 
-inline void commInit(int argc, char **argv) { MPI_Init(&argc, &argv); }
+inline void commInit(int argc, char **argv) {
+  int32_t provided;
+  MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
+}
 
 inline void commFinalize() { MPI_Finalize(); }
 
@@ -85,7 +88,10 @@ void sendData(int commId, std::vector<int> const &dests, std::shared_ptr<T> data
 inline void recvSignal(int commId, Buffer &buf, int &senderRank, CommSignal &signal) {
   namespace ser = serializer;
   MPI_Status status;
-  MPI_Recv(buf.data.data(), buf.data.size(), MPI_BYTE, MPI_ANY_SOURCE, commId, MPI_COMM_WORLD, &status);
+  MPI_Request request;
+  // MPI_Recv(buf.data.data(), buf.data.size(), MPI_BYTE, MPI_ANY_SOURCE, commId, MPI_COMM_WORLD, &status);
+  MPI_Irecv(buf.data.data(), buf.data.size(), MPI_BYTE, MPI_ANY_SOURCE, commId, MPI_COMM_WORLD, &request);
+  MPI_Wait(&request, &status);
   senderRank = status.MPI_SOURCE;
   buf.pos = ser::deserialize<ser::Serializer<ser::Bytes>>(buf.data, 0, signal);
 }
@@ -98,6 +104,10 @@ template <typename TypeTable> void unpackData(Buffer &buf, auto cb) {
     buf.pos = ser::deserializeWithId<ser::Serializer<ser::Bytes, TypeTable>, T>(buf.data, buf.pos, data);
     cb.template operator()<T>(data);
   });
+}
+
+inline void barrier() {
+    MPI_Barrier(MPI_COMM_WORLD);
 }
 
 } // end namespace comm
