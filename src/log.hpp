@@ -5,7 +5,8 @@
 
 #ifndef LOG_H
 #define LOG_H
-#include <iostream>
+#include <cstdio>
+#include <sstream>
 #include <type_traits>
 
 /* config *********************************************************************/
@@ -27,7 +28,9 @@
 // info groups active (groups that are in the list are activated)
 // note: the identifier of the group is displayed in the message, use a custom
 // define / enum when using the INFO_GRP macro if you want a more explicit name.
-#define INFO_GRPS 0, 1
+#define INFO_GRP_RECEIVER_END 2
+#define INFO_GRP_RECEIVER_DISCONNECT 3
+#define INFO_GRPS 0, 1, 2, 3
 
 /******************************************************************************/
 
@@ -54,10 +57,8 @@ template <size_t Id> struct isInfoIdActive<Id, GroupList<>> {
   static constexpr bool value = false;
 };
 
-template <size_t Id, size_t Head, size_t... Ids>
-struct isInfoIdActive<Id, GroupList<Head, Ids...>> {
-  static constexpr bool value =
-      Id == Head || isInfoIdActive<Id, GroupList<Ids...>>::value;
+template <size_t Id, size_t Head, size_t... Ids> struct isInfoIdActive<Id, GroupList<Head, Ids...>> {
+  static constexpr bool value = Id == Head || isInfoIdActive<Id, GroupList<Ids...>>::value;
 };
 
 #ifdef DBG_CONTAINERS
@@ -82,12 +83,10 @@ concept TupleLike = requires(T obj) {
   std::tuple_size_v<T>;
 };
 
-template <Iterable Container>
-std::ostream &operator<<(std::ostream &os, Container const &container);
+template <Iterable Container> std::ostream &operator<<(std::ostream &os, Container const &container);
 
 template <typename Tuple, size_t... Idx>
-std::ostream &printTuple(std::ostream &os, Tuple const &tuple,
-                         std::index_sequence<Idx...>) {
+std::ostream &printTuple(std::ostream &os, Tuple const &tuple, std::index_sequence<Idx...>) {
   return ((os << (Idx > 0 ? ", " : "") << std::get<Idx>(tuple)), ...);
 }
 
@@ -99,13 +98,12 @@ std::ostream &operator<<(std::ostream &os, Tuple<Types...> const &tuple) {
   return os << ">";
 }
 
-template <Iterable Container>
-std::ostream &operator<<(std::ostream &os, Container const &container) {
+template <Iterable Container> std::ostream &operator<<(std::ostream &os, Container const &container) {
   auto it = container.cbegin();
 
   if (it == container.cend()) {
-      os << "[]";
-      return os;
+    os << "[]";
+    return os;
   }
 
   os << "[" << *it++;
@@ -125,9 +123,12 @@ std::ostream &operator<<(std::ostream &os, Container const &container) {
 // INFO_GRP takes the id of a group, only the groups that are in INFO_GRPS are
 // displayed
 #if defined(LOG) && defined(LOG_INFO)
-#define INFO_GRP(msg, id)                                                      \
-  if constexpr (logh::isInfoIdActive<id, logh::GroupList<INFO_GRPS>>::value) { \
-    std::cout << BBLU "INFO[" #id "]: " CRESET << msg << std::endl;            \
+#define INFO_GRP(msg, id)                                                                                              \
+  if constexpr (logh::isInfoIdActive<id, logh::GroupList<INFO_GRPS>>::value) {                                         \
+    using logh::operator<<;                                                                                            \
+    std::ostringstream oss;                                                                                            \
+    oss << BBLU "INFO[" #id "]: " CRESET << msg;                                                                       \
+    printf("%s\n", oss.str().c_str());                                                                                 \
   }
 #define INFO(msg) INFO_GRP(msg, 0)
 #else
@@ -137,21 +138,36 @@ std::ostream &operator<<(std::ostream &os, Container const &container) {
 
 // WARN
 #if defined(LOG) && defined(LOG_WARN)
-#define WARN(msg) std::cout << BYEL "WARN: " CRESET << msg << std::endl;
+#define WARN(msg)                                                                                                      \
+  {                                                                                                                    \
+    std::ostringstream oss;                                                                                            \
+    oss << BYEL "WARN: " CRESET << msg;                                                                                \
+    printf("%s\n", oss.str().c_str());                                                                                 \
+  }
 #else
 #define WARN(msg)
 #endif
 
 // ERROR
 #if defined(LOG) && defined(LOG_ERR)
-#define ERROR(msg) std::cout << BRED "ERROR: " CRESET << msg << std::endl;
+#define ERROR(msg)                                                                                                     \
+  {                                                                                                                    \
+    std::ostringstream oss;                                                                                            \
+    oss << BRED "ERROR: " CRESET << msg;                                                                               \
+    printf("%s\n", oss.str().c_str());                                                                                 \
+  }
 #else
 #define ERROR(msg)
 #endif
 
 // TODO
 #if defined(LOG) && defined(LOG_TODO)
-#define TODO(msg) std::cout << BGRN "TODO: " CRESET << msg << std::endl;
+#define TODO(msg)                                                                                                      \
+  {                                                                                                                    \
+    std::ostringstream oss;                                                                                            \
+    oss << BGRN "TODO: " CRESET << msg << std::endl;                                                                   \
+    printf("%s\n", oss.str().c_str());                                                                                 \
+  }
 #else
 #define TODO(msg)
 #endif
@@ -159,20 +175,28 @@ std::ostream &operator<<(std::ostream &os, Container const &container) {
 // DBG
 #if defined(LOG) && defined(LOG_DBG)
 #ifdef DBG_CONTAINERS
-#define DBG(var)                                                               \
-  if constexpr (!std::is_same_v<const char(&)[sizeof(var)], decltype(var)>) {  \
-    using logh::operator<<;                                                    \
-    std::cout << MAG "DBG: " CRESET #var " = " << var << std::endl;            \
-  } else { /* if not variable */                                               \
-    using logh::operator<<;                                                    \
-    std::cout << MAG "DBG: " CRESET << var << std::endl;                       \
+#define DBG(var)                                                                                                       \
+  if constexpr (!std::is_same_v<const char (&)[sizeof(var)], decltype(var)>) {                                         \
+    std::ostringstream oss;                                                                                            \
+    using logh::operator<<;                                                                                            \
+    oss << MAG "DBG: " CRESET #var " = " << var;                                                                       \
+    printf("%s\n", oss.str().c_str());                                                                                 \
+  } else { /* if not variable */                                                                                       \
+    std::ostringstream oss;                                                                                            \
+    using logh::operator<<;                                                                                            \
+    oss << MAG "DBG: " CRESET << var;                                                                                  \
+    printf("%s\n", oss.str().c_str());                                                                                 \
   }
 #else // DBG_CONTAINERS
-#define DBG(var)                                                               \
-  if constexpr (!std::is_same_v<const char(&)[sizeof(var)], decltype(var)>) {  \
-    std::cout << MAG "DBG: " CRESET #var " = " << var << std::endl;            \
-  } else { /* if not variable */                                               \
-    std::cout << MAG "DBG: " CRESET << var << std::endl;                       \
+#define DBG(var)                                                                                                       \
+  if constexpr (!std::is_same_v<const char (&)[sizeof(var)], decltype(var)>) {                                         \
+    std::ostringstream oss;                                                                                            \
+    oss << MAG "DBG: " CRESET #var " = " << var;                                                                       \
+    printf("%s\n", oss.str().c_str());                                                                                 \
+  } else { /* if not variable */                                                                                       \
+    std::ostringstream oss;                                                                                            \
+    oss << MAG "DBG: " CRESET << var;                                                                                  \
+    printf("%s\n", oss.str().c_str());                                                                                 \
   }
 #endif // DBG_CONTAINERS
 #else
