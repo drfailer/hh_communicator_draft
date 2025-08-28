@@ -38,33 +38,85 @@ public:
     this->preRun();
 
     auto receivers = this->task()->comm()->receivers;
+    bool isReceiver =
+        std::find(receivers.begin(), receivers.end(), this->task()->comm()->comm->rank) != receivers.end();
 
-    // TODO: add a way to implement a 2 threads version in case a process has to
-    // operate both as sender and receiver
-    if (std::find(receivers.begin(), receivers.end(), this->task()->comm()->handle->rank) != receivers.end()) {
-      runAsReceiver();
+    if (isReceiver) {
+      logh::info("start receiver");
+      this->deamon_ = std::thread(&CommunicatorCoreTask<Types...>::recvDeamon, this);
     } else {
-      runAsSender();
+      logh::info("start sender");
+      this->deamon_ = std::thread(&CommunicatorCoreTask<Types...>::sendDeamon, this);
     }
 
-    // Do the shutdown phase
+    taskLoop();
+
+    if (this->deamon_.joinable()) {
+      logh::info("end ", isReceiver);
+      this->deamon_.join();
+    }
+
     this->postRun();
-    // Wake up a node that this node is linked to
     this->wakeUp();
   }
 
 private:
-  void runAsReceiver() {
+  void taskLoop() {
     using namespace std::chrono_literals;
-    std::vector<bool> connections(this->task()->comm()->handle->nbProcesses, true);
-    int source;
-    comm::CommSignal signal;
+    std::chrono::time_point<std::chrono::system_clock> start, finish;
+    std::condition_variable sleepCondition;
+    std::vector<int> receivers;
+    bool canTerminate = false;
+
+    // Actual computation loop
+    while (!this->canTerminate()) {
+      // Wait for a data to arrive or termination
+      this->nvtxProfiler()->startRangeWaiting();
+      start = std::chrono::system_clock::now();
+      canTerminate = this->sleep();
+      finish = std::chrono::system_clock::now();
+      this->nvtxProfiler()->endRangeWaiting();
+      this->incrementWaitDuration(std::chrono::duration_cast<std::chrono::nanoseconds>(finish - start));
+
+      // If loop can terminate break the loop early
+      if (canTerminate) {
+        break;
+      }
+
+      // Operate the connectedReceivers to get a data and send it to execute
+      this->operateReceivers();
+    }
+  }
+
+  void sendDeamon() {
+    using namespace std::chrono_literals;
+    while (!this->canTerminate()) {
+      comm::commProcessSendQueue(this->task()->comm(), []<typename T>(std::shared_ptr<T>) {
+        // TODO: return to memory manager
+      });
+      std::this_thread::sleep_for(4ms);
+    }
+    comm::commSendSignal(this->task()->comm(), this->task()->comm()->receivers, comm::CommSignal::Disconnect);
+    comm::commProcessSendQueue(
+        this->task()->comm(),
+        []<typename T>(std::shared_ptr<T>) {
+          // TODO: return to memory manager
+        },
+        true);
+  }
+
+  void recvDeamon() {
+    using namespace std::chrono_literals;
+    std::vector<bool> connections(this->task()->comm()->comm->nbProcesses, true);
+    int source = -1;
+    comm::CommSignal signal = comm::CommSignal::None;
     comm::Header header;
 
-    for (auto receiverRank : this->task()->comm()->receivers) {
-      connections[receiverRank] = false;
+    for (auto receiver : this->task()->comm()->receivers) {
+      connections[receiver] = false;
     }
 
+    // TODO: empty the queue or flush?
     while (isConnected(connections) || !this->task()->comm()->queues.recvOps.empty()) {
       comm::commRecvSignal(this->task()->comm(), source, signal, header);
 
@@ -72,58 +124,29 @@ private:
       case comm::CommSignal::None:
         break;
       case comm::CommSignal::Disconnect:
-        INFO_GRP("disconnect: from " << source << ", channel = " << (int)this->task()->comm()->channel << ", rank = "
-                                     << this->task()->comm()->handle->rank << ", connections = " << connections,
-                 INFO_GRP_RECEIVER_DISCONNECT);
+        logh::infog(logh::IG::ReceiverDisconnect, "receiver disconnect", "source = ", source,
+                    " channel = ", (int)this->task()->comm()->channel, " rank = ", this->task()->comm()->comm->rank,
+                    " connections = ", connections);
         assert(connections[source] == true);
         connections[source] = false;
         break;
       case comm::CommSignal::Data:
-        comm::commRecvData(this->task()->comm(), source, header, [&]<typename T>() { return std::make_shared<T>(); });
+        comm::commRecvData(this->task()->comm(), source, header, [&]<typename T>() {
+          // TODO: get from memory manager
+          return std::make_shared<T>();
+        });
         break;
       }
       comm::commProcessRecvDataQueue(this->task()->comm(),
                                      [&]<typename T>(std::shared_ptr<T> data) { this->task()->addResult(data); });
       std::this_thread::sleep_for(4ms);
     }
-    INFO_GRP("receiver end: channel = " << (int)this->task()->comm()->channel
-                                        << ", rank = " << this->task()->comm()->handle->rank,
-             INFO_GRP_RECEIVER_END);
-  }
-
-  void runAsSender() {
-    using namespace std::chrono_literals;
-    std::chrono::time_point<std::chrono::system_clock> start, finish;
-    std::condition_variable sleepCondition;
-
-    this->nvtxProfiler()->startRangeWaiting();
-    start = std::chrono::system_clock::now();
-
-    // Actual computation loop
-    while (!this->canTerminate() || !this->task()->comm()->queues.sendOps.empty()) {
-      {
-        std::unique_lock<std::mutex> lock(waitMutex_);
-        sleepCondition.wait_for(lock, 4ms, [&]() { return !this->receiversEmpty(); });
-      }
-
-      // Operate the connectedReceivers to get a data and send it to execute
-      if (!this->receiversEmpty()) {
-        finish = std::chrono::system_clock::now();
-        this->nvtxProfiler()->endRangeWaiting();
-        this->incrementWaitDuration(std::chrono::duration_cast<std::chrono::nanoseconds>(finish - start));
-        this->nvtxProfiler()->startRangeWaiting();
-        start = std::chrono::system_clock::now();
-        this->operateReceivers();
-      }
-      comm::commProcessSendQueue(this->task()->comm());
-    }
-
-    comm::commSendSignal(this->task()->comm(), comm::CommSignal::Disconnect);
-    comm::commProcessSendQueue(this->task()->comm());
+    logh::infog(logh::IG::ReceiverEnd, "receiver end", "channel = ", (int)this->task()->comm()->channel,
+                " rank = ", this->task()->comm()->comm->rank);
   }
 
 private:
-  std::mutex waitMutex_;
+  std::thread deamon_;
 };
 
 } // end namespace core

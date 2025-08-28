@@ -3,14 +3,14 @@
 #include "serializer/serialize.hpp"
 #include "type_map.hpp"
 #include <cassert>
+#include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <map>
 #include <mpi.h>
 #include <serializer/serializer.hpp>
-#include <variant>
-#include <chrono>
 #include <thread>
+#include <variant>
 
 #define HH_COMM_DEBUG
 #ifdef HH_COMM_DEBUG
@@ -46,6 +46,7 @@ struct CommHandle {
   int nbProcesses;
   unsigned char idGenerator;
   MPI_Comm comm;
+  std::mutex mpiMutex;
 };
 
 inline CommHandle *commCreate() {
@@ -121,7 +122,7 @@ enum class CommSignal : unsigned char {
 // CommTaskHandle //////////////////////////////////////////////////////////////
 
 template <typename TM> struct CommTaskHandle {
-  CommHandle *handle;
+  CommHandle *comm;
   unsigned char channel;
   std::vector<int> receivers;
   CommQueues queues;
@@ -130,7 +131,7 @@ template <typename TM> struct CommTaskHandle {
 
 template <typename TM> CommTaskHandle<TM> commTaskHandleCreate(CommHandle *handle, std::vector<int> receivers) {
   return CommTaskHandle<TM>{
-      .handle = handle,
+      .comm = handle,
       .channel = ++handle->idGenerator,
       .receivers = receivers,
       .queues = {},
@@ -182,52 +183,56 @@ inline u16 commGeneratePackageId() {
 // Helper //////////////////////////////////////////////////////////////////////
 
 template <typename TM>
-void commFlushQueueAndWarehouse(std::vector<CommOperation> &queue, std::map<u16, PackageStorage<TM>> &wh) {
-    std::vector<MPI_Request> requests;
+void commFlushQueueAndWarehouse(CommTaskHandle<TM> *handle, std::vector<CommOperation> &queue,
+                                std::map<u16, PackageStorage<TM>> &wh) {
+  std::vector<MPI_Request> requests;
 
-    for (auto &op : queue) {
-      MPI_Cancel(&op.request);
-      requests.push_back(op.request);
-    }
+  for (auto &op : queue) {
+    std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
+    MPI_Cancel(&op.request);
+    requests.push_back(op.request);
+  }
 
-    int done = false;
-    do {
-      using namespace std::chrono_literals;
-      std::this_thread::sleep_for(4ms);
-      MPI_Testall(requests.size(), requests.data(), &done, MPI_STATUSES_IGNORE);
-    } while (!done);
-    queue.clear();
+  int done = false;
+  do {
+    std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
+    using namespace std::chrono_literals;
+    std::this_thread::sleep_for(4ms);
+    MPI_Testall(requests.size(), requests.data(), &done, MPI_STATUSES_IGNORE);
+  } while (!done);
+  queue.clear();
 
-    for (auto it : wh) {
-      auto storage = it.second;
-      type_map::apply(TM(), storage.typeId, [&]<typename T>() {
-        if constexpr (!requires(T *data) { data->pack(); }) {
-          delete[] storage.package.data[0].mem;
-        }
-      });
-    }
-    wh.clear();
+  for (auto it : wh) {
+    auto storage = it.second;
+    type_map::apply(TM(), storage.typeId, [&]<typename T>() {
+      if constexpr (!requires(T *data) { data->pack(); }) {
+        delete[] storage.package.data[0].mem;
+      }
+    });
+  }
+  wh.clear();
 }
 
 // Send ////////////////////////////////////////////////////////////////////////
 
+inline void commSend(CommHandle *handle, Header const &header, int dest, Buffer const &buf) {
+  MPI_Send(buf.mem, buf.len, MPI_BYTE, dest, std::bit_cast<int>(header), handle->comm);
+}
+
+template <typename RT>
+inline void commSendAsync(CommHandle *handle, Header const &header, int dest, Buffer const &buf, RT request) {
+  MPI_Isend(buf.mem, buf.len, MPI_BYTE, dest, std::bit_cast<int>(header), handle->comm, request);
+}
+
 template <typename TM>
-inline void commSend(CommTaskHandle<TM> *handle, Header const &header, int dest, Buffer const &buf) {
-  MPI_Send(buf.mem, buf.len, MPI_BYTE, dest, std::bit_cast<int>(header), handle->handle->comm);
-}
-
-template <typename TM, typename RT>
-inline void commSendAsync(CommTaskHandle<TM> *handle, Header const &header, int dest, Buffer const &buf, RT request) {
-  MPI_Isend(buf.mem, buf.len, MPI_BYTE, dest, std::bit_cast<int>(header), handle->handle->comm, request);
-}
-
-template <typename TM> inline void commSendSignal(CommTaskHandle<TM> *handle, CommSignal signal) {
+inline void commSendSignal(CommTaskHandle<TM> *handle, std::vector<int> dests, CommSignal signal) {
   Header header = {.channel = handle->channel, .signal = 1, .typeId = 0, .packageId = 0, .bufferId = 0};
 
   hh_comm_log("commSendSignal: channel = %d, signal = %d\n", handle->channel, (int)signal);
-  for (auto dest : handle->receivers) {
+  for (auto dest : dests) {
     char buf[1] = {(char)signal};
-    commSend(handle, header, dest, Buffer{buf, 1});
+    std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
+    commSend(handle->comm, header, dest, Buffer{buf, 1});
   }
 }
 
@@ -259,74 +264,65 @@ inline void commSendData(CommTaskHandle<TM> *handle, std::vector<int> dests, std
   handle->wh.mutex.unlock();
 
   // TODO: how do we want to order the loops?
-  handle->queues.mutex.lock();
   for (size_t i = 0; i < package.data.size(); ++i) {
     header.bufferId = (u8)i;
     for (auto dest : dests) {
+      std::lock_guard<std::mutex> queuesLock(handle->queues.mutex);
       handle->queues.sendOps.push_back(CommOperation{
           .packageId = packageId,
           .bufferId = header.bufferId,
           .request = {},
       });
-      commSendAsync(handle, header, dest, package.data[i], &handle->queues.sendOps.back().request);
+      std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
+      commSendAsync(handle->comm, header, dest, package.data[i], &handle->queues.sendOps.back().request);
     }
   }
-  handle->queues.mutex.unlock();
 }
 
-// TODO: add a callback for returning the data
-template <typename TM> void commProcessSendQueue(CommTaskHandle<TM> *handle, bool flush = false) {
-  // TODO: normally, this process should only be using the send queue, which
-  // means that we do not necessarily need to use two different mutexes,
-  // however, it might be safer for the future
-  handle->queues.mutex.lock();
-  for (auto it = handle->queues.sendOps.begin(); it != handle->queues.sendOps.end();) {
-    int flag = 0;
-    MPI_Status status;
-    MPI_Test(&it->request, &flag, &status);
+template <typename TM, typename ReturnDataCB>
+void commProcessSendQueue(CommTaskHandle<TM> *handle, ReturnDataCB cb, bool flush = false) {
+  do {
+    std::lock_guard<std::mutex> queuesLock(handle->queues.mutex);
 
-    if (flag) {
-      assert(handle->wh.sendStorage.contains(it->packageId));
-      PackageStorage<TM> &storage = handle->wh.sendStorage.at(it->packageId);
-      ++storage.bufferCount;
+    for (auto it = handle->queues.sendOps.begin(); it != handle->queues.sendOps.end();) {
+      int flag = 0;
+      MPI_Status status;
+      std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
+      MPI_Test(&it->request, &flag, &status);
 
-      if (storage.bufferCount >= storage.ttlBufferCount) {
-        // TODO: this solution is not great, idealy, we would have a callback to
-        //       release the memory/return it to a buffer pool
+      if (flag) {
+        std::lock_guard<std::mutex> whLock(handle->wh.mutex);
+        assert(handle->wh.sendStorage.contains(it->packageId));
+        PackageStorage<TM> &storage = handle->wh.sendStorage.at(it->packageId);
+        ++storage.bufferCount;
 
-        // Since the buffer is dynamically allocated when the data type does not
-        // support the 'pack' operation, we need to free once the transmission is
-        // done
-        type_map::apply(TM(), storage.typeId, [&]<typename T>() {
-          if constexpr (!requires(T *data) { data->pack(); }) {
-            delete[] storage.package.data[0].mem;
-          }
-        });
-        handle->wh.sendStorage.erase(it->packageId);
+        if (storage.bufferCount >= storage.ttlBufferCount) {
+          type_map::apply(TM(), storage.typeId, [&]<typename T>() {
+            if constexpr (!requires(T *data) { data->pack(); }) {
+              // the buffer is dynamically allocated when the data type does not
+              // support the 'pack' operation
+              delete[] storage.package.data[0].mem;
+            }
+            cb.template operator()<T>(std::get<std::shared_ptr<T>>(storage.data));
+          });
+          handle->wh.sendStorage.erase(it->packageId);
+        }
+        handle->queues.sendOps.erase(it);
+      } else {
+        it++;
       }
-      handle->queues.sendOps.erase(it);
-    } else {
-      it++;
     }
-  }
-  hh_comm_log("commProcessSendQueue: queueSize = %ld\n", handle->queues.sendOps.size());
-
-  if (flush) {
-    commFlushQueueAndWarehouse(handle->queues.sendOps, handle->wh.sendStorage);
-  }
-  handle->queues.mutex.unlock();
+  } while (flush && !handle->queues.sendOps.empty());
 }
 
 // Recv ////////////////////////////////////////////////////////////////////////
 
-template <typename TM, typename ST>
-void commRecv(CommTaskHandle<TM> *handle, int source, int tag, Buffer const &buf, ST status) {
-  MPI_Recv(buf.mem, buf.len, MPI_BYTE, source, tag, handle->handle->comm, status);
+inline void commRecv(CommHandle *handle, int source, int tag, Buffer const &buf, MPI_Status *status) {
+  MPI_Recv(buf.mem, buf.len, MPI_BYTE, source, tag, handle->comm, status);
 }
 
-template <typename TM, typename RT>
-void commRecvAsync(CommTaskHandle<TM> *handle, int source, int tag, Buffer const &buf, RT request) {
-  MPI_Irecv(buf.mem, buf.len, MPI_BYTE, source, tag, handle->handle->comm, request);
+inline void commRecvAsync(CommHandle *handle, int source, int tag, Buffer const &buf, MPI_Request *request) {
+  MPI_Irecv(buf.mem, buf.len, MPI_BYTE, source, tag, handle->comm, request);
 }
 
 template <typename TM>
@@ -336,7 +332,8 @@ inline void commRecvSignal(CommTaskHandle<TM> *handle, int &source, CommSignal &
 
   signal = CommSignal::None;
   source = -1;
-  MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, handle->handle->comm, &flag, &status);
+  std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
+  MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, handle->comm->comm, &flag, &status);
 
   if (flag) {
     header = *std::bit_cast<Header *>(&status.MPI_TAG);
@@ -350,7 +347,7 @@ inline void commRecvSignal(CommTaskHandle<TM> *handle, int &source, CommSignal &
     } else {
       char buf[1];
       // TODO: do we want async here?
-      commRecv(handle, status.MPI_SOURCE, status.MPI_TAG, Buffer{buf, 1}, &status);
+      commRecv(handle->comm, status.MPI_SOURCE, status.MPI_TAG, Buffer{buf, 1}, &status);
       signal = (CommSignal)buf[0];
     }
     source = status.MPI_SOURCE;
@@ -370,6 +367,7 @@ inline void commRecvData(CommTaskHandle<TM> *handle, int source, Header const &h
 
   type_map::apply(TM(), typeId, [&]<typename T>() {
     if (!handle->wh.recvStorage.contains(packageId)) {
+      std::lock_guard<std::mutex> whLock(handle->wh.mutex);
       // TODO: the current memory manager implementation does not support multiple
       //       data types -> the type map might be usefull for this
       auto data = createData.template operator()<T>();
@@ -384,22 +382,25 @@ inline void commRecvData(CommTaskHandle<TM> *handle, int source, Header const &h
       handle->wh.recvStorage.insert({packageId, storage});
     }
     auto &storage = handle->wh.recvStorage.at(packageId);
+    std::lock_guard<std::mutex> queuesLock(handle->queues.mutex);
     handle->queues.recvOps.push_back(CommOperation{
         .packageId = packageId,
         .bufferId = bufferId,
         .request = {},
     });
-    commRecvAsync(handle, source, std::bit_cast<int>(header), storage.package.data[bufferId],
+    std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
+    commRecvAsync(handle->comm, source, std::bit_cast<int>(header), storage.package.data[bufferId],
                   &handle->queues.recvOps.back().request);
   });
 }
 
-template <typename TM, typename Function>
-void commProcessRecvDataQueue(CommTaskHandle<TM> *handle, Function cb, bool flush = false) {
-  handle->queues.mutex.lock();
+template <typename TM, typename ProcessCB>
+void commProcessRecvDataQueue(CommTaskHandle<TM> *handle, ProcessCB cb, bool flush = false) {
+  std::lock_guard<std::mutex> queuesLock(handle->queues.mutex);
   for (auto it = handle->queues.recvOps.begin(); it != handle->queues.recvOps.end();) {
     int flag = 0;
     MPI_Status status;
+    std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
     MPI_Test(&it->request, &flag, &status);
 
     if (flag) {
@@ -414,6 +415,7 @@ void commProcessRecvDataQueue(CommTaskHandle<TM> *handle, Function cb, bool flus
           commUnpack(storage.package, data);
           cb.template operator()<T>(data);
         });
+        std::lock_guard<std::mutex> whLock(handle->wh.mutex);
         handle->wh.recvStorage.erase(it->packageId);
       }
       handle->queues.recvOps.erase(it);
@@ -423,14 +425,15 @@ void commProcessRecvDataQueue(CommTaskHandle<TM> *handle, Function cb, bool flus
   }
 
   if (flush) {
-    commFlushQueueAndWarehouse(handle->queues.recvOps, handle->wh.recvStorage);
+    commFlushQueueAndWarehouse(handle, handle->queues.recvOps, handle->wh.recvStorage);
   }
-  handle->queues.mutex.unlock();
 }
 
 // Other functions /////////////////////////////////////////////////////////////
 
-inline void commBarrier() { MPI_Barrier(MPI_COMM_WORLD); }
+inline void commBarrier() {
+  MPI_Barrier(MPI_COMM_WORLD);
+}
 
 inline void commInit(int argc, char **argv) {
   int32_t provided = 0;

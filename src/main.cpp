@@ -76,19 +76,15 @@ int main(int argc, char **argv) {
 
   graph.executeGraph(true);
   graph.pushData(data);
-  if (ch->rank == 0)
-    graph.finishPushingData();
-
-  if (ch->rank == 0) {
-    // while (auto result = graph.getBlockingResult()) {
-    //   results.push_back(*std::get<std::shared_ptr<int>>(*result));
-    // }
-    results.push_back(*std::get<std::shared_ptr<int>>(*graph.getBlockingResult()));
-    results.push_back(*std::get<std::shared_ptr<int>>(*graph.getBlockingResult()));
-  }
-
   hh::comm::commBarrier();
   graph.finishPushingData();
+
+  if (ch->rank == 0) {
+    while (auto result = graph.getBlockingResult()) {
+      results.push_back(*std::get<std::shared_ptr<int>>(*result));
+    }
+  }
+
   graph.waitForTermination();
 
   if (ch->rank == 0) {
