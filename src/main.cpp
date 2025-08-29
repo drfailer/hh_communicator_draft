@@ -67,7 +67,7 @@ struct TestGraph1 : hh::Graph<1, int, int> {
 
 int main(int argc, char **argv) {
   hh::comm::commInit(argc, argv);
-  hh::comm::CommHandle *ch = hh::comm::commCreate();
+  hh::comm::CommHandle *ch = hh::comm::commCreate(true);
   auto data = std::make_shared<int>(4);
   TestGraph1 graph(ch);
   std::vector<int> results;
@@ -87,8 +87,9 @@ int main(int argc, char **argv) {
 
   graph.waitForTermination();
 
+  graph.createDotFile(std::to_string(ch->rank) + "test.dot");
+  hh::comm::commBarrier();
   if (ch->rank == 0) {
-    graph.createDotFile("test.dot");
     DBG(results);
   }
 

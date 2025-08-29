@@ -100,7 +100,7 @@ private:
 
 private:
   std::shared_ptr<CoreTaskType> const coreTask_ = nullptr;
-  comm::CommTaskHandle<TypesIds> commHandle_;
+  comm::CommTaskHandle<TypesIds> *commHandle_;
   CommunicatorTaskOpt options_;
 
 public:
@@ -119,11 +119,13 @@ public:
     this->coreTask_->printOptions().font({0xff, 0xff, 0xff, 0xff});
   }
 
-  ~CommunicatorTask() override = default;
+  ~CommunicatorTask() override {
+      comm::commTaskHandleDestroy(commHandle_);
+  }
 
   void initialize() override { CommunicatorMultiSend<CommunicatorTask<Types...>, TypesIds, Inputs>::initialize(); }
 
-  [[nodiscard]] comm::CommTaskHandle<TypesIds> *comm() { return &commHandle_; }
+  [[nodiscard]] comm::CommTaskHandle<TypesIds> *comm() const { return commHandle_; }
 
   [[nodiscard]] CommunicatorTaskOpt options() { return options_; }
 

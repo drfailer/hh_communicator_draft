@@ -60,11 +60,44 @@ public:
     this->wakeUp();
   }
 
-  // [[nodiscard]] std::string extraPrintingInformation() const override {
-  //     std::string infos = this->task_->extraPrintingInformation();
-  //     // TODO: add network infos
-  //     return infos;
-  // }
+  [[nodiscard]] std::string extraPrintingInformation() const override {
+    std::string networkStats;
+    std::vector<comm::CommTaskStats> stats;
+
+    if (!this->task()->comm()->comm->collectStats) {
+      return networkStats;
+    }
+
+    size_t nbProcesses = this->task()->comm()->comm->nbProcesses;
+
+    if (this->task()->comm()->comm->rank == 0) {
+      stats = comm::commGatherStats(this->task()->comm());
+      std::map<comm::StorageId, comm::StorageInfo> storageStats;
+      size_t maxSendOpsSize = 0;
+      size_t maxRecvOpsSize = 0;
+      size_t maxRecvDataQueueSize = 0;
+      size_t maxSendStorageSize = 0;
+      size_t maxRecvStorageSize = 0;
+
+      for (auto const &stat : stats) {
+        maxSendOpsSize = std::max(maxSendOpsSize, stat.maxSendOpsSize);
+        maxRecvOpsSize = std::max(maxRecvOpsSize, stat.maxRecvOpsSize);
+        maxRecvDataQueueSize = std::max(maxRecvDataQueueSize, stat.maxRecvDataQueueSize);
+        maxSendStorageSize = std::max(maxSendStorageSize, stat.maxSendStorageSize);
+        maxRecvStorageSize = std::max(maxRecvStorageSize, stat.maxRecvStorageSize);
+      }
+      networkStats.append("maxSendOpsSize = " + std::to_string(maxSendOpsSize) + "\n");
+      networkStats.append("maxRecvOpsSize = " + std::to_string(maxRecvOpsSize) + "\n");
+      networkStats.append("maxRecvDataQueueSize = " + std::to_string(maxRecvDataQueueSize) + "\n");
+      networkStats.append("maxSendStorageSize = " + std::to_string(maxSendStorageSize) + "\n");
+      networkStats.append("maxRecvStorageSize = " + std::to_string(maxRecvStorageSize) + "\n");
+      TODO("collect timing information");
+    } else {
+      comm::commSendStats(this->task()->comm());
+    }
+    // exchange stats
+    return networkStats;
+  }
 
 private:
   void taskLoop() {
@@ -122,9 +155,12 @@ private:
       connections[receiver] = false;
     }
 
-    // TODO: empty the queue or flush?
+    // TODO: empty the queue or flush? I think the best here would be to start a
+    //       timer when isConnected is false. After the timer, the thread leaves
+    //       the loops and flushes the queue, however, this should be reported
+    //       as an error in the dot file.
     while (isConnected(connections) || !this->task()->comm()->queues.recvOps.empty() ||
-           !this->task()->comm()->queues.pendingRecvData.empty()) {
+           !this->task()->comm()->queues.recvDataQueue.empty()) {
       comm::commRecvSignal(this->task()->comm(), source, signal, header);
 
       switch (signal) {
@@ -140,7 +176,7 @@ private:
       case comm::CommSignal::Data:
         break;
       }
-      comm::commProcessPendingRecvData(this->task()->comm(), [&]<typename T>() {
+      comm::commProcessRecvDataQueue(this->task()->comm(), [&]<typename T>() {
         static int test_idx = 0;
         if (test_idx++ % 2 == 0) {
           logh::warn("create data return nullptr");

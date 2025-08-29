@@ -32,7 +32,7 @@ class GenericCoreTask
       public TIM<Separator, AllTypes...>,
       public TOM<Separator, AllTypes...> {
 
- private:
+ protected:
   TaskType *const
       task_ = nullptr; ///< User defined task
 
@@ -318,6 +318,10 @@ class GenericCoreTask
   /// @brief Accessor to the task for sub classes
   /// @return Task
   [[nodiscard]] TaskType *task() { return this->task_; }
+
+  /// @brief Accessor to the task for sub classes
+  /// @return Task
+  [[nodiscard]] TaskType *task() const { return this->task_; }
 };
 }
 }
