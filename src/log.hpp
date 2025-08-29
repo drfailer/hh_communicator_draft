@@ -31,12 +31,14 @@ enum class IG : int {
     Default = 0,
     ReceiverDisconnect,
     ReceiverEnd,
+    Core,
     Comm,
 };
 #define ACTIVE_INFO_GROUPS \
     IG::Default, \
     IG::ReceiverDisconnect, \
     IG::ReceiverEnd, \
+    IG::Core, \
     IG::Comm
 
 } // namespace logh

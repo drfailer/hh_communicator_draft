@@ -42,23 +42,29 @@ public:
         std::find(receivers.begin(), receivers.end(), this->task()->comm()->comm->rank) != receivers.end();
 
     if (isReceiver) {
-      logh::info("start receiver");
+      logh::infog(logh::IG::Core, "core", "start receiver");
       this->deamon_ = std::thread(&CommunicatorCoreTask<Types...>::recvDeamon, this);
     } else {
-      logh::info("start sender");
+      logh::infog(logh::IG::Core, "core", "start sender");
       this->deamon_ = std::thread(&CommunicatorCoreTask<Types...>::sendDeamon, this);
     }
 
     taskLoop();
 
     if (this->deamon_.joinable()) {
-      logh::info("end ", isReceiver);
+      logh::infog(logh::IG::Core, "core", "join ", isReceiver ? "receiver" : "sender");
       this->deamon_.join();
     }
 
     this->postRun();
     this->wakeUp();
   }
+
+  // [[nodiscard]] std::string extraPrintingInformation() const override {
+  //     std::string infos = this->task_->extraPrintingInformation();
+  //     // TODO: add network infos
+  //     return infos;
+  // }
 
 private:
   void taskLoop() {
@@ -91,13 +97,13 @@ private:
   void sendDeamon() {
     using namespace std::chrono_literals;
     while (!this->canTerminate()) {
-      comm::commProcessSendQueue(this->task()->comm(), []<typename T>(std::shared_ptr<T>) {
+      comm::commProcessSendOpsQueue(this->task()->comm(), []<typename T>(std::shared_ptr<T>) {
         // TODO: return to memory manager
       });
       std::this_thread::sleep_for(4ms);
     }
     comm::commSendSignal(this->task()->comm(), this->task()->comm()->receivers, comm::CommSignal::Disconnect);
-    comm::commProcessSendQueue(
+    comm::commProcessSendOpsQueue(
         this->task()->comm(),
         []<typename T>(std::shared_ptr<T>) {
           // TODO: return to memory manager
@@ -117,7 +123,8 @@ private:
     }
 
     // TODO: empty the queue or flush?
-    while (isConnected(connections) || !this->task()->comm()->queues.recvOps.empty()) {
+    while (isConnected(connections) || !this->task()->comm()->queues.recvOps.empty() ||
+           !this->task()->comm()->queues.pendingRecvData.empty()) {
       comm::commRecvSignal(this->task()->comm(), source, signal, header);
 
       switch (signal) {
@@ -131,14 +138,19 @@ private:
         connections[source] = false;
         break;
       case comm::CommSignal::Data:
-        comm::commRecvData(this->task()->comm(), source, header, [&]<typename T>() {
-          // TODO: get from memory manager
-          return std::make_shared<T>();
-        });
         break;
       }
-      comm::commProcessRecvDataQueue(this->task()->comm(),
-                                     [&]<typename T>(std::shared_ptr<T> data) { this->task()->addResult(data); });
+      comm::commProcessPendingRecvData(this->task()->comm(), [&]<typename T>() {
+        static int test_idx = 0;
+        if (test_idx++ % 2 == 0) {
+          logh::warn("create data return nullptr");
+          return std::shared_ptr<T>{nullptr};
+        }
+        // TODO: get from memory manager
+        return std::make_shared<T>();
+      });
+      comm::commProcessRecvOpsQueue(this->task()->comm(),
+                                    [&]<typename T>(std::shared_ptr<T> data) { this->task()->addResult(data); });
       std::this_thread::sleep_for(4ms);
     }
     logh::infog(logh::IG::ReceiverEnd, "receiver end", "channel = ", (int)this->task()->comm()->channel,

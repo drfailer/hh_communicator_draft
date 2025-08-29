@@ -22,25 +22,25 @@ struct TestGraph1 : hh::Graph<1, int, int> {
     auto out = std::make_shared<hh::LambdaTask<1, int, int>>("output", 1);
 
     in->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
-      std::cout << "[TASK] in -> " << commHandle->rank << std::endl;
+      logh::log(stdout, "[TASK]", "in -> ", commHandle->rank);
       *data += 1;
       DBG(*data);
       self.addResult(data);
     });
     frgn1->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
-      std::cout << "[TASK] frng1 -> " << commHandle->rank << std::endl;
+      logh::log(stdout, "[TASK]", "frng1 -> ", commHandle->rank);
       *data += 1;
       DBG(*data);
       self.addResult(data);
     });
     frgn2->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
-      std::cout << "[TASK] frng2 -> " << commHandle->rank << std::endl;
+      logh::log(stdout, "[TASK]", "frng2 -> ", commHandle->rank);
       *data *= 2;
       DBG(*data);
       self.addResult(data);
     });
     out->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
-      std::cout << "[TASK] out -> " << commHandle->rank << std::endl;
+      logh::log(stdout, "[TASK]", "out -> ", commHandle->rank);
       *data += 1;
       DBG(*data);
       self.addResult(data);

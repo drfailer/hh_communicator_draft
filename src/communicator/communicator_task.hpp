@@ -110,7 +110,8 @@ public:
         tool::BehaviorTaskMultiSendersTypeDeducer_t<Outputs>((std::dynamic_pointer_cast<CoreTaskType>(this->core()))),
         CommunicatorMultiSend<CommunicatorTask<Types...>, TypesIds, Inputs>(this),
         coreTask_(std::dynamic_pointer_cast<CoreTaskType>(this->core())),
-        commHandle_(comm::commTaskHandleCreate<TypesIds>(commHandle, receivers)), options_(CommunicatorTaskOpt{includeSelf, scatter}) {
+        commHandle_(comm::commTaskHandleCreate<TypesIds>(commHandle, receivers)),
+        options_(CommunicatorTaskOpt{includeSelf, scatter}) {
     if (coreTask_ == nullptr) {
       throw std::runtime_error("The core used by the task should be a CoreTask.");
     }
