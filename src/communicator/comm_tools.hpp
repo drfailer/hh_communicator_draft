@@ -16,6 +16,56 @@
 
 /*
  * Hedgehog communicator backend implementation with serializer-cpp and MPI
+ *
+ * # Current implementation:
+ *
+ * ## Vocabulary
+ *
+ * - Buffer: ptr + len
+ * - Package: list of buffers (max 4 buffer per package)
+ * - PackageWarehouse: save packages until transmission is completed.
+ * - Storage: entry in the PackageWarehouse (storage id = packageId + source).
+ * - Operations: packageId + bufferId + mpi request + storageId -> request that
+ *               corresponds to a particular buffer that bellongs to a certain
+ *               package stored in the PackageStorage.
+ *
+ * ## Send
+ *
+ * - The sender tasks can use the `commSendSignal` or `commSendData` functions.
+ * - The `commProcessSendOpsQueue` processes the send operations queue.
+ * - Sending a signal is blocking since the signal is small (1 byte).
+ * - To send data, a type can implement the `pack` method. The transmission
+ *   will start by creating a storage in the warehouse to store the package.
+ *   Then, a new send operation will be added to the sendOps queue. The
+ *   `commProcessSendOpsQueue` is called in a busy loop to remove packages that
+ *   have been sent.
+ *
+ * ## Recv
+ *
+ * - The receiver tasks can use the `commRecvSignal` function.
+ * - The `commProcessRecvDataQueue` and `commProcessRecvOpsQueue` can be used
+ *   to process the recv queues.
+ * - Receiving a signal is blocking.
+ * - When receiving a data signal, a new pending recv data request is added to
+ *   a queue. The `commProcessRecvDataQueue` will then try to allocate a new
+ *   storage entry. If the memory manager returns a valid pointer, then a new
+ *   storage entry is created and a recv operations is added to the queue
+ *   (creation of the MPI request). Finally, `commProcessRecvOpsQueue`
+ *   processes the recv operations. An operation is completed if all the
+ *   buffers of the package are received. When it is the case, the `unpack`
+ *   method can be called to process the package.
+ *
+ * ## Protocol detail
+ *
+ * - Header (MPI tag): [channel(8b), signal(1b), typeId(6b), packageId(14b), bufferId(2b)]
+ * - Content (buffer): [Signal(8bits)|Data(?)]
+ *
+ * Header components:
+ * - channel: identifier of the CommunicatorTask ------------------- [limit = 256]
+ * - signal: boolean (signal or data?) ----------------------------- [NA]
+ * - typeId: identifier of the transimitted type (cf type map) ----- [limit = 64]
+ * - packageId: identifier of the package (cf commGeneratePackageId) [limit = 16384]
+ * - bufferId: buffer index in the package ------------------------- [limit = 4]
  */
 
 namespace hh {
@@ -77,13 +127,21 @@ struct Package {
 };
 
 struct Header {
-  u8 channel : 8;     // 255 channels (number of CommTasks)
+  u8 channel : 8;     // 256 channels (number of CommTasks)
   u8 signal : 1;      // 0 -> data | 1 -> signal
   u8 typeId : 6;      // 64 types (number of types managed by one task)
   u16 packageId : 14; // 16384 packages
   u8 bufferId : 2;    // 4 buffers per package
 };
 static_assert(sizeof(Header) <= sizeof(u32));
+
+enum class CommSignal : unsigned char {
+  None,
+  Data,
+  Disconnect,
+};
+
+// Warehouse ///////////////////////////////////////////////////////////////////
 
 struct StorageId {
   u32 source;
@@ -94,6 +152,22 @@ static_assert(sizeof(StorageId) == sizeof(u64));
 inline bool operator<(StorageId const &lhs, StorageId const &rhs) {
   return std::bit_cast<u64>(lhs) < std::bit_cast<u64>(rhs);
 }
+
+template <typename TM> struct PackageStorage {
+  Package package;
+  u64 bufferCount;
+  u64 ttlBufferCount;
+  u8 typeId;
+  variant_type_t<TM> data;
+};
+
+template <typename TM> struct PackageWarehouse {
+  std::map<StorageId, PackageStorage<TM>> sendStorage;
+  std::map<StorageId, PackageStorage<TM>> recvStorage;
+  std::mutex mutex;
+};
+
+// Queues //////////////////////////////////////////////////////////////////////
 
 struct CommOperation {
   u16 packageId;
@@ -113,45 +187,13 @@ inline bool operator<(CommPendingRecvData const &lhs, CommPendingRecvData const 
 }
 
 struct CommQueues {
-  std::vector<CommOperation> sendOps;
-  std::vector<CommOperation> recvOps;
-  std::set<CommPendingRecvData> recvDataQueue;
+  std::vector<CommOperation> sendOps; // send operations (MPI_Request)
+  std::vector<CommOperation> recvOps; // recv operations (MPI_Request)
+  std::set<CommPendingRecvData> recvDataQueue; // recv data queue (wait for memory manager)
   std::mutex mutex;
 };
 
-template <typename TM> struct PackageStorage {
-  Package package;
-  u64 bufferCount;
-  u64 ttlBufferCount;
-  u8 typeId;
-  variant_type_t<TM> data;
-};
-
-template <typename TM> struct PackageWarehouse {
-  std::map<StorageId, PackageStorage<TM>> sendStorage;
-  std::map<StorageId, PackageStorage<TM>> recvStorage;
-  std::mutex mutex;
-};
-
-enum class CommSignal : unsigned char {
-  None,
-  Data,
-  Disconnect,
-};
-
-// CommTaskHandle //////////////////////////////////////////////////////////////
-
-/*
- * Stats we want:
- * - max send/recv queue size
- * - max send/recv storage size
- * - average transmission time
- * - average transmission time per data type
- * - average transmission time per source
- * - average wait time (no signal received/no element in the queue)
- * - packing/unpacking time per type
- * - memory manager related data...
- */
+// Stats container /////////////////////////////////////////////////////////////
 
 using time_t = std::chrono::time_point<std::chrono::system_clock>;
 using delay_t = std::chrono::duration<double>;
@@ -177,6 +219,8 @@ struct CommTaskStats {
   size_t maxRecvStorageSize;
   std::mutex mutex;
 };
+
+// Task Handle /////////////////////////////////////////////////////////////////
 
 template <typename TM> struct CommTaskHandle {
   CommHandle *comm;
@@ -204,6 +248,10 @@ template <typename TM> void commTaskHandleDestroy(CommTaskHandle<TM> *taskHandle
 
 // Packing functions ///////////////////////////////////////////////////////////
 
+/*
+ * If the data type is packable, the use the `pack` function, otherwise,
+ * default to serializer.
+ */
 template <typename T> Package commPack(std::shared_ptr<T> data) {
   Package package;
 
@@ -218,6 +266,10 @@ template <typename T> Package commPack(std::shared_ptr<T> data) {
   return package;
 }
 
+/*
+ * If the data type is packable, it should implement a `package` method that
+ * returns the package memory. Otherwise, allocate a buffer on the heap.
+ */
 template <typename T> Package commPackage(std::shared_ptr<T> data) {
   if constexpr (requires { data->package(); }) {
     return data->package();
@@ -226,6 +278,10 @@ template <typename T> Package commPackage(std::shared_ptr<T> data) {
   }
 }
 
+/*
+ * If the data type is unpackable, call the `unpack` method, otherwise, default
+ * to serializer.
+ */
 template <typename T> void commUnpack(Package package, std::shared_ptr<T> data) {
   if constexpr (requires { data->unpack(); }) {
     data->unpack(package);
@@ -236,6 +292,10 @@ template <typename T> void commUnpack(Package package, std::shared_ptr<T> data) 
   }
 }
 
+/*
+ * Generate a package id on 14 bits using a counter. Each rank will have its
+ * own counter that will loop when after the 16384 package is sent.
+ */
 inline u16 commGeneratePackageId() {
   static u16 curPackageId = 0;
   u16 result = curPackageId;
@@ -245,6 +305,10 @@ inline u16 commGeneratePackageId() {
 
 // Helper //////////////////////////////////////////////////////////////////////
 
+/*
+ * UNUSED
+ * Flush operation queue and remove storage entries from the warehouse.
+ */
 template <typename TM>
 void commFlushQueueAndWarehouse(CommTaskHandle<TM> *handle, std::vector<CommOperation> &queue,
                                 std::map<StorageId, PackageStorage<TM>> &wh) {
@@ -276,6 +340,10 @@ void commFlushQueueAndWarehouse(CommTaskHandle<TM> *handle, std::vector<CommOper
   wh.clear();
 }
 
+/*
+ * If the memory manager (createData) returns a valid pointer, creates a new
+ * storage entry in the warehouse.
+ */
 template <typename TM, typename CreateDataCB>
 bool commCreateRecvStorage(CommTaskHandle<TM> *handle, StorageId storageId, u8 typeId, CreateDataCB createData) {
   bool status = true;
@@ -307,15 +375,24 @@ bool commCreateRecvStorage(CommTaskHandle<TM> *handle, StorageId storageId, u8 t
 
 // Send ////////////////////////////////////////////////////////////////////////
 
+/*
+ * Interface to MPI_Send.
+ */
 inline void commSend(CommHandle *handle, Header const &header, int dest, Buffer const &buf) {
   MPI_Send(buf.mem, buf.len, MPI_BYTE, dest, std::bit_cast<int>(header), handle->comm);
 }
 
+/*
+ * Interface to MPI_Isend.
+ */
 template <typename RT>
 void commSendAsync(CommHandle *handle, Header const &header, int dest, Buffer const &buf, RT request) {
   MPI_Isend(buf.mem, buf.len, MPI_BYTE, dest, std::bit_cast<int>(header), handle->comm, request);
 }
 
+/*
+ * Send a signal to the given destinations.
+ */
 template <typename TM> void commSendSignal(CommTaskHandle<TM> *handle, std::vector<int> dests, CommSignal signal) {
   Header header = {.channel = handle->channel, .signal = 1, .typeId = 0, .packageId = 0, .bufferId = 0};
 
@@ -327,6 +404,9 @@ template <typename TM> void commSendSignal(CommTaskHandle<TM> *handle, std::vect
   }
 }
 
+/*
+ * Send data to the given destinations.
+ */
 template <typename T, typename TM>
 void commSendData(CommTaskHandle<TM> *handle, std::vector<int> dests, std::shared_ptr<T> data) {
   time_t tpackingStart, tpackingEnd;
@@ -396,6 +476,9 @@ void commSendData(CommTaskHandle<TM> *handle, std::vector<int> dests, std::share
   }
 }
 
+/*
+ * Process the send operation queue.
+ */
 template <typename TM, typename ReturnDataCB>
 void commProcessSendOpsQueue(CommTaskHandle<TM> *handle, ReturnDataCB cb, bool flush = false) {
   std::lock_guard<std::mutex> queuesLock(handle->queues.mutex);
@@ -446,14 +529,25 @@ void commProcessSendOpsQueue(CommTaskHandle<TM> *handle, ReturnDataCB cb, bool f
 
 // Recv ////////////////////////////////////////////////////////////////////////
 
+/*
+ * Interface to MPI_Recv.
+ */
 inline void commRecv(CommHandle *handle, int source, int tag, Buffer const &buf, MPI_Status *status) {
   MPI_Recv(buf.mem, buf.len, MPI_BYTE, source, tag, handle->comm, status);
 }
 
+/*
+ * Interface to MPI_Irecv.
+ */
 inline void commRecvAsync(CommHandle *handle, int source, int tag, Buffer const &buf, MPI_Request *request) {
   MPI_Irecv(buf.mem, buf.len, MPI_BYTE, source, tag, handle->comm, request);
 }
 
+/*
+ * Probe the network. When a valid message has arrived, if it contains a
+ * signal, then receive the signal, otherwise, add a pending recv data request
+ * to the queue.
+ */
 template <typename TM>
 void commRecvSignal(CommTaskHandle<TM> *handle, int &source, CommSignal &signal, Header &header) {
   MPI_Status status;
@@ -490,6 +584,12 @@ void commRecvSignal(CommTaskHandle<TM> *handle, int &source, CommSignal &signal,
   }
 }
 
+/*
+ * Try to create a recv storage and create a recv operation on success.
+ * `commCreateRecvStorage` fails when the memory manager (`createData`) returns
+ * a nullptr (eg the pool is empty). In this case, the pending recv data
+ * requests will remain in the queue util memory is available.
+ */
 template <typename TM, typename CreateDataCB>
 bool commRecvData(CommTaskHandle<TM> *handle, CommPendingRecvData const &prd, CreateDataCB createData) {
   auto packageId = prd.header.packageId;
@@ -523,6 +623,12 @@ bool commRecvData(CommTaskHandle<TM> *handle, CommPendingRecvData const &prd, Cr
   return true;
 }
 
+/*
+ * Process the pending recv data queue.
+ *
+ * FIXME: for now, there is no timeout condition, therefore if the memory
+ *        manager keeps returning nullptr, the program will never terminate.
+ */
 template <typename TM, typename CreateDataCB>
 void commProcessRecvDataQueue(CommTaskHandle<TM> *handle, CreateDataCB createData) {
   std::lock_guard<std::mutex> queuesLock(handle->queues.mutex);
@@ -542,6 +648,10 @@ void commProcessRecvDataQueue(CommTaskHandle<TM> *handle, CreateDataCB createDat
   }
 }
 
+/*
+ * Process the recv operations. This operations are to pending MPI requests
+ * that have an associated recv data storage that will store the buffers.
+ */
 template <typename TM, typename ProcessCB>
 void commProcessRecvOpsQueue(CommTaskHandle<TM> *handle, ProcessCB cb, bool flush = false) {
   std::lock_guard<std::mutex> queuesLock(handle->queues.mutex);
@@ -606,6 +716,9 @@ inline void commFinalize() { MPI_Finalize(); }
 
 // stats exchange //////////////////////////////////////////////////////////////
 
+/*
+ * Send statistics when generating the dot file.
+ */
 template <typename TM> void commSendStats(CommTaskHandle<TM> *handle) {
   std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
   serializer::Bytes buf;
@@ -626,6 +739,9 @@ template <typename TM> void commSendStats(CommTaskHandle<TM> *handle) {
   commSend(handle->comm, header, 0, Buffer{std::bit_cast<char *>(buf.data()), buf.size()});
 }
 
+/*
+ * Gather statistics on the master rank.
+ */
 template <typename TM> std::vector<CommTaskStats> commGatherStats(CommTaskHandle<TM> *handle) {
   int bufSize;
   std::vector<CommTaskStats> stats(handle->comm->nbProcesses);
