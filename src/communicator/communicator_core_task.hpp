@@ -2,6 +2,7 @@
 #define COMMUNICATOR_COMMUNICATOR_CORE_TASK
 #include "../log.hpp"
 #include "comm_tools.hpp"
+#include "communicator_memory_manager.hpp"
 #include "generic_core_task.hpp"
 #include <algorithm>
 #include <condition_variable>
@@ -131,6 +132,10 @@ public:
     return infos;
   }
 
+  void setMemoryManager(std::shared_ptr<tool::CommunicatorMemoryManager<Types...>> mm) {
+      this->mm_ = mm;
+  }
+
 private:
   static void strAppend(std::string &str, auto const &...args) {
     std::ostringstream oss;
@@ -231,16 +236,20 @@ private:
   void sendDeamon() {
     using namespace std::chrono_literals;
     while (!this->canTerminate()) {
-      comm::commProcessSendOpsQueue(this->task()->comm(), []<typename T>(std::shared_ptr<T>) {
-        // TODO: return to memory manager
+      comm::commProcessSendOpsQueue(this->task()->comm(), [&]<typename T>(std::shared_ptr<T> data) {
+        if (mm_) {
+          mm_->returnMemory(std::move(data));
+        }
       });
       std::this_thread::sleep_for(4ms);
     }
     comm::commSendSignal(this->task()->comm(), this->task()->comm()->receivers, comm::CommSignal::Disconnect);
     comm::commProcessSendOpsQueue(
         this->task()->comm(),
-        []<typename T>(std::shared_ptr<T>) {
-          // TODO: return to memory manager
+        [&]<typename T>(std::shared_ptr<T> data) {
+          if (mm_) {
+            mm_->returnMemory(std::move(data));
+          }
         },
         true);
   }
@@ -278,13 +287,14 @@ private:
         break;
       }
       comm::commProcessRecvDataQueue(this->task()->comm(), [&]<typename T>() {
-        static int test_idx = 0;
-        if (test_idx++ % 2 == 0) {
-          logh::warn("create data return nullptr");
-          return std::shared_ptr<T>{nullptr};
+        if (!mm_) {
+          if constexpr (std::is_default_constructible_v<T>) {
+            return std::make_shared<T>();
+          } else {
+            throw std::runtime_error("error: fail to create data in communicator task, provide a memory manager to solve this issue.");
+          }
         }
-        // TODO: get from memory manager
-        return std::make_shared<T>();
+        return mm_->template getMemory<T>();
       });
       comm::commProcessRecvOpsQueue(this->task()->comm(),
                                     [&]<typename T>(std::shared_ptr<T> data) { this->task()->addResult(data); });
@@ -296,6 +306,7 @@ private:
 
 private:
   std::thread deamon_;
+  std::shared_ptr<tool::CommunicatorMemoryManager<Types...>> mm_;
 };
 
 } // end namespace core

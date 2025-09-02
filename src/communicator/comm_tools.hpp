@@ -372,7 +372,7 @@ void commSendData(CommTaskHandle<TM> *handle, std::vector<int> dests, std::share
   }
 
   assert(package.data.size() <= 4);
-  logh::infog(logh::IG::Comm, "COMM", "commSendData: channel = ", (int)handle->channel, " typeId = ", get_id<T>(TM()),
+  logh::infog(logh::IG::Comm, "COMM", "commSendData: channel = ", (int)handle->channel, " typeId = ", (int)get_id<T>(TM()),
               " requestId = ", (int)header.packageId);
 
   handle->wh.mutex.lock();
@@ -622,7 +622,7 @@ template <typename TM> void commSendStats(CommTaskHandle<TM> *handle) {
                                     handle->stats.maxRecvDataQueueSize, handle->stats.maxSendStorageSize,
                                     handle->stats.maxRecvStorageSize, handle->stats.storageStats);
 
-  logh::info("commSendStats: rank = ", handle->comm->rank, " buf size = ", buf.size());
+  logh::infog(logh::IG::Stats, "STATS", "commSendStats: rank = ", handle->comm->rank, " buf size = ", buf.size());
   commSend(handle->comm, header, 0, Buffer{std::bit_cast<char *>(buf.data()), buf.size()});
 }
 
@@ -637,7 +637,7 @@ template <typename TM> std::vector<CommTaskStats> commGatherStats(CommTaskHandle
   stats[0].maxSendStorageSize = handle->stats.maxSendStorageSize;
   stats[0].maxRecvStorageSize = handle->stats.maxRecvStorageSize;
   for (int i = 1; i < handle->comm->nbProcesses; ++i) {
-    logh::info("commGatherStats: rank = ", handle->comm->rank, " target = ", i);
+    logh::infog(logh::IG::Stats, "STATS", "commGatherStats: rank = ", handle->comm->rank, " target = ", i);
     std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
     MPI_Status status;
     MPI_Probe(i, MPI_ANY_TAG, handle->comm->comm, &status);

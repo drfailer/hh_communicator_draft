@@ -21,26 +21,33 @@ struct TestGraph1 : hh::Graph<1, int, int> {
     auto bn0 = std::make_shared<hh::CommunicatorTask<int>>(commHandle, std::vector<int>({0}));
     auto out = std::make_shared<hh::LambdaTask<1, int, int>>("output", 1);
 
+    auto mm = std::make_shared<hh::tool::CommunicatorMemoryManager<int>>();
+    mm->template preallocate<int>(5);
+
+    b01->setMemoryManager(mm);
+    b02->setMemoryManager(mm);
+    bn0->setMemoryManager(mm);
+
     in->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
-      logh::log(stdout, "[TASK]", "in -> ", commHandle->rank);
+      logh::log(stdout, "[TASK] ", "in -> ", commHandle->rank);
       *data += 1;
       DBG(*data);
       self.addResult(data);
     });
     frgn1->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
-      logh::log(stdout, "[TASK]", "frng1 -> ", commHandle->rank);
+      logh::log(stdout, "[TASK] ", "frng1 -> ", commHandle->rank);
       *data += 1;
       DBG(*data);
       self.addResult(data);
     });
     frgn2->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
-      logh::log(stdout, "[TASK]", "frng2 -> ", commHandle->rank);
+      logh::log(stdout, "[TASK] ", "frng2 -> ", commHandle->rank);
       *data *= 2;
       DBG(*data);
       self.addResult(data);
     });
     out->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
-      logh::log(stdout, "[TASK]", "out -> ", commHandle->rank);
+      logh::log(stdout, "[TASK] ", "out -> ", commHandle->rank);
       *data += 1;
       DBG(*data);
       self.addResult(data);

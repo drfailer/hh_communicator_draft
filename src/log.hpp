@@ -33,13 +33,16 @@ enum class IG : int {
     ReceiverEnd,
     Core,
     Comm,
+    Stats,
 };
-#define ACTIVE_INFO_GROUPS \
-    IG::Default, \
-    IG::ReceiverDisconnect, \
-    IG::ReceiverEnd, \
-    IG::Core, \
-    IG::Comm
+#define ACTIVE_INFO_GROUPS IG::Default
+// #define ACTIVE_INFO_GROUPS \
+//     IG::Default, \
+//     IG::ReceiverDisconnect, \
+//     IG::ReceiverEnd, \
+//     IG::Core, \
+//     IG::Comm, \
+//     IG::Stats
 
 } // namespace logh
 

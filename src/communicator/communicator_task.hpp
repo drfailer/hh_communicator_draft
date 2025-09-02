@@ -137,6 +137,10 @@ public:
     throw std::runtime_error("error: the communicator task should not be copied.");
   }
 
+  void setMemoryManager(std::shared_ptr<tool::CommunicatorMemoryManager<Types...>> mm) {
+      this->coreTask_->setMemoryManager(mm);
+  }
+
   using tool::BehaviorTaskMultiSendersTypeDeducer_t<std::tuple<Types...>>::addResult;
 };
 } // namespace hh
