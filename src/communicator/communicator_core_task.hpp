@@ -3,8 +3,11 @@
 #include "../log.hpp"
 #include "comm_tools.hpp"
 #include "generic_core_task.hpp"
+#include <algorithm>
 #include <condition_variable>
+#include <numeric>
 #include <thread>
+#include <type_traits>
 
 namespace hh {
 
@@ -61,15 +64,14 @@ public:
   }
 
   [[nodiscard]] std::string extraPrintingInformation() const override {
-    std::string networkStats;
+    std::string infos;
     std::vector<comm::CommTaskStats> stats;
 
     if (!this->task()->comm()->comm->collectStats) {
-      return networkStats;
+      return infos;
     }
 
     size_t nbProcesses = this->task()->comm()->comm->nbProcesses;
-
     if (this->task()->comm()->comm->rank == 0) {
       stats = comm::commGatherStats(this->task()->comm());
       std::map<comm::StorageId, comm::StorageInfo> storageStats;
@@ -78,6 +80,15 @@ public:
       size_t maxRecvDataQueueSize = 0;
       size_t maxSendStorageSize = 0;
       size_t maxRecvStorageSize = 0;
+      auto transmissionStats = computeTransmissionStats(stats);
+
+      infos.append("nbProcesses = " + std::to_string(nbProcesses) + "\n");
+      std::string receiversStr = "[" + std::to_string(this->task()->comm()->receivers[0]);
+      for (size_t i = 1; i < this->task()->comm()->receivers.size(); ++i) {
+        receiversStr += ", " + std::to_string(this->task()->comm()->receivers[i]);
+      }
+      receiversStr += "]";
+      infos.append("receivers = " + receiversStr + "\n");
 
       for (auto const &stat : stats) {
         maxSendOpsSize = std::max(maxSendOpsSize, stat.maxSendOpsSize);
@@ -86,17 +97,107 @@ public:
         maxSendStorageSize = std::max(maxSendStorageSize, stat.maxSendStorageSize);
         maxRecvStorageSize = std::max(maxRecvStorageSize, stat.maxRecvStorageSize);
       }
-      networkStats.append("maxSendOpsSize = " + std::to_string(maxSendOpsSize) + "\n");
-      networkStats.append("maxRecvOpsSize = " + std::to_string(maxRecvOpsSize) + "\n");
-      networkStats.append("maxRecvDataQueueSize = " + std::to_string(maxRecvDataQueueSize) + "\n");
-      networkStats.append("maxSendStorageSize = " + std::to_string(maxSendStorageSize) + "\n");
-      networkStats.append("maxRecvStorageSize = " + std::to_string(maxRecvStorageSize) + "\n");
-      TODO("collect timing information");
+      infos.append("maxSendOpsSize = " + std::to_string(maxSendOpsSize) + "\n");
+      infos.append("maxRecvOpsSize = " + std::to_string(maxRecvOpsSize) + "\n");
+      infos.append("maxRecvDataQueueSize = " + std::to_string(maxRecvDataQueueSize) + "\n");
+      infos.append("maxSendStorageSize = " + std::to_string(maxSendStorageSize) + "\n");
+      infos.append("maxRecvStorageSize = " + std::to_string(maxRecvStorageSize) + "\n");
+
+      for (comm::u8 typeId = 0; typeId < TypesIds().size; ++typeId) {
+        strAppend(infos, "=== type :: ", (int)typeId, " ===");
+        if (!transmissionStats.contains(typeId)) {
+          continue;
+        }
+        auto transmissionDelays = transmissionStats.at(typeId).transmissionDelays;
+        auto packingDelay = transmissionStats.at(typeId).packingDelay;
+        auto unpackingDelay = transmissionStats.at(typeId).unpackingDelay;
+        auto bandWidth = transmissionStats.at(typeId).bandWdith;
+        strAppend(infos, "packing: ", packingDelay, "us, (count = ", packingDelay.size(), ")");
+        strAppend(infos, "unpacking: ", unpackingDelay, "us, (count = ", unpackingDelay.size(), ")");
+        strAppend(infos, "bandWdith: ", bandWidth, "MB/s");
+        infos.append("transmission: {\n");
+        for (size_t sender = 0; sender < transmissionDelays.size(); ++sender) {
+          if (transmissionDelays[sender].empty()) {
+            continue;
+          }
+          strAppend(infos, "[", sender, "] = ", transmissionDelays[sender]);
+        }
+        infos.append("}\n");
+      }
     } else {
       comm::commSendStats(this->task()->comm());
     }
     // exchange stats
-    return networkStats;
+    return infos;
+  }
+
+private:
+  static void strAppend(std::string &str, auto const &...args) {
+    std::ostringstream oss;
+    (
+        [&] {
+          if constexpr (std::is_same_v<decltype(args), std::vector<double> const &>) {
+            auto avg = computeAvg(args);
+            oss << avg.first << "+-" << avg.second;
+          } else {
+            oss << args;
+          }
+        }(),
+        ...);
+    str.append(oss.str() + "\n");
+  }
+
+  static std::pair<double, double> computeAvg(std::vector<double> const &delays) {
+    double avg =
+        std::accumulate(delays.cbegin(), delays.cend(), .0, [](double acc, auto delay) { return acc + delay; }) /
+        (double)delays.size();
+    double stddev = std::sqrt(std::accumulate(delays.cbegin(), delays.cend(), .0, [&](double acc, auto delay) {
+      double diff = delay - avg;
+      return acc + diff * diff;
+    }));
+    return {1000 * avg, 1000 * stddev};
+  }
+
+  struct TransmissionStat {
+    std::vector<double> packingDelay;
+    std::vector<double> unpackingDelay;
+    std::vector<std::vector<double>> transmissionDelays;
+    std::vector<double> bandWdith;
+  };
+
+  std::map<comm::u8, TransmissionStat> computeTransmissionStats(std::vector<comm::CommTaskStats> const &stats) const {
+    std::map<comm::u8, TransmissionStat> transmissionStats;
+    size_t nbProcesses = this->task()->comm()->comm->nbProcesses;
+
+    for (auto receiverRank : this->task()->comm()->receivers) {
+      for (auto recvStorageStat : stats[receiverRank].storageStats) {
+        comm::StorageId storageId = recvStorageStat.first;
+        comm::StorageInfo recvInfos = recvStorageStat.second;
+        comm::u32 source = storageId.source;
+        comm::u8 typeId = recvInfos.typeId;
+
+        if (stats[source].storageStats.contains(storageId)) {
+          auto sendInfos = stats[source].storageStats.at(storageId);
+          if (!transmissionStats.contains(typeId)) {
+            transmissionStats.insert({
+                typeId,
+                TransmissionStat{
+                    .packingDelay = {},
+                    .unpackingDelay = {},
+                    .transmissionDelays = std::vector<std::vector<double>>(nbProcesses),
+                    .bandWdith = {},
+                },
+            });
+          }
+          auto delay = std::chrono::duration_cast<std::chrono::nanoseconds>(recvInfos.recvtp - sendInfos.sendtp);
+          transmissionStats.at(typeId).transmissionDelays[source].push_back(delay.count());
+          transmissionStats.at(typeId).packingDelay.push_back(sendInfos.packingTime.count());
+          transmissionStats.at(typeId).unpackingDelay.push_back(sendInfos.unpackingTime.count());
+          transmissionStats.at(typeId).bandWdith.push_back((sendInfos.dataSize / (1024. * 1024.)) / delay.count());
+        }
+      }
+    }
+    return transmissionStats;
   }
 
 private:

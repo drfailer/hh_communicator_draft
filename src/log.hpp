@@ -64,7 +64,7 @@ template <typename T> struct clear {
     using type = std::remove_const_t<std::remove_reference_t<T>>;
 };
 
-template <typename T> using clear_t = clear<T>::type;
+template <typename T> using clear_t = typename clear<T>::type;
 
 template <typename T>
 concept Iterable = requires(clear_t<T> t) {

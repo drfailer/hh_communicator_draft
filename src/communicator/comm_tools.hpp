@@ -32,7 +32,7 @@ template <typename... Types> struct variant_type<TypeTable<Types...>> {
   using type = std::variant<std::shared_ptr<Types>...>;
 };
 
-template <typename TM> using variant_type_t = variant_type<TM>::type;
+template <typename TM> using variant_type_t = typename variant_type<TM>::type;
 
 // Comm ////////////////////////////////////////////////////////////////////////
 
@@ -160,10 +160,11 @@ struct StorageInfo {
   time_t sendtp;
   time_t recvtp;
   delay_t packingTime;
-  delay_t unpackintTime;
+  delay_t unpackingTime;
   size_t packingCount;
   size_t unpackingCount;
   u8 typeId;
+  size_t dataSize;
 };
 
 // TODO: we may have to define a limit on the size of storageStats
@@ -359,7 +360,15 @@ void commSendData(CommTaskHandle<TM> *handle, std::vector<int> dests, std::share
   if (handle->comm->collectStats) {
     std::lock_guard<std::mutex> statsLock(handle->stats.mutex);
     handle->stats.storageStats.insert({storageId, StorageInfo{}});
+    handle->stats.storageStats.at(storageId).typeId = header.typeId;
+    handle->stats.storageStats.at(storageId).packingCount += 1;
     handle->stats.storageStats.at(storageId).packingTime += tpackingEnd - tpackingStart;
+
+    size_t dataSize = 0;
+    for (auto buffer : package.data) {
+        dataSize += buffer.len;
+    }
+    handle->stats.storageStats.at(storageId).dataSize = dataSize;
   }
 
   assert(package.data.size() <= 4);
@@ -556,16 +565,21 @@ void commProcessRecvOpsQueue(CommTaskHandle<TM> *handle, ProcessCB cb, bool flus
 
       if (storage.bufferCount >= storage.ttlBufferCount) {
         logh::infog(logh::IG::Comm, "COMM", "commProcessRecvDataQueue: unpacking data");
+        time_t tunpackingStart, tunpackingEnd;
         type_map::apply(TM(), storage.typeId, [&]<typename T>() {
           auto data = std::get<std::shared_ptr<T>>(storage.data);
+          tunpackingStart = std::chrono::system_clock::now();
           commUnpack(storage.package, data);
+          tunpackingEnd = std::chrono::system_clock::now();
           cb.template operator()<T>(data);
         });
         handle->wh.recvStorage.erase(it->storageId);
 
         if (handle->comm->collectStats) {
           std::lock_guard<std::mutex> statsLock(handle->stats.mutex);
-          handle->stats.storageStats.at(it->storageId).sendtp = std::chrono::system_clock::now();
+          handle->stats.storageStats.at(it->storageId).recvtp = std::chrono::system_clock::now();
+          handle->stats.storageStats.at(it->storageId).unpackingTime += tunpackingEnd - tunpackingStart;
+          handle->stats.storageStats.at(it->storageId).unpackingCount += 1;
         }
       }
       handle->queues.recvOps.erase(it);
