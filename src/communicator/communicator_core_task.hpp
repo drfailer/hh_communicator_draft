@@ -72,6 +72,8 @@ public:
       return infos;
     }
 
+    comm::commBarrier();
+
     size_t nbProcesses = this->task()->comm()->comm->nbProcesses;
     if (this->task()->comm()->comm->rank == 0) {
       stats = comm::commGatherStats(this->task()->comm());
@@ -105,10 +107,10 @@ public:
       infos.append("maxRecvStorageSize = " + std::to_string(maxRecvStorageSize) + "\n");
 
       for (comm::u8 typeId = 0; typeId < TypesIds().size; ++typeId) {
-        strAppend(infos, "=== type :: ", (int)typeId, " ===");
         if (!transmissionStats.contains(typeId)) {
           continue;
         }
+        strAppend(infos, "=== type :: ", (int)typeId, " ===");
         auto transmissionDelays = transmissionStats.at(typeId).transmissionDelays;
         auto packingDelay = transmissionStats.at(typeId).packingDelay;
         auto unpackingDelay = transmissionStats.at(typeId).unpackingDelay;
@@ -117,11 +119,14 @@ public:
         strAppend(infos, "unpacking: ", unpackingDelay, "us, (count = ", unpackingDelay.size(), ")");
         strAppend(infos, "bandWdith: ", bandWidth, "MB/s");
         infos.append("transmission: {\n");
-        for (size_t sender = 0; sender < transmissionDelays.size(); ++sender) {
-          if (transmissionDelays[sender].empty()) {
-            continue;
+        for (size_t sender = 0; sender < nbProcesses; ++sender) {
+          for (size_t receiver = 0; receiver < nbProcesses; ++receiver) {
+            if (transmissionDelays[sender * nbProcesses + receiver].empty()) {
+              continue;
+            }
+            strAppend(infos, "[", sender, " -> ", receiver, "] = ", transmissionDelays[sender * nbProcesses + receiver],
+                      "us");
           }
-          strAppend(infos, "[", sender, "] = ", transmissionDelays[sender]);
         }
         infos.append("}\n");
       }
@@ -132,9 +137,7 @@ public:
     return infos;
   }
 
-  void setMemoryManager(std::shared_ptr<tool::CommunicatorMemoryManager<Types...>> mm) {
-      this->mm_ = mm;
-  }
+  void setMemoryManager(std::shared_ptr<tool::CommunicatorMemoryManager<Types...>> mm) { this->mm_ = mm; }
 
 private:
   static void strAppend(std::string &str, auto const &...args) {
@@ -143,7 +146,7 @@ private:
         [&] {
           if constexpr (std::is_same_v<decltype(args), std::vector<double> const &>) {
             auto avg = computeAvg(args);
-            oss << avg.first << "+-" << avg.second;
+            oss << avg.first << " +- " << avg.second;
           } else {
             oss << args;
           }
@@ -152,15 +155,24 @@ private:
     str.append(oss.str() + "\n");
   }
 
-  static std::pair<double, double> computeAvg(std::vector<double> const &delays) {
-    double avg =
-        std::accumulate(delays.cbegin(), delays.cend(), .0, [](double acc, auto delay) { return acc + delay; }) /
-        (double)delays.size();
-    double stddev = std::sqrt(std::accumulate(delays.cbegin(), delays.cend(), .0, [&](double acc, auto delay) {
-      double diff = delay - avg;
-      return acc + diff * diff;
-    }));
-    return {1000 * avg, 1000 * stddev};
+  static std::pair<double, double> computeAvg(std::vector<double> const &values) {
+    if (values.size() == 0) {
+      return {0, 0};
+    }
+    double avg = 0;
+    double stddev = 0;
+
+    for (double value : values) {
+      avg += value;
+    }
+    avg /= values.size();
+
+    for (double value : values) {
+      double diff = value - avg;
+      stddev += diff * diff;
+    }
+    stddev = std::sqrt(stddev / values.size());
+    return {avg / 1000, stddev / 1000};
   }
 
   struct TransmissionStat {
@@ -189,16 +201,16 @@ private:
                 TransmissionStat{
                     .packingDelay = {},
                     .unpackingDelay = {},
-                    .transmissionDelays = std::vector<std::vector<double>>(nbProcesses),
+                    .transmissionDelays = std::vector<std::vector<double>>(nbProcesses * nbProcesses),
                     .bandWdith = {},
                 },
             });
           }
           auto delay = std::chrono::duration_cast<std::chrono::nanoseconds>(recvInfos.recvtp - sendInfos.sendtp);
-          transmissionStats.at(typeId).transmissionDelays[source].push_back(delay.count());
+          transmissionStats.at(typeId).transmissionDelays[source * nbProcesses + receiverRank].push_back(delay.count());
           transmissionStats.at(typeId).packingDelay.push_back(sendInfos.packingTime.count());
-          transmissionStats.at(typeId).unpackingDelay.push_back(sendInfos.unpackingTime.count());
-          transmissionStats.at(typeId).bandWdith.push_back((sendInfos.dataSize / (1024. * 1024.)) / delay.count());
+          transmissionStats.at(typeId).unpackingDelay.push_back(recvInfos.unpackingTime.count());
+          transmissionStats.at(typeId).bandWdith.push_back((sendInfos.dataSize / (1024. * 1024.)) / (delay.count() / 1'000'000'000.));
         }
       }
     }
@@ -238,6 +250,7 @@ private:
     while (!this->canTerminate()) {
       comm::commProcessSendOpsQueue(this->task()->comm(), [&]<typename T>(std::shared_ptr<T> data) {
         if (mm_) {
+          // TODO: if the data deos not come from this mm?
           mm_->returnMemory(std::move(data));
         }
       });
@@ -248,6 +261,7 @@ private:
         this->task()->comm(),
         [&]<typename T>(std::shared_ptr<T> data) {
           if (mm_) {
+            // TODO: if the data deos not come from this mm?
             mm_->returnMemory(std::move(data));
           }
         },
@@ -273,6 +287,11 @@ private:
            !this->task()->comm()->queues.recvDataQueue.empty()) {
       comm::commRecvSignal(this->task()->comm(), source, signal, header);
 
+      if (!isConnected(connections)) {
+        logh::error("non connected task: ops queue size = ", this->task()->comm()->queues.recvOps.size(),
+                    ", data queue size = ", this->task()->comm()->queues.recvDataQueue.size());
+      }
+
       switch (signal) {
       case comm::CommSignal::None:
         break;
@@ -291,7 +310,8 @@ private:
           if constexpr (std::is_default_constructible_v<T>) {
             return std::make_shared<T>();
           } else {
-            throw std::runtime_error("error: fail to create data in communicator task, provide a memory manager to solve this issue.");
+            throw std::runtime_error(
+                "error: fail to create data in communicator task, provide a memory manager to solve this issue.");
           }
         }
         return mm_->template getMemory<T>();
