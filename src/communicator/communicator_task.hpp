@@ -10,9 +10,11 @@ namespace hh {
 // /!\ the sender list will not contain ranks that both send and receive
 
 struct CommunicatorTaskOpt {
-  bool includeSelf = false; // also transmit the data to the current node
-  bool scatter = true;      // scatter the data between receivers, or send the same data to all
+  bool sendersAreReceivers = false; // also transmit the data to the current node
+  bool scatter = true;              // scatter the data between receivers, or send the same data to all
 };
+
+template <typename T> using DestCBType = std::function<std::vector<int>(std::shared_ptr<T>)>;
 
 template <typename TaskType, typename TypesIds, typename Input>
 struct CommunicatorSend : tool::BehaviorMultiExecuteTypeDeducer_t<std::tuple<Input>> {
@@ -22,6 +24,7 @@ private:
   bool isReceiver_ = false;
   std::vector<int> receivers_;
   std::function<void(std::shared_ptr<Input>)> preSendCB_ = nullptr;
+  DestCBType<Input> destCB_ = nullptr;
 
 public:
   CommunicatorSend(TaskType *task) : task_(task) {}
@@ -40,31 +43,48 @@ public:
      */
     if (isReceiver_) {
       task_->addResult(data);
-    } else if (task_->options().scatter) {
-      int receiver = receivers_[rankIdx_];
-      rankIdx_ = (rankIdx_ + 1) % receivers_.size();
-      if (receiver == task_->comm()->comm->rank) {
-        task_->addResult(data);
-      } else {
-        comm::commSendData<Input>(task_->comm(), {receiver}, data);
-      }
     } else {
-      if (task_->options().includeSelf) {
-        task_->addResult(data);
+      if (destCB_) {
+        auto dests = destCB_(data);
+        auto rankIt = std::find(dests.begin(), dests.end(), task_->comm()->comm->rank);
+
+        if (rankIt != dests.end()) {
+          task_->addResult(data);
+          dests.erase(rankIt);
+        }
+        if (!dests.empty()) {
+          comm::commSendData<Input>(task_->comm(), dests, data);
+        }
+      } else {
+        if (task_->options().scatter) {
+          int receiver = receivers_[rankIdx_];
+          rankIdx_ = (rankIdx_ + 1) % receivers_.size();
+          if (receiver == task_->comm()->comm->rank) {
+            task_->addResult(data);
+          } else {
+            comm::commSendData<Input>(task_->comm(), {receiver}, data);
+          }
+        } else {
+          if (task_->options().sendersAreReceivers) {
+            task_->addResult(data);
+          }
+          comm::commSendData(task_->comm(), receivers_, data);
+        }
       }
-      comm::commSendData(task_->comm(), receivers_, data);
     }
   }
 
   void initialize() {
     receivers_ = task_->comm()->receivers;
     isReceiver_ = std::find(receivers_.begin(), receivers_.end(), task_->comm()->comm->rank) != receivers_.end();
-    if (!isReceiver_ && task_->options().includeSelf && task_->options().scatter) {
+    if (!isReceiver_ && task_->options().sendersAreReceivers && task_->options().scatter) {
       receivers_.push_back(task_->comm()->comm->rank);
     }
   }
 
   void preSendCB(std::function<void(std::shared_ptr<Input>)> cb) { preSendCB_ = cb; }
+
+  void destCB(DestCBType<Input> cb) { destCB_ = cb; }
 };
 
 template <typename TasType, typename TypeTable, typename... Inputs> struct CommunicatorMultiSend;
@@ -78,7 +98,11 @@ struct CommunicatorMultiSend<TaskType, TypeTable, std::tuple<Inputs...>>
     CommunicatorSend<TaskType, TypeTable, Input>::preSendCB(cb);
   }
 
-  void initialize() { (CommunicatorSend<TaskType, TypeTable, Inputs>::initialize(), ...); }
+  template <typename Input> void destCB(DestCBType<Input> cb) {
+    ((CommunicatorSend<TaskType, TypeTable, Input> *)this)->destCB(cb);
+  }
+
+  void initialize() { (((CommunicatorSend<TaskType, TypeTable, Inputs> *)this)->initialize(), ...); }
 };
 
 template <typename... Types>
@@ -104,14 +128,13 @@ private:
   CommunicatorTaskOpt options_;
 
 public:
-  explicit CommunicatorTask(comm::CommHandle *commHandle, std::vector<int> const &receivers, bool includeSelf = false,
-                            bool scatter = true, std::string const &name = "CommunicatorTask")
+  explicit CommunicatorTask(comm::CommHandle *commHandle, std::vector<int> const &receivers,
+                            CommunicatorTaskOpt opt = {}, std::string const &name = "CommunicatorTask")
       : behavior::TaskNode(std::make_shared<CoreTaskType>(this, name)), behavior::Copyable<SelfType>(1),
         tool::BehaviorTaskMultiSendersTypeDeducer_t<Outputs>((std::dynamic_pointer_cast<CoreTaskType>(this->core()))),
         CommunicatorMultiSend<CommunicatorTask<Types...>, TypesIds, Inputs>(this),
         coreTask_(std::dynamic_pointer_cast<CoreTaskType>(this->core())),
-        commHandle_(comm::commTaskHandleCreate<TypesIds>(commHandle, receivers)),
-        options_(CommunicatorTaskOpt{includeSelf, scatter}) {
+        commHandle_(comm::commTaskHandleCreate<TypesIds>(commHandle, receivers)), options_(opt) {
     if (coreTask_ == nullptr) {
       throw std::runtime_error("The core used by the task should be a CoreTask.");
     }
@@ -119,9 +142,7 @@ public:
     this->coreTask_->printOptions().font({0xff, 0xff, 0xff, 0xff});
   }
 
-  ~CommunicatorTask() override {
-      comm::commTaskHandleDestroy(commHandle_);
-  }
+  ~CommunicatorTask() override { comm::commTaskHandleDestroy(commHandle_); }
 
   void initialize() override { CommunicatorMultiSend<CommunicatorTask<Types...>, TypesIds, Inputs>::initialize(); }
 
@@ -137,8 +158,9 @@ public:
     throw std::runtime_error("error: the communicator task should not be copied.");
   }
 
-  void setMemoryManager(std::shared_ptr<tool::CommunicatorMemoryManager<Types...>> mm) {
-      this->coreTask_->setMemoryManager(mm);
+  template <typename... MMTypes>
+  void setMemoryManager(std::shared_ptr<tool::CommunicatorMemoryManager<MMTypes...>> mm) {
+    this->coreTask_->setMemoryManager(mm->template convert<Types...>());
   }
 
   using tool::BehaviorTaskMultiSendersTypeDeducer_t<std::tuple<Types...>>::addResult;
