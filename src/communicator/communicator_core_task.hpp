@@ -62,6 +62,9 @@ public:
 
     this->postRun();
     this->wakeUp();
+
+    logh::infog(logh::IG::CoreTerminate, "core terminate", "channel = ", (int)this->task()->comm()->channel,
+                ", rank = ", this->task()->comm()->comm->rank);
   }
 
   [[nodiscard]] std::string extraPrintingInformation() const override {
@@ -248,6 +251,13 @@ private:
   void sendDeamon() {
     using namespace std::chrono_literals;
     while (!this->canTerminate()) {
+        static size_t dbg_idx = 0;
+        if (dbg_idx++ == 4000) {
+            dbg_idx = 0;
+            logh::warn("sender still running: channel = ", (int)this->task()->comm()->channel,
+                       ", rank = ", this->task()->comm()->comm->rank,
+                       ", queue size = ", this->task()->comm()->queues.sendOps.size());
+        }
       comm::commProcessSendOpsQueue(this->task()->comm(), [&]<typename T>(std::shared_ptr<T> data) {
         if (mm_) {
           // TODO: if the data deos not come from this mm?
@@ -257,15 +267,17 @@ private:
       std::this_thread::sleep_for(4ms);
     }
     comm::commSendSignal(this->task()->comm(), this->task()->comm()->receivers, comm::CommSignal::Disconnect);
-    comm::commProcessSendOpsQueue(
-        this->task()->comm(),
-        [&]<typename T>(std::shared_ptr<T> data) {
-          if (mm_) {
-            // TODO: if the data deos not come from this mm?
-            mm_->returnMemory(std::move(data));
-          }
-        },
-        true);
+    logh::infog(logh::IG::SenderDisconnect, "sender disconnect", "channel = ", (int)this->task()->comm()->channel,
+                ", rank = ", this->task()->comm()->comm->rank);
+        comm::commProcessSendOpsQueue(
+            this->task()->comm(),
+            [&]<typename T>(std::shared_ptr<T> data) {
+              if (mm_) {
+                // TODO: if the data deos not come from this mm?
+                mm_->returnMemory(std::move(data));
+              }
+            },
+            true);
   }
 
   void recvDeamon() {
