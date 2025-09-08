@@ -127,9 +127,10 @@ struct Package {
 };
 
 struct Header {
-  u8 channel : 8;     // 256 channels (number of CommTasks)
+  u8 padding : 1;     // must be a positive number... :D
   u8 signal : 1;      // 0 -> data | 1 -> signal
   u8 typeId : 6;      // 64 types (number of types managed by one task)
+  u8 channel : 8;     // 256 channels (number of CommTasks)
   u16 packageId : 14; // 16384 packages
   u8 bufferId : 2;    // 4 buffers per package
 };
@@ -395,7 +396,14 @@ void commSendAsync(CommHandle *handle, Header const &header, int dest, Buffer co
  * Send a signal to the given destinations.
  */
 template <typename TM> void commSendSignal(CommTaskHandle<TM> *handle, std::vector<int> dests, CommSignal signal) {
-  Header header = {.channel = handle->channel, .signal = 1, .typeId = 0, .packageId = 0, .bufferId = 0};
+  Header header = {
+      .padding = 0,
+      .signal = 1,
+      .typeId = 0,
+      .channel = handle->channel,
+      .packageId = 0,
+      .bufferId = 0,
+  };
 
   logh::infog(logh::IG::Comm, "COMM", "commSendSignal: channel = ", (int)handle->channel, " signal = ", (int)signal);
   for (auto dest : dests) {
@@ -413,9 +421,10 @@ void commSendData(CommTaskHandle<TM> *handle, std::vector<int> dests, std::share
   time_t tpackingStart, tpackingEnd;
   u16 packageId = commGeneratePackageId();
   Header header = {
-      .channel = handle->channel,
+      .padding = 0,
       .signal = 0,
       .typeId = type_map::get_id<T>(TM()),
+      .channel = handle->channel,
       .packageId = packageId,
       .bufferId = 0,
   };
@@ -724,9 +733,10 @@ template <typename TM> void commSendStats(CommTaskHandle<TM> *handle) {
   std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
   serializer::Bytes buf;
   Header header = {
-      .channel = handle->channel,
+      .padding = 0,
       .signal = 0,
       .typeId = 0,
+      .channel = handle->channel,
       .packageId = 0,
       .bufferId = 0,
   };
