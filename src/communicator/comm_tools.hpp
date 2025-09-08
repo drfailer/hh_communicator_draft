@@ -187,8 +187,8 @@ inline bool operator<(CommPendingRecvData const &lhs, CommPendingRecvData const 
 }
 
 struct CommQueues {
-  std::vector<CommOperation> sendOps; // send operations (MPI_Request)
-  std::vector<CommOperation> recvOps; // recv operations (MPI_Request)
+  std::vector<CommOperation> sendOps;          // send operations (MPI_Request)
+  std::vector<CommOperation> recvOps;          // recv operations (MPI_Request)
   std::set<CommPendingRecvData> recvDataQueue; // recv data queue (wait for memory manager)
   std::mutex mutex;
 };
@@ -196,7 +196,7 @@ struct CommQueues {
 // Stats container /////////////////////////////////////////////////////////////
 
 using time_t = std::chrono::time_point<std::chrono::system_clock>;
-using delay_t = std::chrono::duration<double>;
+using delay_t = std::chrono::duration<long int, std::ratio<1, 1000000000>>;
 
 struct StorageInfo {
   time_t sendtp;
@@ -256,7 +256,7 @@ template <typename T> Package commPack(std::shared_ptr<T> data) {
   Package package;
 
   if constexpr (requires { data->pack(); }) {
-    package.data = data->pack();
+    package = data->pack();
   } else {
     serializer::Bytes bytes(64, 64);
     size_t size = serializer::serialize<serializer::Serializer<serializer::Bytes>>(bytes, 0, data);
@@ -282,10 +282,10 @@ template <typename T> Package commPackage(std::shared_ptr<T> data) {
  * If the data type is unpackable, call the `unpack` method, otherwise, default
  * to serializer.
  */
-template <typename T> void commUnpack(Package package, std::shared_ptr<T> data) {
-  if constexpr (requires { data->unpack(); }) {
-    data->unpack(package);
-  } else {
+template <typename T> void commUnpack(Package &&package, std::shared_ptr<T> data) {
+  if constexpr (requires { data->unpack(std::move(package)); }) {
+    data->unpack(std::move(package));
+  } else if constexpr (!requires { data->package(); }) {
     serializer::Bytes bytes(std::bit_cast<std::byte *>(package.data.front().mem), package.data.front().len,
                             package.data.front().len);
     serializer::deserialize<serializer::Serializer<serializer::Bytes>>(bytes, 0, data);
@@ -332,7 +332,7 @@ void commFlushQueueAndWarehouse(CommTaskHandle<TM> *handle, std::vector<CommOper
   for (auto it : wh) {
     auto storage = it.second;
     type_map::apply(TM(), storage.typeId, [&]<typename T>() {
-      if constexpr (!requires(T *data) { data->pack(); }) {
+      if constexpr (!requires(T * data) { data->pack(); }) {
         delete[] storage.package.data[0].mem;
       }
     });
@@ -369,6 +369,7 @@ bool commCreateRecvStorage(CommTaskHandle<TM> *handle, StorageId storageId, u8 t
   if (handle->comm->collectStats) {
     std::lock_guard<std::mutex> statsLock(handle->stats.mutex);
     handle->stats.storageStats.insert({storageId, {}});
+    handle->stats.storageStats.at(storageId).typeId = typeId;
   }
   return status;
 }
@@ -440,20 +441,22 @@ void commSendData(CommTaskHandle<TM> *handle, std::vector<int> dests, std::share
   if (handle->comm->collectStats) {
     std::lock_guard<std::mutex> statsLock(handle->stats.mutex);
     handle->stats.storageStats.insert({storageId, StorageInfo{}});
-    handle->stats.storageStats.at(storageId).typeId = header.typeId;
+    handle->stats.storageStats.at(storageId).typeId = storage.typeId;
     handle->stats.storageStats.at(storageId).packingCount += 1;
-    handle->stats.storageStats.at(storageId).packingTime += tpackingEnd - tpackingStart;
+    handle->stats.storageStats.at(storageId).packingTime +=
+        std::chrono::duration_cast<std::chrono::nanoseconds>(tpackingEnd - tpackingStart);
+    handle->stats.storageStats.at(storageId).sendtp = std::chrono::system_clock::now();
 
     size_t dataSize = 0;
     for (auto buffer : package.data) {
-        dataSize += buffer.len;
+      dataSize += buffer.len;
     }
     handle->stats.storageStats.at(storageId).dataSize = dataSize;
   }
 
   assert(package.data.size() <= 4);
-  logh::infog(logh::IG::Comm, "COMM", "commSendData: channel = ", (int)handle->channel, " typeId = ", (int)get_id<T>(TM()),
-              " requestId = ", (int)header.packageId);
+  logh::infog(logh::IG::Comm, "COMM", "commSendData: channel = ", (int)handle->channel,
+              " typeId = ", (int)get_id<T>(TM()), " requestId = ", (int)header.packageId);
 
   handle->wh.mutex.lock();
   handle->wh.sendStorage.insert({storageId, storage});
@@ -505,7 +508,7 @@ void commProcessSendOpsQueue(CommTaskHandle<TM> *handle, ReturnDataCB cb, bool f
 
         if (storage.bufferCount >= storage.ttlBufferCount) {
           type_map::apply(TM(), storage.typeId, [&]<typename T>() {
-            if constexpr (!requires(T *data) { data->pack(); }) {
+            if constexpr (!requires(T * data) { data->pack(); }) {
               // the buffer is dynamically allocated when the data type does not
               // support the 'pack' operation
               delete[] storage.package.data[0].mem;
@@ -513,11 +516,6 @@ void commProcessSendOpsQueue(CommTaskHandle<TM> *handle, ReturnDataCB cb, bool f
             cb.template operator()<T>(std::get<std::shared_ptr<T>>(storage.data));
           });
           handle->wh.sendStorage.erase(it->storageId);
-
-          if (handle->comm->collectStats) {
-            std::lock_guard<std::mutex> statsLock(handle->stats.mutex);
-            handle->stats.storageStats.at(it->storageId).sendtp = std::chrono::system_clock::now();
-          }
         }
         handle->queues.sendOps.erase(it);
       } else {
@@ -658,6 +656,7 @@ void commProcessRecvOpsQueue(CommTaskHandle<TM> *handle, ProcessCB cb, bool flus
   for (auto it = handle->queues.recvOps.begin(); it != handle->queues.recvOps.end();) {
     int flag = 0;
     MPI_Status status;
+
     std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
     MPI_Test(&it->request, &flag, &status);
 
@@ -679,18 +678,20 @@ void commProcessRecvOpsQueue(CommTaskHandle<TM> *handle, ProcessCB cb, bool flus
         type_map::apply(TM(), storage.typeId, [&]<typename T>() {
           auto data = std::get<std::shared_ptr<T>>(storage.data);
           tunpackingStart = std::chrono::system_clock::now();
-          commUnpack(storage.package, data);
+          commUnpack(std::move(storage.package), data);
           tunpackingEnd = std::chrono::system_clock::now();
           cb.template operator()<T>(data);
         });
-        handle->wh.recvStorage.erase(it->storageId);
 
         if (handle->comm->collectStats) {
           std::lock_guard<std::mutex> statsLock(handle->stats.mutex);
           handle->stats.storageStats.at(it->storageId).recvtp = std::chrono::system_clock::now();
-          handle->stats.storageStats.at(it->storageId).unpackingTime += tunpackingEnd - tunpackingStart;
+          handle->stats.storageStats.at(it->storageId).unpackingTime +=
+              std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart);
           handle->stats.storageStats.at(it->storageId).unpackingCount += 1;
         }
+
+        handle->wh.recvStorage.erase(it->storageId);
       }
       handle->queues.recvOps.erase(it);
     } else {
