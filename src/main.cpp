@@ -14,7 +14,7 @@ struct TestGraph1 : hh::Graph<1, int, int> {
   TestGraph1(hh::comm::CommHandle *commHandle) : hh::Graph<1, int, int>("TestGraph1"), commHandle_(commHandle) {
     assert(commHandle->nbProcesses == 3);
     auto in = std::make_shared<hh::LambdaTask<1, int, int>>("input", 1);
-    auto b01 = std::make_shared<hh::CommunicatorTask<int>>(commHandle, std::vector<int>({1}));
+    auto b01 = std::make_shared<hh::CommunicatorTask<int>>(commHandle, std::vector<int>({1}), hh::CommunicatorTaskOpt{});
     auto b02 = std::make_shared<hh::CommunicatorTask<int>>(commHandle, std::vector<int>({2}));
     auto frgn1 = std::make_shared<hh::LambdaTask<1, int, int>>("foreign task", 1);
     auto frgn2 = std::make_shared<hh::LambdaTask<1, int, int>>("foreign task", 1);
@@ -29,27 +29,27 @@ struct TestGraph1 : hh::Graph<1, int, int> {
     bn0->setMemoryManager(mm);
 
     in->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
-      logh::log(stdout, "[TASK] ", "in -> ", commHandle->rank);
+      hh::logh::log(stdout, "[TASK] ", "in -> ", commHandle->rank);
       *data += 1;
-      DBG(*data);
+      HH_DBG(*data);
       self.addResult(data);
     });
     frgn1->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
-      logh::log(stdout, "[TASK] ", "frng1 -> ", commHandle->rank);
+      hh::logh::log(stdout, "[TASK] ", "frng1 -> ", commHandle->rank);
       *data += 1;
-      DBG(*data);
+      HH_DBG(*data);
       self.addResult(data);
     });
     frgn2->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
-      logh::log(stdout, "[TASK] ", "frng2 -> ", commHandle->rank);
+      hh::logh::log(stdout, "[TASK] ", "frng2 -> ", commHandle->rank);
       *data *= 2;
-      DBG(*data);
+      HH_DBG(*data);
       self.addResult(data);
     });
     out->setLambda<int>([commHandle](std::shared_ptr<int> data, auto self) {
-      logh::log(stdout, "[TASK] ", "out -> ", commHandle->rank);
+      hh::logh::log(stdout, "[TASK] ", "out -> ", commHandle->rank);
       *data += 1;
-      DBG(*data);
+      HH_DBG(*data);
       self.addResult(data);
     });
 
@@ -97,7 +97,7 @@ int main(int argc, char **argv) {
   graph.createDotFile(std::to_string(ch->rank) + "test.dot");
   hh::comm::commBarrier();
   if (ch->rank == 0) {
-    DBG(results);
+    HH_DBG(results);
   }
 
   hh::comm::commDestroy(ch);
