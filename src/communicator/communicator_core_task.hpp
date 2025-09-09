@@ -46,27 +46,148 @@ public:
         std::find(receivers.begin(), receivers.end(), this->task()->comm()->comm->rank) != receivers.end();
 
     if (isReceiver) {
-      logh::infog(logh::IG::Core, "core", "start receiver");
+      comm::commInfog(logh::IG::Core, "core", this->task()->comm(), "start receiver");
       this->deamon_ = std::thread(&CommunicatorCoreTask<Types...>::recvDeamon, this);
     } else {
-      logh::infog(logh::IG::Core, "core", "start sender");
+      comm::commInfog(logh::IG::Core, "core", this->task()->comm(), "start sender");
       this->deamon_ = std::thread(&CommunicatorCoreTask<Types...>::sendDeamon, this);
     }
 
     taskLoop();
 
     if (this->deamon_.joinable()) {
-      logh::infog(logh::IG::Core, "core", "join ", isReceiver ? "receiver" : "sender");
+      comm::commInfog(logh::IG::Core, "core", this->task()->comm(), "join ", isReceiver ? "receiver" : "sender");
       this->deamon_.join();
     }
 
     this->postRun();
     this->wakeUp();
 
-    logh::infog(logh::IG::CoreTerminate, "core terminate", "channel = ", (int)this->task()->comm()->channel,
-                ", rank = ", this->task()->comm()->comm->rank);
+    comm::commInfog(logh::IG::CoreTerminate, "core terminate", this->task()->comm());
   }
 
+private:
+  void taskLoop() {
+    using namespace std::chrono_literals;
+    std::chrono::time_point<std::chrono::system_clock> start, finish;
+    std::condition_variable sleepCondition;
+    std::vector<int> receivers;
+    bool canTerminate = false;
+
+    comm::commInfog(logh::IG::CoreTaskLoop, "core task loop", this->task()->comm(),
+                    "start task loop, canTerminate = ", canTerminate);
+
+    // Actual computation loop
+    while (!this->canTerminate()) {
+      // Wait for a data to arrive or termination
+      this->nvtxProfiler()->startRangeWaiting();
+      start = std::chrono::system_clock::now();
+      canTerminate = this->sleep();
+      finish = std::chrono::system_clock::now();
+      this->nvtxProfiler()->endRangeWaiting();
+      this->incrementWaitDuration(std::chrono::duration_cast<std::chrono::nanoseconds>(finish - start));
+
+      comm::commInfog(logh::IG::CoreTaskLoop, "core task loop", this->task()->comm(),
+                      "run task loop, canTerminate = ", canTerminate);
+
+      // If loop can terminate break the loop early
+      if (canTerminate) {
+        break;
+      }
+
+      // Operate the connectedReceivers to get a data and send it to execute
+      this->operateReceivers();
+    }
+  }
+
+  void sendDeamon() {
+    using namespace std::chrono_literals;
+    while (!this->canTerminate()) {
+      static size_t dbg_idx = 0;
+      if (dbg_idx++ == 4000) {
+        dbg_idx = 0;
+        logh::warn("sender still running: channel = ", (int)this->task()->comm()->channel,
+                   ", rank = ", this->task()->comm()->comm->rank,
+                   ", queue size = ", this->task()->comm()->queues.sendOps.size(),
+                   ", hasNotifierConnected = ", this->hasNotifierConnected());
+      }
+      comm::commProcessSendOpsQueue(this->task()->comm(), [&]<typename T>(std::shared_ptr<T> data) {
+        if (mm_) {
+          // TODO: if the data deos not come from this mm?
+          mm_->returnMemory(std::move(data));
+        }
+      });
+      std::this_thread::sleep_for(4ms);
+    }
+    comm::commSendSignal(this->task()->comm(), this->task()->comm()->receivers, comm::CommSignal::Disconnect);
+    comm::commInfog(logh::IG::SenderDisconnect, "sender disconnect", this->task()->comm());
+    comm::commProcessSendOpsQueue(
+        this->task()->comm(),
+        [&]<typename T>(std::shared_ptr<T> data) {
+          if (mm_) {
+            // TODO: if the data deos not come from this mm?
+            mm_->returnMemory(std::move(data));
+          }
+        },
+        true);
+    comm::commInfog(logh::IG::SenderEnd, "sender end", this->task()->comm());
+  }
+
+  void recvDeamon() {
+    using namespace std::chrono_literals;
+    std::vector<bool> connections(this->task()->comm()->comm->nbProcesses, true);
+    int source = -1;
+    comm::CommSignal signal = comm::CommSignal::None;
+    comm::Header header;
+
+    for (auto receiver : this->task()->comm()->receivers) {
+      connections[receiver] = false;
+    }
+
+    // TODO: empty the queue or flush? I think the best here would be to start a
+    //       timer when isConnected is false. After the timer, the thread leaves
+    //       the loops and flushes the queue, however, this should be reported
+    //       as an error in the dot file.
+    while (isConnected(connections) || !this->task()->comm()->queues.recvOps.empty() ||
+           !this->task()->comm()->queues.recvDataQueue.empty()) {
+      comm::commRecvSignal(this->task()->comm(), source, signal, header);
+
+      if (!isConnected(connections)) {
+        logh::error("non connected task: ops queue size = ", this->task()->comm()->queues.recvOps.size(),
+                    ", data queue size = ", this->task()->comm()->queues.recvDataQueue.size());
+      }
+
+      switch (signal) {
+      case comm::CommSignal::None:
+        break;
+      case comm::CommSignal::Disconnect:
+        assert(connections[source] == true);
+        connections[source] = false;
+        comm::commInfog(logh::IG::ReceiverDisconnect, "receiver disconnect", this->task()->comm(), "source = ", source,
+                        ", connections = ", connections);
+        break;
+      case comm::CommSignal::Data:
+        break;
+      }
+      comm::commProcessRecvDataQueue(this->task()->comm(), [&]<typename T>() {
+        if (!mm_) {
+          if constexpr (std::is_default_constructible_v<T>) {
+            return std::make_shared<T>();
+          } else {
+            throw std::runtime_error(
+                "error: fail to create data in communicator task, provide a memory manager to solve this issue.");
+          }
+        }
+        return mm_->template getMemory<T>();
+      });
+      comm::commProcessRecvOpsQueue(this->task()->comm(),
+                                    [&]<typename T>(std::shared_ptr<T> data) { this->task()->addResult(data); });
+      std::this_thread::sleep_for(4ms);
+    }
+    comm::commInfog(logh::IG::ReceiverEnd, "receiver end", this->task()->comm());
+  }
+
+public:
   [[nodiscard]] std::string extraPrintingInformation() const override {
     std::string infos;
     std::vector<comm::CommTaskStats> stats;
@@ -140,8 +261,6 @@ public:
     return infos;
   }
 
-  void setMemoryManager(std::shared_ptr<tool::CommunicatorMemoryManager<Types...>> mm) { this->mm_ = mm; }
-
 private:
   static void strAppend(std::string &str, auto const &...args) {
     std::ostringstream oss;
@@ -213,128 +332,16 @@ private:
           transmissionStats.at(typeId).transmissionDelays[source * nbProcesses + receiverRank].push_back(delay.count());
           transmissionStats.at(typeId).packingDelay.push_back(sendInfos.packingTime.count());
           transmissionStats.at(typeId).unpackingDelay.push_back(recvInfos.unpackingTime.count());
-          transmissionStats.at(typeId).bandWdith.push_back((sendInfos.dataSize / (1024. * 1024.)) / (delay.count() / 1'000'000'000.));
+          transmissionStats.at(typeId).bandWdith.push_back((sendInfos.dataSize / (1024. * 1024.)) /
+                                                           (delay.count() / 1'000'000'000.));
         }
       }
     }
     return transmissionStats;
   }
 
-private:
-  void taskLoop() {
-    using namespace std::chrono_literals;
-    std::chrono::time_point<std::chrono::system_clock> start, finish;
-    std::condition_variable sleepCondition;
-    std::vector<int> receivers;
-    bool canTerminate = false;
-
-    // Actual computation loop
-    while (!this->canTerminate()) {
-      // Wait for a data to arrive or termination
-      this->nvtxProfiler()->startRangeWaiting();
-      start = std::chrono::system_clock::now();
-      canTerminate = this->sleep();
-      finish = std::chrono::system_clock::now();
-      this->nvtxProfiler()->endRangeWaiting();
-      this->incrementWaitDuration(std::chrono::duration_cast<std::chrono::nanoseconds>(finish - start));
-
-      // If loop can terminate break the loop early
-      if (canTerminate) {
-        break;
-      }
-
-      // Operate the connectedReceivers to get a data and send it to execute
-      this->operateReceivers();
-    }
-  }
-
-  void sendDeamon() {
-    using namespace std::chrono_literals;
-    while (!this->canTerminate()) {
-        static size_t dbg_idx = 0;
-        if (dbg_idx++ == 4000) {
-            dbg_idx = 0;
-            logh::warn("sender still running: channel = ", (int)this->task()->comm()->channel,
-                       ", rank = ", this->task()->comm()->comm->rank,
-                       ", queue size = ", this->task()->comm()->queues.sendOps.size());
-        }
-      comm::commProcessSendOpsQueue(this->task()->comm(), [&]<typename T>(std::shared_ptr<T> data) {
-        if (mm_) {
-          // TODO: if the data deos not come from this mm?
-          mm_->returnMemory(std::move(data));
-        }
-      });
-      std::this_thread::sleep_for(4ms);
-    }
-    comm::commSendSignal(this->task()->comm(), this->task()->comm()->receivers, comm::CommSignal::Disconnect);
-    logh::infog(logh::IG::SenderDisconnect, "sender disconnect", "channel = ", (int)this->task()->comm()->channel,
-                ", rank = ", this->task()->comm()->comm->rank);
-        comm::commProcessSendOpsQueue(
-            this->task()->comm(),
-            [&]<typename T>(std::shared_ptr<T> data) {
-              if (mm_) {
-                // TODO: if the data deos not come from this mm?
-                mm_->returnMemory(std::move(data));
-              }
-            },
-            true);
-  }
-
-  void recvDeamon() {
-    using namespace std::chrono_literals;
-    std::vector<bool> connections(this->task()->comm()->comm->nbProcesses, true);
-    int source = -1;
-    comm::CommSignal signal = comm::CommSignal::None;
-    comm::Header header;
-
-    for (auto receiver : this->task()->comm()->receivers) {
-      connections[receiver] = false;
-    }
-
-    // TODO: empty the queue or flush? I think the best here would be to start a
-    //       timer when isConnected is false. After the timer, the thread leaves
-    //       the loops and flushes the queue, however, this should be reported
-    //       as an error in the dot file.
-    while (isConnected(connections) || !this->task()->comm()->queues.recvOps.empty() ||
-           !this->task()->comm()->queues.recvDataQueue.empty()) {
-      comm::commRecvSignal(this->task()->comm(), source, signal, header);
-
-      if (!isConnected(connections)) {
-        logh::error("non connected task: ops queue size = ", this->task()->comm()->queues.recvOps.size(),
-                    ", data queue size = ", this->task()->comm()->queues.recvDataQueue.size());
-      }
-
-      switch (signal) {
-      case comm::CommSignal::None:
-        break;
-      case comm::CommSignal::Disconnect:
-        logh::infog(logh::IG::ReceiverDisconnect, "receiver disconnect", "source = ", source,
-                    " channel = ", (int)this->task()->comm()->channel, " rank = ", this->task()->comm()->comm->rank,
-                    " connections = ", connections);
-        assert(connections[source] == true);
-        connections[source] = false;
-        break;
-      case comm::CommSignal::Data:
-        break;
-      }
-      comm::commProcessRecvDataQueue(this->task()->comm(), [&]<typename T>() {
-        if (!mm_) {
-          if constexpr (std::is_default_constructible_v<T>) {
-            return std::make_shared<T>();
-          } else {
-            throw std::runtime_error(
-                "error: fail to create data in communicator task, provide a memory manager to solve this issue.");
-          }
-        }
-        return mm_->template getMemory<T>();
-      });
-      comm::commProcessRecvOpsQueue(this->task()->comm(),
-                                    [&]<typename T>(std::shared_ptr<T> data) { this->task()->addResult(data); });
-      std::this_thread::sleep_for(4ms);
-    }
-    logh::infog(logh::IG::ReceiverEnd, "receiver end", "channel = ", (int)this->task()->comm()->channel,
-                " rank = ", this->task()->comm()->comm->rank);
-  }
+public:
+  void setMemoryManager(std::shared_ptr<tool::CommunicatorMemoryManager<Types...>> mm) { this->mm_ = mm; }
 
 private:
   std::thread deamon_;

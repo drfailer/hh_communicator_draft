@@ -30,6 +30,8 @@ public:
   CommunicatorSend(TaskType *task) : task_(task) {}
 
   void execute(std::shared_ptr<Input> data) override {
+    logh::infog(logh::IG::CommunicatorTaskExecute, "communicator task execute", "[", (int)task_->comm()->channel,
+                "]: rank = ", task_->comm()->comm->rank, ", isReceiver_ = ", isReceiver_);
     if (preSendCB_) {
       preSendCB_(data);
     }
