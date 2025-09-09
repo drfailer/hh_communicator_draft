@@ -17,7 +17,7 @@ template <typename T> struct MemoryPool {
   std::condition_variable cv;
 
   std::shared_ptr<T> getMemory() {
-    std::unique_lock<std::mutex> poolLock(mutex);
+    std::lock_guard<std::mutex> poolLock(mutex);
 
     if (memory.empty()) {
       return nullptr;
@@ -41,7 +41,7 @@ template <typename T> struct MemoryPool {
   void returnMemory(std::shared_ptr<T> data) {
     std::lock_guard<std::mutex> poolLock(mutex);
     memory.push_back(data);
-    cv.notify_one();
+    cv.notify_all();
   }
 
   void preallocate(size_t size, auto &&...args) {
