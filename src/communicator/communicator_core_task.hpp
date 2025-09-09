@@ -294,7 +294,7 @@ private:
       stddev += diff * diff;
     }
     stddev = std::sqrt(stddev / values.size());
-    return {avg / 1000, stddev / 1000};
+    return {avg, stddev};
   }
 
   struct TransmissionStat {
@@ -329,9 +329,9 @@ private:
             });
           }
           auto delay = std::chrono::duration_cast<std::chrono::nanoseconds>(recvInfos.recvtp - sendInfos.sendtp);
-          transmissionStats.at(typeId).transmissionDelays[source * nbProcesses + receiverRank].push_back(delay.count());
-          transmissionStats.at(typeId).packingDelay.push_back(sendInfos.packingTime.count());
-          transmissionStats.at(typeId).unpackingDelay.push_back(recvInfos.unpackingTime.count());
+          transmissionStats.at(typeId).transmissionDelays[source * nbProcesses + receiverRank].push_back(delay.count() / 1'000'000'000.);
+          transmissionStats.at(typeId).packingDelay.push_back(sendInfos.packingTime.count() / 1'000'000'000.);
+          transmissionStats.at(typeId).unpackingDelay.push_back(recvInfos.unpackingTime.count() / 1'000'000'000.);
           transmissionStats.at(typeId).bandWdith.push_back((sendInfos.dataSize / (1024. * 1024.)) /
                                                            (delay.count() / 1'000'000'000.));
         }
