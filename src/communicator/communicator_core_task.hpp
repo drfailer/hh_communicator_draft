@@ -192,7 +192,7 @@ public:
     std::string infos;
     std::vector<comm::CommTaskStats> stats;
 
-    if (!this->task()->comm()->comm->collectStats) {
+    if (!this->task()->comm()->comm->collectStats || this->task()->comm()->comm->nbProcesses == 1) {
       return infos;
     }
 
