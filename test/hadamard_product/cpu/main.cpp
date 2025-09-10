@@ -1,7 +1,7 @@
 #include "../../../lib/serializer-cpp/serializer/serializer.hpp"
 #include "../../../src/communicator/communicator_core_task.hpp"
 #include "../../../src/communicator/communicator_task.hpp"
-#include "argument_parser.hpp"
+#include "../../common/ap.h"
 #include "log.hpp"
 #include <hedgehog/hedgehog.h>
 #include <iostream>
@@ -348,7 +348,11 @@ Config parseArgs(int argc, char **argv) {
     ap::add_size_t_arg(&ap, "-M", &config.M, 1024);
     ap::add_size_t_arg(&ap, "-N", &config.N, 1024);
     ap::add_size_t_arg(&ap, "-tileSize", &config.tileSize, 32);
-    argument_parser_run(&ap);
+    auto status = argument_parser_run(&ap);
+
+    if (status != ap::ArgumentParserStatus::Ok) {
+        exit(status == ap::ArgumentParserStatus::Help ? 0 : 1);
+    }
 
     logh::info("config = { M = ", config.M, ", N = ", config.N, ", tileSize = ", config.tileSize, " }");
     return config;

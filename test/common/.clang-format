@@ -1,0 +1,41 @@
+IndentWidth: 4
+ColumnLimit: 80
+
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: true
+AlignEscapedNewlines: Right
+AlignOperands: true
+AlignTrailingComments: false
+PackConstructorInitializers: Never
+
+PointerAlignment: Right
+DerivePointerAlignment: false
+
+BraceWrapping:
+  AfterFunction: false # true in C
+  AfterNamespace: false
+  AfterClass: false
+  AfterEnum: false
+  AfterControlStatement: false
+  AfterObjCDeclaration: false
+  AfterStruct: false
+  AfterUnion: false
+  AfterExternBlock: false
+  BeforeCatch: false
+  BeforeElse: false
+  IndentBraces: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: true
+  SplitEmptyNamespace: true
+
+BreakBeforeBraces: Custom
+AlwaysBreakTemplateDeclarations: true
+BreakBeforeBinaryOperators: true
+BreakStringLiterals: false
+
+AllowShortFunctionsOnASingleLine: Empty
+
+IndentCaseLabels: false
+IndentGotoLabels: false
+IndentPPDirectives: None
