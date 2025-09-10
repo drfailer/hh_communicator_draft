@@ -1,0 +1,6 @@
+*.dot
+*.png
+main
+prog
+.cache
+build
