@@ -31,17 +31,26 @@ template <typename T> struct MemoryPool {
     std::unique_lock<std::mutex> poolLock(mutex);
 
     if (memory.empty()) {
+      logh::warn("waiting for memory pool");
       cv.wait(poolLock, [&]() { return !memory.empty(); });
+      logh::warn("end waiting");
     }
     auto data = memory.back();
     memory.pop_back();
     return data;
   }
 
-  void returnMemory(std::shared_ptr<T> data) {
+  bool returnMemory(std::shared_ptr<T> &&data) {
+    if (data.use_count() > 1) {
+      // security so that we don't return any memory that is still referenced.
+      // The `returnMemory` function requires to move the pointer, therefore
+      // the count sould be 1 here.
+      return false;
+    }
     std::lock_guard<std::mutex> poolLock(mutex);
     memory.push_back(data);
     cv.notify_all();
+    return true;
   }
 
   void preallocate(size_t size, auto &&...args) {
@@ -89,7 +98,7 @@ template <typename... Types> struct CommunicatorMemoryManager {
     return pool->getMemoryOrWait();
   }
 
-  template <typename T> void returnMemory(std::shared_ptr<T> data) {
+  template <typename T> bool returnMemory(std::shared_ptr<T> &&data) {
     auto &pool = this->template pool<T>();
 
     // FIXME: there is now way to know if the input data belongs to the mm, therefore we add it anyway for now
@@ -97,7 +106,7 @@ template <typename... Types> struct CommunicatorMemoryManager {
       pool = std::make_shared<MemoryPool<T>>();
     }
 
-    pool->returnMemory(data);
+    return pool->returnMemory(std::move(data));
   }
 
   template <typename... SubsetTypes> std::shared_ptr<CommunicatorMemoryManager<SubsetTypes...>> convert() {
