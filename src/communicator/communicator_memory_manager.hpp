@@ -53,13 +53,6 @@ template <typename T> struct MemoryPool {
       if (!data->canBeRecycle()) {
         return false;
       }
-    } else {
-      if (data.use_count() > 1) {
-        // security so that we don't return any memory that is still referenced.
-        // The `returnMemory` function requires to move the pointer, therefore
-        // the count sould be 1 here.
-        return false;
-      }
     }
     if constexpr (requires { data->cleanMemory(); }) {
       data->cleanMemory();
