@@ -11,23 +11,25 @@ namespace hh {
 
 struct CommunicatorTaskOpt {
   bool sendersAreReceivers = false; // also transmit the data to the current node
-  bool scatter = true;              // scatter the data between receivers, or send the same data to all
+  bool scatter = true; // scatter the data between receivers, or send the same data to all
 };
 
-template <typename T> using DestCBType = std::function<std::vector<int>(std::shared_ptr<T>)>;
+template <typename T>
+using DestCBType = std::function<std::vector<int>(std::shared_ptr<T>)>;
 
 template <typename TaskType, typename TypesIds, typename Input>
 struct CommunicatorSend : tool::BehaviorMultiExecuteTypeDeducer_t<std::tuple<Input>> {
 private:
-  size_t rankIdx_ = 0;
-  TaskType *task_ = nullptr;
-  bool isReceiver_ = false;
-  std::vector<int> receivers_;
+  size_t                                      rankIdx_ = 0;
+  TaskType                                   *task_ = nullptr;
+  bool                                        isReceiver_ = false;
+  std::vector<int>                            receivers_;
   std::function<void(std::shared_ptr<Input>)> preSendCB_ = nullptr;
-  DestCBType<Input> destCB_ = nullptr;
+  DestCBType<Input>                           destCB_ = nullptr;
 
 public:
-  CommunicatorSend(TaskType *task) : task_(task) {}
+  CommunicatorSend(TaskType *task)
+      : task_(task) {}
 
   void execute(std::shared_ptr<Input> data) override {
     logh::infog(logh::IG::CommunicatorTaskExecute, "communicator task execute", "[", (int)task_->comm()->channel,
@@ -84,27 +86,37 @@ public:
     }
   }
 
-  void preSendCB(std::function<void(std::shared_ptr<Input>)> cb) { preSendCB_ = cb; }
+  void preSendCB(std::function<void(std::shared_ptr<Input>)> cb) {
+    preSendCB_ = cb;
+  }
 
-  void destCB(DestCBType<Input> cb) { destCB_ = cb; }
+  void destCB(DestCBType<Input> cb) {
+    destCB_ = cb;
+  }
 };
 
-template <typename TasType, typename TypeTable, typename... Inputs> struct CommunicatorMultiSend;
+template <typename TasType, typename TypeTable, typename... Inputs>
+struct CommunicatorMultiSend;
 
 template <typename TaskType, typename TypeTable, typename... Inputs>
 struct CommunicatorMultiSend<TaskType, TypeTable, std::tuple<Inputs...>>
     : CommunicatorSend<TaskType, TypeTable, Inputs>... {
-  CommunicatorMultiSend(TaskType *task) : CommunicatorSend<TaskType, TypeTable, Inputs>(task)... {}
+  CommunicatorMultiSend(TaskType *task)
+      : CommunicatorSend<TaskType, TypeTable, Inputs>(task)... {}
 
-  template <typename Input> void preSendCB(std::function<void(std::shared_ptr<Input>)> cb) {
+  template <typename Input>
+  void preSendCB(std::function<void(std::shared_ptr<Input>)> cb) {
     CommunicatorSend<TaskType, TypeTable, Input>::preSendCB(cb);
   }
 
-  template <typename Input> void destCB(DestCBType<Input> cb) {
+  template <typename Input>
+  void destCB(DestCBType<Input> cb) {
     ((CommunicatorSend<TaskType, TypeTable, Input> *)this)->destCB(cb);
   }
 
-  void initialize() { (((CommunicatorSend<TaskType, TypeTable, Inputs> *)this)->initialize(), ...); }
+  void initialize() {
+    (((CommunicatorSend<TaskType, TypeTable, Inputs> *)this)->initialize(), ...);
+  }
 };
 
 template <typename... Types>
@@ -126,17 +138,19 @@ private:
 
 private:
   std::shared_ptr<CoreTaskType> const coreTask_ = nullptr;
-  comm::CommTaskHandle<TypesIds> *commHandle_;
-  CommunicatorTaskOpt options_;
+  comm::CommTaskHandle<TypesIds>     *commHandle_;
+  CommunicatorTaskOpt                 options_;
 
 public:
   explicit CommunicatorTask(comm::CommHandle *commHandle, std::vector<int> const &receivers,
                             CommunicatorTaskOpt opt = {}, std::string const &name = "CommunicatorTask")
-      : behavior::TaskNode(std::make_shared<CoreTaskType>(this, name)), behavior::Copyable<SelfType>(1),
-        tool::BehaviorTaskMultiSendersTypeDeducer_t<Outputs>((std::dynamic_pointer_cast<CoreTaskType>(this->core()))),
+      : behavior::TaskNode(std::make_shared<CoreTaskType>(this, name)),
+        behavior::Copyable<SelfType>(1),
         CommunicatorMultiSend<CommunicatorTask<Types...>, TypesIds, Inputs>(this),
+        tool::BehaviorTaskMultiSendersTypeDeducer_t<Outputs>((std::dynamic_pointer_cast<CoreTaskType>(this->core()))),
         coreTask_(std::dynamic_pointer_cast<CoreTaskType>(this->core())),
-        commHandle_(comm::commTaskHandleCreate<TypesIds>(commHandle, receivers)), options_(opt) {
+        commHandle_(comm::commTaskHandleCreate<TypesIds>(commHandle, receivers)),
+        options_(opt) {
     if (coreTask_ == nullptr) {
       throw std::runtime_error("The core used by the task should be a CoreTask.");
     }
@@ -144,13 +158,21 @@ public:
     this->coreTask_->printOptions().font({0xff, 0xff, 0xff, 0xff});
   }
 
-  ~CommunicatorTask() override { comm::commTaskHandleDestroy(commHandle_); }
+  ~CommunicatorTask() override {
+    comm::commTaskHandleDestroy(commHandle_);
+  }
 
-  void initialize() override { CommunicatorMultiSend<CommunicatorTask<Types...>, TypesIds, Inputs>::initialize(); }
+  void initialize() override {
+    CommunicatorMultiSend<CommunicatorTask<Types...>, TypesIds, Inputs>::initialize();
+  }
 
-  [[nodiscard]] comm::CommTaskHandle<TypesIds> *comm() const { return commHandle_; }
+  [[nodiscard]] comm::CommTaskHandle<TypesIds> *comm() const {
+    return commHandle_;
+  }
 
-  [[nodiscard]] CommunicatorTaskOpt options() { return options_; }
+  [[nodiscard]] CommunicatorTaskOpt options() {
+    return options_;
+  }
 
   [[nodiscard]] bool canTerminate() const override {
     return !coreTask_->hasNotifierConnected() && coreTask_->receiversEmpty();
