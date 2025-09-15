@@ -346,6 +346,16 @@ template <typename... Ts> void commInfog(logh::IG ig, std::string const &name, a
   }
 }
 
+inline void checkMPI(int code) {
+    if (code == 0) {
+        return;
+    }
+    char error[100] = {0};
+    int len = 0;
+    MPI_Error_string(code, error, &len);
+    logh::error("mpi error: ", std::string(error, error + len));
+}
+
 /*
  * UNUSED
  * Flush operation queue and remove storage entries from the warehouse.
@@ -357,7 +367,7 @@ void commFlushQueueAndWarehouse(CommTaskHandle<TM> *handle, std::vector<CommOper
 
   for (auto &op : queue) {
     std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
-    MPI_Cancel(&op.request);
+    checkMPI(MPI_Cancel(&op.request));
     requests.push_back(op.request);
   }
 
@@ -366,7 +376,7 @@ void commFlushQueueAndWarehouse(CommTaskHandle<TM> *handle, std::vector<CommOper
     std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
     using namespace std::chrono_literals;
     std::this_thread::sleep_for(4ms);
-    MPI_Testall(requests.size(), requests.data(), &done, MPI_STATUSES_IGNORE);
+    checkMPI(MPI_Testall(requests.size(), requests.data(), &done, MPI_STATUSES_IGNORE));
   } while (!done);
   queue.clear();
 
@@ -422,7 +432,7 @@ bool commCreateRecvStorage(CommTaskHandle<TM> *handle, StorageId storageId, u8 t
  */
 inline void commSend(CommHandle *handle, Header const &header, int dest, Buffer const &buf) {
   int tag = headerToTag(header);
-  MPI_Send(buf.mem, buf.len, MPI_BYTE, dest, tag, handle->comm);
+  checkMPI(MPI_Send(buf.mem, buf.len, MPI_BYTE, dest, tag, handle->comm));
 }
 
 /*
@@ -432,7 +442,7 @@ template <typename RT>
 void commSendAsync(CommHandle *handle, Header const &header, int dest, Buffer const &buf, RT request) {
   int tag = headerToTag(header);
   ;
-  MPI_Isend(buf.mem, buf.len, MPI_BYTE, dest, tag, handle->comm, request);
+  checkMPI(MPI_Isend(buf.mem, buf.len, MPI_BYTE, dest, tag, handle->comm, request));
 }
 
 /*
@@ -550,7 +560,7 @@ void commProcessSendOpsQueue(CommTaskHandle<TM> *handle, ReturnDataCB cb, bool f
       int flag = 0;
       MPI_Status status;
       std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
-      MPI_Test(&it->request, &flag, &status);
+      checkMPI(MPI_Test(&it->request, &flag, &status));
 
       if (flag) {
         std::lock_guard<std::mutex> whLock(handle->wh.mutex);
@@ -583,7 +593,7 @@ void commProcessSendOpsQueue(CommTaskHandle<TM> *handle, ReturnDataCB cb, bool f
  * Interface to MPI_Recv.
  */
 inline void commRecv(CommHandle *handle, int source, int tag, Buffer const &buf, MPI_Status *status) {
-  MPI_Recv(buf.mem, buf.len, MPI_BYTE, source, tag, handle->comm, status);
+  checkMPI(MPI_Recv(buf.mem, buf.len, MPI_BYTE, source, tag, handle->comm, status));
 }
 
 /*
@@ -591,7 +601,7 @@ inline void commRecv(CommHandle *handle, int source, int tag, Buffer const &buf,
  */
 inline void commRecvAsync(CommHandle *handle, int source, Header header, Buffer const &buf, MPI_Request *request) {
   int tag = headerToTag(header);
-  MPI_Irecv(buf.mem, buf.len, MPI_BYTE, source, tag, handle->comm, request);
+  checkMPI(MPI_Irecv(buf.mem, buf.len, MPI_BYTE, source, tag, handle->comm, request));
 }
 
 /*
@@ -607,7 +617,7 @@ void commRecvSignal(CommTaskHandle<TM> *handle, int &source, CommSignal &signal,
   signal = CommSignal::None;
   source = -1;
   std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
-  MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, handle->comm->comm, &flag, &status);
+  checkMPI(MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, handle->comm->comm, &flag, &status));
 
   if (flag) {
     header = tagToHeader(status.MPI_TAG);
@@ -711,7 +721,7 @@ void commProcessRecvOpsQueue(CommTaskHandle<TM> *handle, ProcessCB cb, bool flus
     MPI_Status status;
 
     std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
-    MPI_Test(&it->request, &flag, &status);
+    checkMPI(MPI_Test(&it->request, &flag, &status));
 
     if (handle->comm->collectStats) {
       std::lock_guard<std::mutex> statsLock(handle->stats.mutex);
