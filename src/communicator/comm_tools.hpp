@@ -300,7 +300,8 @@ template <typename T> void commUnpack(Package &&package, std::shared_ptr<T> data
 inline u16 commGeneratePackageId() {
   static u16 curPackageId = 0;
   u16 result = curPackageId;
-  curPackageId = (curPackageId + 1) & 0b0011111111111111; // update the id and make sure it stays on 14 bits
+  curPackageId = (curPackageId + 1) % 16384; // update the id and make sure it stays on 14 bits
+  // curPackageId = (curPackageId + 1) & 0b0011111111111111; // update the id and make sure it stays on 14 bits
   return result;
 }
 
@@ -357,7 +358,6 @@ inline void checkMPI(int code) {
 }
 
 /*
- * UNUSED
  * Flush operation queue and remove storage entries from the warehouse.
  */
 template <typename TM>
@@ -367,6 +367,7 @@ void commFlushQueueAndWarehouse(CommTaskHandle<TM> *handle, std::vector<CommOper
 
   for (auto &op : queue) {
     std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
+    logh::error("request canceled");
     checkMPI(MPI_Cancel(&op.request));
     requests.push_back(op.request);
   }
