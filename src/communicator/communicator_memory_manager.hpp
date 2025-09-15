@@ -50,8 +50,8 @@ struct MemoryPool {
     if constexpr (requires { data->cleanMemory(); }) {
       data->cleanMemory();
     }
-    ++nbReturnMemory;
     std::lock_guard<std::mutex> poolLock(mutex);
+    ++nbReturnMemory;
     memory.push_back(data);
     cv.notify_all();
     return true;
