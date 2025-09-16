@@ -279,10 +279,10 @@ public:
         auto transmissionDelays = transmissionStats.at(typeId).transmissionDelays;
         auto packingDelay = transmissionStats.at(typeId).packingDelay;
         auto unpackingDelay = transmissionStats.at(typeId).unpackingDelay;
-        auto bandWidth = transmissionStats.at(typeId).bandWdith;
+        auto bandWidth = transmissionStats.at(typeId).bandWidth;
         strAppend(infos, "packing: ", packingDelay, "us, (count = ", packingDelay.size(), ")");
         strAppend(infos, "unpacking: ", unpackingDelay, "us, (count = ", unpackingDelay.size(), ")");
-        strAppend(infos, "bandWdith: ", bandWidth, "MB/s");
+        strAppend(infos, "bandWidth: ", bandWidth, "MB/s");
         infos.append("transmission: {\\l");
         for (size_t sender = 0; sender < nbProcesses; ++sender) {
           for (size_t receiver = 0; receiver < nbProcesses; ++receiver) {
@@ -342,7 +342,7 @@ private:
     std::vector<double>              packingDelay;
     std::vector<double>              unpackingDelay;
     std::vector<std::vector<double>> transmissionDelays;
-    std::vector<double>              bandWdith;
+    std::vector<double>              bandWidth;
   };
 
   std::map<comm::u8, TransmissionStat> computeTransmissionStats(std::vector<comm::CommTaskStats> const &stats) const {
@@ -365,7 +365,7 @@ private:
                     .packingDelay = {},
                     .unpackingDelay = {},
                     .transmissionDelays = std::vector<std::vector<double>>(nbProcesses * nbProcesses),
-                    .bandWdith = {},
+                    .bandWidth = {},
                 },
             });
           }
@@ -374,7 +374,7 @@ private:
               delay.count() / 1'000'000'000.);
           transmissionStats.at(typeId).packingDelay.push_back(sendInfos.packingTime.count() / 1'000'000'000.);
           transmissionStats.at(typeId).unpackingDelay.push_back(recvInfos.unpackingTime.count() / 1'000'000'000.);
-          transmissionStats.at(typeId).bandWdith.push_back((sendInfos.dataSize / (1024. * 1024.))
+          transmissionStats.at(typeId).bandWidth.push_back((sendInfos.dataSize / (1024. * 1024.))
                                                            / (delay.count() / 1'000'000'000.));
         }
       }
