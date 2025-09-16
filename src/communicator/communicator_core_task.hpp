@@ -275,7 +275,9 @@ public:
         if (!transmissionStats.contains(typeId)) {
           continue;
         }
-        infos.append("========== type :: " + std::to_string((int)typeId) + " ==========\n");
+        type_map::apply(TypesIds(), typeId, [&]<typename T>() {
+          infos.append("========== " + hh::tool::typeToStr<T>() + " ==========\n");
+        });
         auto transmissionDelays = transmissionStats.at(typeId).transmissionDelays;
         auto packingDelay = transmissionStats.at(typeId).packingDelay;
         auto unpackingDelay = transmissionStats.at(typeId).unpackingDelay;

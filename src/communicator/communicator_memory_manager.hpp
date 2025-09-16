@@ -1,6 +1,7 @@
 #ifndef COMMUNICATOR_COMMUNICATOR_MEMORY_MANAGER
 #define COMMUNICATOR_COMMUNICATOR_MEMORY_MANAGER
 #include "../log.hpp"
+#include "hedgehog/src/tools/meta_functions.h"
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -67,10 +68,10 @@ struct MemoryPool {
   }
 
   std::string extraPrintingInformation() const {
-    // FIXME: GCC bug -> cannot use declval to create the object and print the type
-    return "MemoryPool[" + std::string(typeid(memory.data()).name()) + "]: { " + "preallocatedSize = "
-           + std::to_string(preallocatedSize) + ", nbGetMemory = " + std::to_string(nbGetMemory) + ", nbReturnMemory = "
-           + std::to_string(nbReturnMemory) + ", poolSize = " + std::to_string(memory.size()) + " }";
+    std::string typeStr = hh::tool::typeToStr<T>();
+    return "MemoryPool[" + typeStr + "]: { " + "preallocatedSize = " + std::to_string(preallocatedSize)
+           + ", nbGetMemory = " + std::to_string(nbGetMemory) + ", nbReturnMemory = " + std::to_string(nbReturnMemory)
+           + ", poolSize = " + std::to_string(memory.size()) + " }";
   }
 };
 
