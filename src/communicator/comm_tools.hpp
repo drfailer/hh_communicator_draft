@@ -74,25 +74,29 @@ namespace comm {
 
 // Type map ////////////////////////////////////////////////////////////////////
 
-template <typename... Types> using TypeTable = type_map::TypeMap<unsigned char, Types...>;
+template <typename... Types>
+using TypeTable = type_map::TypeMap<unsigned char, Types...>;
 
-template <typename TM> struct variant_type;
+template <typename TM>
+struct variant_type;
 
-template <typename... Types> struct variant_type<TypeTable<Types...>> {
+template <typename... Types>
+struct variant_type<TypeTable<Types...>> {
   using type = std::variant<std::shared_ptr<Types>...>;
 };
 
-template <typename TM> using variant_type_t = typename variant_type<TM>::type;
+template <typename TM>
+using variant_type_t = typename variant_type<TM>::type;
 
 // Comm ////////////////////////////////////////////////////////////////////////
 
 struct CommHandle {
-  int rank;
-  int nbProcesses;
+  int           rank;
+  int           nbProcesses;
   unsigned char idGenerator;
-  MPI_Comm comm;
-  std::mutex mpiMutex;
-  bool collectStats;
+  MPI_Comm      comm;
+  std::mutex    mpiMutex;
+  bool          collectStats;
 };
 
 inline CommHandle *commCreate(bool collectStats = false) {
@@ -108,7 +112,9 @@ inline CommHandle *commCreate(bool collectStats = false) {
   return handle;
 }
 
-inline void commDestroy(CommHandle *handle) { delete handle; }
+inline void commDestroy(CommHandle *handle) {
+  delete handle;
+}
 
 // transmission data types /////////////////////////////////////////////////////
 
@@ -119,7 +125,7 @@ using u8 = unsigned char;
 
 struct Buffer {
   char *mem;
-  u64 len;
+  u64   len;
 };
 
 struct Package {
@@ -127,12 +133,12 @@ struct Package {
 };
 
 struct Header {
-  u8 padding : 1;     // must be a positive number... :D
-  u8 signal : 1;      // 0 -> data | 1 -> signal
-  u8 typeId : 6;      // 64 types (number of types managed by one task)
-  u8 channel : 8;     // 256 channels (number of CommTasks)
+  u8  padding : 1; // must be a positive number... :D
+  u8  signal : 1; // 0 -> data | 1 -> signal
+  u8  typeId : 6; // 64 types (number of types managed by one task)
+  u8  channel : 8; // 256 channels (number of CommTasks)
   u16 packageId : 14; // 16384 packages
-  u8 bufferId : 2;    // 4 buffers per package
+  u8  bufferId : 2; // 4 buffers per package
 };
 static_assert(sizeof(Header) <= sizeof(u32));
 
@@ -154,31 +160,33 @@ inline bool operator<(StorageId const &lhs, StorageId const &rhs) {
   return std::bit_cast<u64>(lhs) < std::bit_cast<u64>(rhs);
 }
 
-template <typename TM> struct PackageStorage {
-  Package package;
-  u64 bufferCount;
-  u64 ttlBufferCount;
-  u8 typeId;
+template <typename TM>
+struct PackageStorage {
+  Package            package;
+  u64                bufferCount;
+  u64                ttlBufferCount;
+  u8                 typeId;
   variant_type_t<TM> data;
 };
 
-template <typename TM> struct PackageWarehouse {
+template <typename TM>
+struct PackageWarehouse {
   std::map<StorageId, PackageStorage<TM>> sendStorage;
   std::map<StorageId, PackageStorage<TM>> recvStorage;
-  std::mutex mutex;
+  std::mutex                              mutex;
 };
 
 // Queues //////////////////////////////////////////////////////////////////////
 
 struct CommOperation {
-  u16 packageId;
-  u8 bufferId;
+  u16         packageId;
+  u8          bufferId;
   MPI_Request request;
-  StorageId storageId;
+  StorageId   storageId;
 };
 
 struct CommPendingRecvData {
-  int source;
+  int    source;
   Header header;
 };
 
@@ -188,10 +196,10 @@ inline bool operator<(CommPendingRecvData const &lhs, CommPendingRecvData const 
 }
 
 struct CommQueues {
-  std::vector<CommOperation> sendOps;          // send operations (MPI_Request)
-  std::vector<CommOperation> recvOps;          // recv operations (MPI_Request)
+  std::vector<CommOperation>    sendOps; // send operations (MPI_Request)
+  std::vector<CommOperation>    recvOps; // recv operations (MPI_Request)
   std::set<CommPendingRecvData> createDataQueue; // wait for memory manager
-  std::mutex mutex;
+  std::mutex                    mutex;
 };
 
 // Stats container /////////////////////////////////////////////////////////////
@@ -200,52 +208,59 @@ using time_t = std::chrono::time_point<std::chrono::system_clock>;
 using delay_t = std::chrono::duration<long int, std::ratio<1, 1000000000>>;
 
 struct StorageInfo {
-  time_t sendtp;
-  time_t recvtp;
+  time_t  sendtp;
+  time_t  recvtp;
   delay_t packingTime;
   delay_t unpackingTime;
-  size_t packingCount;
-  size_t unpackingCount;
-  u8 typeId;
-  size_t dataSize;
+  size_t  packingCount;
+  size_t  unpackingCount;
+  u8      typeId;
+  size_t  dataSize;
 };
 
 // TODO: we may have to define a limit on the size of storageStats
 struct CommTaskStats {
   std::map<StorageId, StorageInfo> storageStats;
-  size_t maxSendOpsSize;
-  size_t maxRecvOpsSize;
-  size_t maxRecvDataQueueSize;
-  size_t maxSendStorageSize;
-  size_t maxRecvStorageSize;
-  std::mutex mutex;
+  size_t                           maxSendOpsSize;
+  size_t                           maxRecvOpsSize;
+  size_t                           maxCreateDataQueueSize;
+  size_t                           maxSendStorageSize;
+  size_t                           maxRecvStorageSize;
+  std::mutex                       mutex;
 };
 
 // Task Handle /////////////////////////////////////////////////////////////////
 
-template <typename TM> struct CommTaskHandle {
-  CommHandle *comm;
-  unsigned char channel;
-  std::vector<int> receivers;
-  CommQueues queues;
+template <typename TM>
+struct CommTaskHandle {
+  CommHandle          *comm;
+  unsigned char        channel;
+  std::vector<int>     receivers;
+  CommQueues           queues;
   PackageWarehouse<TM> wh;
-  CommTaskStats stats;
+  CommTaskStats        stats;
+  std::vector<size_t>  packagesCount;
 };
 
-template <typename TM> CommTaskHandle<TM> *commTaskHandleCreate(CommHandle *handle, std::vector<int> const &receivers) {
+template <typename TM>
+CommTaskHandle<TM> *commTaskHandleCreate(CommHandle *handle, std::vector<int> const &receivers) {
   CommTaskHandle<TM> *taskHandle = new CommTaskHandle<TM>();
   taskHandle->comm = handle;
   taskHandle->channel = ++handle->idGenerator;
   taskHandle->receivers = receivers;
   taskHandle->stats.maxSendOpsSize = 0;
   taskHandle->stats.maxRecvOpsSize = 0;
-  taskHandle->stats.maxRecvDataQueueSize = 0;
+  taskHandle->stats.maxCreateDataQueueSize = 0;
   taskHandle->stats.maxSendStorageSize = 0;
   taskHandle->stats.maxRecvStorageSize = 0;
+  taskHandle->packagesCount = std::vector<size_t>(handle->nbProcesses, 0);
   return taskHandle;
 }
 
-template <typename TM> void commTaskHandleDestroy(CommTaskHandle<TM> *taskHandle) { delete taskHandle; }
+template <typename TM>
+void commTaskHandleDestroy(CommTaskHandle<TM> *taskHandle) {
+  delete taskHandle;
+}
 
 // Packing functions ///////////////////////////////////////////////////////////
 
@@ -253,15 +268,16 @@ template <typename TM> void commTaskHandleDestroy(CommTaskHandle<TM> *taskHandle
  * If the data type is packable, the use the `pack` function, otherwise,
  * default to serializer.
  */
-template <typename T> Package commPack(std::shared_ptr<T> data) {
+template <typename T>
+Package commPack(std::shared_ptr<T> data) {
   Package package;
 
   if constexpr (requires { data->pack(); }) {
     package = data->pack();
   } else {
     serializer::Bytes bytes(64, 64);
-    size_t size = serializer::serialize<serializer::Serializer<serializer::Bytes>>(bytes, 0, data);
-    Buffer buf = Buffer{.mem = bytes.dropMem<char *>(), .len = size};
+    size_t            size = serializer::serialize<serializer::Serializer<serializer::Bytes>>(bytes, 0, data);
+    Buffer            buf = Buffer{.mem = bytes.dropMem<char *>(), .len = size};
     package.data.push_back(buf);
   }
   return package;
@@ -271,7 +287,8 @@ template <typename T> Package commPack(std::shared_ptr<T> data) {
  * If the data type is packable, it should implement a `package` method that
  * returns the package memory. Otherwise, allocate a buffer on the heap.
  */
-template <typename T> Package commPackage(std::shared_ptr<T> data) {
+template <typename T>
+Package commPackage(std::shared_ptr<T> data) {
   if constexpr (requires { data->package(); }) {
     return data->package();
   } else {
@@ -283,7 +300,8 @@ template <typename T> Package commPackage(std::shared_ptr<T> data) {
  * If the data type is unpackable, call the `unpack` method, otherwise, default
  * to serializer.
  */
-template <typename T> void commUnpack(Package &&package, std::shared_ptr<T> data) {
+template <typename T>
+void commUnpack(Package &&package, std::shared_ptr<T> data) {
   if constexpr (requires { data->unpack(std::move(package)); }) {
     data->unpack(std::move(package));
   } else if constexpr (!requires { data->package(); }) {
@@ -299,7 +317,7 @@ template <typename T> void commUnpack(Package &&package, std::shared_ptr<T> data
  */
 inline u16 commGeneratePackageId() {
   static u16 curPackageId = 0;
-  u16 result = curPackageId;
+  u16        result = curPackageId;
   curPackageId = (curPackageId + 1) % 16384; // update the id and make sure it stays on 14 bits
   // curPackageId = (curPackageId + 1) & 0b0011111111111111; // update the id and make sure it stays on 14 bits
   return result;
@@ -309,7 +327,7 @@ inline u16 commGeneratePackageId() {
 
 inline void dbg_print_binary(int i) {
   std::string str = "0b00000000000000000000000000000000";
-  size_t idx = 0;
+  size_t      idx = 0;
 
   while (idx < 32) {
     str[str.size() - idx - 1] = (i >> idx) % 2 == 0 ? '0' : '1';
@@ -339,7 +357,8 @@ inline Header tagToHeader(int tag) {
   return header;
 }
 
-template <typename... Ts> void commInfog(logh::IG ig, std::string const &name, auto handle, Ts &&...args) {
+template <typename... Ts>
+void commInfog(logh::IG ig, std::string const &name, auto handle, Ts &&...args) {
   if constexpr (sizeof...(Ts)) {
     logh::infog(ig, name, "[", (int)handle->channel, "]: rank = ", handle->comm->rank, ", ", std::forward<Ts>(args)...);
   } else {
@@ -348,13 +367,13 @@ template <typename... Ts> void commInfog(logh::IG ig, std::string const &name, a
 }
 
 inline void checkMPI(int code) {
-    if (code == 0) {
-        return;
-    }
-    char error[100] = {0};
-    int len = 0;
-    MPI_Error_string(code, error, &len);
-    logh::error("mpi error: ", std::string(error, error + len));
+  if (code == 0) {
+    return;
+  }
+  char error[100] = {0};
+  int  len = 0;
+  MPI_Error_string(code, error, &len);
+  logh::error("mpi error: ", std::string(error, error + len));
 }
 
 /*
@@ -407,7 +426,7 @@ bool commCreateRecvStorage(CommTaskHandle<TM> *handle, StorageId storageId, u8 t
       status = false;
       return;
     }
-    auto package = commPackage(data);
+    auto               package = commPackage(data);
     PackageStorage<TM> storage{
         .package = package,
         .bufferCount = 0,
@@ -449,7 +468,8 @@ void commSendAsync(CommHandle *handle, Header const &header, int dest, Buffer co
 /*
  * Send a signal to the given destinations.
  */
-template <typename TM> void commSendSignal(CommTaskHandle<TM> *handle, std::vector<int> dests, CommSignal signal) {
+template <typename TM>
+void commSendSignal(CommTaskHandle<TM> *handle, std::vector<int> dests, CommSignal signal) {
   Header header = {
       .padding = 0,
       .signal = 1,
@@ -458,12 +478,18 @@ template <typename TM> void commSendSignal(CommTaskHandle<TM> *handle, std::vect
       .packageId = 0,
       .bufferId = 0,
   };
+  char buf[100] = {(char)signal};
+  u64  len = 1;
 
   comm::commInfog(logh::IG::Comm, "comm", handle, "signal = ", (int)signal);
   for (auto dest : dests) {
-    char buf[1] = {(char)signal};
+    if (signal == CommSignal::Disconnect) {
+      size_t size = sizeof(handle->packagesCount[dest]);
+      std::memcpy(&buf[1], &handle->packagesCount[dest], size);
+      len = 1 + size;
+    }
     std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
-    commSend(handle->comm, header, dest, Buffer{buf, 1});
+    commSend(handle->comm, header, dest, Buffer{buf, len});
   }
 }
 
@@ -473,7 +499,7 @@ template <typename TM> void commSendSignal(CommTaskHandle<TM> *handle, std::vect
 template <typename T, typename TM>
 void commSendData(CommTaskHandle<TM> *handle, std::vector<int> dests, std::shared_ptr<T> data) {
   time_t tpackingStart, tpackingEnd;
-  u16 packageId = commGeneratePackageId();
+  u16    packageId = commGeneratePackageId();
   Header header = {
       .padding = 0,
       .signal = 0,
@@ -506,8 +532,8 @@ void commSendData(CommTaskHandle<TM> *handle, std::vector<int> dests, std::share
     handle->stats.storageStats.insert({storageId, StorageInfo{}});
     handle->stats.storageStats.at(storageId).typeId = storage.typeId;
     handle->stats.storageStats.at(storageId).packingCount += 1;
-    handle->stats.storageStats.at(storageId).packingTime +=
-        std::chrono::duration_cast<std::chrono::nanoseconds>(tpackingEnd - tpackingStart);
+    handle->stats.storageStats.at(storageId).packingTime
+        += std::chrono::duration_cast<std::chrono::nanoseconds>(tpackingEnd - tpackingStart);
     handle->stats.storageStats.at(storageId).sendtp = std::chrono::system_clock::now();
 
     size_t dataSize = 0;
@@ -525,10 +551,10 @@ void commSendData(CommTaskHandle<TM> *handle, std::vector<int> dests, std::share
   handle->wh.sendStorage.insert({storageId, storage});
   handle->wh.mutex.unlock();
 
-  // TODO: how do we want to order the loops?
-  for (size_t i = 0; i < package.data.size(); ++i) {
-    header.bufferId = (u8)i;
-    for (auto dest : dests) {
+  for (auto dest : dests) {
+    ++handle->packagesCount[dest];
+    for (size_t i = 0; i < package.data.size(); ++i) {
+      header.bufferId = (u8)i;
       std::lock_guard<std::mutex> queuesLock(handle->queues.mutex);
       handle->queues.sendOps.push_back(CommOperation{
           .packageId = packageId,
@@ -558,8 +584,8 @@ void commProcessSendOpsQueue(CommTaskHandle<TM> *handle, ReturnDataCB cb, bool f
 
   do {
     for (auto it = handle->queues.sendOps.begin(); it != handle->queues.sendOps.end();) {
-      int flag = 0;
-      MPI_Status status;
+      int                         flag = 0;
+      MPI_Status                  status;
       std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
       checkMPI(MPI_Test(&it->request, &flag, &status));
 
@@ -611,9 +637,9 @@ inline void commRecvAsync(CommHandle *handle, int source, Header header, Buffer 
  * to the queue.
  */
 template <typename TM>
-void commRecvSignal(CommTaskHandle<TM> *handle, int &source, CommSignal &signal, Header &header) {
+void commRecvSignal(CommTaskHandle<TM> *handle, int &source, CommSignal &signal, Header &header, Buffer &buf) {
   MPI_Status status;
-  int flag = false;
+  int        flag = false;
 
   signal = CommSignal::None;
   source = -1;
@@ -635,10 +661,9 @@ void commRecvSignal(CommTaskHandle<TM> *handle, int &source, CommSignal &signal,
       });
       signal = CommSignal::Data;
     } else {
-      char buf[1];
       // TODO: do we want async here?
-      commRecv(handle->comm, status.MPI_SOURCE, status.MPI_TAG, Buffer{buf, 1}, &status);
-      signal = (CommSignal)buf[0];
+      commRecv(handle->comm, status.MPI_SOURCE, status.MPI_TAG, buf, &status);
+      signal = (CommSignal)buf.mem[0];
     }
     source = status.MPI_SOURCE;
     comm::commInfog(logh::IG::Comm, "comm", handle, "commRecvSignal -> ", " source = ", status.MPI_SOURCE,
@@ -697,8 +722,8 @@ void commProcessRecvDataQueue(CommTaskHandle<TM> *handle, CreateDataCB createDat
 
   if (handle->comm->collectStats) {
     std::lock_guard<std::mutex> statsLock(handle->stats.mutex);
-    handle->stats.maxRecvDataQueueSize =
-        std::max(handle->stats.maxRecvDataQueueSize, handle->queues.createDataQueue.size());
+    handle->stats.maxCreateDataQueueSize
+        = std::max(handle->stats.maxCreateDataQueueSize, handle->queues.createDataQueue.size());
   }
 
   for (auto it = handle->queues.createDataQueue.begin(); it != handle->queues.createDataQueue.end();) {
@@ -718,7 +743,7 @@ template <typename TM, typename ProcessCB>
 void commProcessRecvOpsQueue(CommTaskHandle<TM> *handle, ProcessCB cb, bool flush = false) {
   std::lock_guard<std::mutex> queuesLock(handle->queues.mutex);
   for (auto it = handle->queues.recvOps.begin(); it != handle->queues.recvOps.end();) {
-    int flag = 0;
+    int        flag = 0;
     MPI_Status status;
 
     std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
@@ -750,8 +775,8 @@ void commProcessRecvOpsQueue(CommTaskHandle<TM> *handle, ProcessCB cb, bool flus
         if (handle->comm->collectStats) {
           std::lock_guard<std::mutex> statsLock(handle->stats.mutex);
           handle->stats.storageStats.at(it->storageId).recvtp = std::chrono::system_clock::now();
-          handle->stats.storageStats.at(it->storageId).unpackingTime +=
-              std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart);
+          handle->stats.storageStats.at(it->storageId).unpackingTime
+              += std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart);
           handle->stats.storageStats.at(it->storageId).unpackingCount += 1;
         }
 
@@ -770,35 +795,40 @@ void commProcessRecvOpsQueue(CommTaskHandle<TM> *handle, ProcessCB cb, bool flus
 
 // Other functions /////////////////////////////////////////////////////////////
 
-inline void commBarrier() { MPI_Barrier(MPI_COMM_WORLD); }
+inline void commBarrier() {
+  MPI_Barrier(MPI_COMM_WORLD);
+}
 
 inline void commInit(int argc, char **argv) {
   int32_t provided = 0;
   MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
 }
 
-inline void commFinalize() { MPI_Finalize(); }
+inline void commFinalize() {
+  MPI_Finalize();
+}
 
 // stats exchange //////////////////////////////////////////////////////////////
 
 /*
  * Send statistics when generating the dot file.
  */
-template <typename TM> void commSendStats(CommTaskHandle<TM> *handle) {
+template <typename TM>
+void commSendStats(CommTaskHandle<TM> *handle) {
   std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
-  serializer::Bytes buf;
-  Header header = {
-      .padding = 0,
-      .signal = 0,
-      .typeId = 0,
-      .channel = handle->channel,
-      .packageId = 0,
-      .bufferId = 0,
+  serializer::Bytes           buf;
+  Header                      header = {
+                           .padding = 0,
+                           .signal = 0,
+                           .typeId = 0,
+                           .channel = handle->channel,
+                           .packageId = 0,
+                           .bufferId = 0,
   };
 
   using Serializer = serializer::Serializer<serializer::Bytes>;
   serializer::serialize<Serializer>(buf, 0, handle->stats.maxSendOpsSize, handle->stats.maxRecvOpsSize,
-                                    handle->stats.maxRecvDataQueueSize, handle->stats.maxSendStorageSize,
+                                    handle->stats.maxCreateDataQueueSize, handle->stats.maxSendStorageSize,
                                     handle->stats.maxRecvStorageSize, handle->stats.storageStats);
   comm::commInfog(logh::IG::Stats, "stats", handle, "commSendStats -> ", " buf size = ", buf.size());
   commSend(handle->comm, header, 0, Buffer{std::bit_cast<char *>(buf.data()), buf.size()});
@@ -807,20 +837,21 @@ template <typename TM> void commSendStats(CommTaskHandle<TM> *handle) {
 /*
  * Gather statistics on the master rank.
  */
-template <typename TM> std::vector<CommTaskStats> commGatherStats(CommTaskHandle<TM> *handle) {
-  int bufSize;
+template <typename TM>
+std::vector<CommTaskStats> commGatherStats(CommTaskHandle<TM> *handle) {
+  int                        bufSize;
   std::vector<CommTaskStats> stats(handle->comm->nbProcesses);
 
   stats[0].storageStats = std::move(handle->stats.storageStats);
   stats[0].maxSendOpsSize = handle->stats.maxSendOpsSize;
   stats[0].maxRecvOpsSize = handle->stats.maxRecvOpsSize;
-  stats[0].maxRecvDataQueueSize = handle->stats.maxRecvDataQueueSize;
+  stats[0].maxCreateDataQueueSize = handle->stats.maxCreateDataQueueSize;
   stats[0].maxSendStorageSize = handle->stats.maxSendStorageSize;
   stats[0].maxRecvStorageSize = handle->stats.maxRecvStorageSize;
   for (int i = 1; i < handle->comm->nbProcesses; ++i) {
     comm::commInfog(logh::IG::Stats, "stats", handle, "commGatherStats -> ", " target = ", i);
     std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
-    MPI_Status status;
+    MPI_Status                  status;
     MPI_Probe(i, MPI_ANY_TAG, handle->comm->comm, &status);
     MPI_Get_count(&status, MPI_BYTE, &bufSize);
 
@@ -829,7 +860,7 @@ template <typename TM> std::vector<CommTaskStats> commGatherStats(CommTaskHandle
 
     using Serializer = serializer::Serializer<serializer::Bytes>;
     serializer::deserialize<Serializer>(buf, 0, stats[i].maxSendOpsSize, stats[i].maxRecvOpsSize,
-                                        stats[i].maxRecvDataQueueSize, stats[i].maxSendStorageSize,
+                                        stats[i].maxCreateDataQueueSize, stats[i].maxSendStorageSize,
                                         stats[i].maxRecvStorageSize, stats[i].storageStats);
   }
   return stats;

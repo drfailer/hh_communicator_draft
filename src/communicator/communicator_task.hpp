@@ -138,18 +138,16 @@ private:
 
 private:
   std::shared_ptr<CoreTaskType> const coreTask_ = nullptr;
-  comm::CommTaskHandle<TypesIds>     *commHandle_;
   CommunicatorTaskOpt                 options_;
 
 public:
   explicit CommunicatorTask(comm::CommHandle *commHandle, std::vector<int> const &receivers,
                             CommunicatorTaskOpt opt = {}, std::string const &name = "CommunicatorTask")
-      : behavior::TaskNode(std::make_shared<CoreTaskType>(this, name)),
+      : behavior::TaskNode(std::make_shared<CoreTaskType>(this, commHandle, receivers, name)),
         behavior::Copyable<SelfType>(1),
         CommunicatorMultiSend<CommunicatorTask<Types...>, TypesIds, Inputs>(this),
         tool::BehaviorTaskMultiSendersTypeDeducer_t<Outputs>((std::dynamic_pointer_cast<CoreTaskType>(this->core()))),
         coreTask_(std::dynamic_pointer_cast<CoreTaskType>(this->core())),
-        commHandle_(comm::commTaskHandleCreate<TypesIds>(commHandle, receivers)),
         options_(opt) {
     if (coreTask_ == nullptr) {
       throw std::runtime_error("The core used by the task should be a CoreTask.");
@@ -158,16 +156,12 @@ public:
     this->coreTask_->printOptions().font({0xff, 0xff, 0xff, 0xff});
   }
 
-  ~CommunicatorTask() override {
-    comm::commTaskHandleDestroy(commHandle_);
-  }
-
   void initialize() override {
     CommunicatorMultiSend<CommunicatorTask<Types...>, TypesIds, Inputs>::initialize();
   }
 
   [[nodiscard]] comm::CommTaskHandle<TypesIds> *comm() const {
-    return commHandle_;
+    return coreTask_->comm();
   }
 
   [[nodiscard]] CommunicatorTaskOpt options() {
