@@ -190,7 +190,7 @@ inline bool operator<(CommPendingRecvData const &lhs, CommPendingRecvData const 
 struct CommQueues {
   std::vector<CommOperation> sendOps;          // send operations (MPI_Request)
   std::vector<CommOperation> recvOps;          // recv operations (MPI_Request)
-  std::set<CommPendingRecvData> recvDataQueue; // recv data queue (wait for memory manager)
+  std::set<CommPendingRecvData> createDataQueue; // wait for memory manager
   std::mutex mutex;
 };
 
@@ -629,7 +629,7 @@ void commRecvSignal(CommTaskHandle<TM> *handle, int &source, CommSignal &signal,
 
     if (header.signal == 0) {
       std::lock_guard<std::mutex> queuesLock(handle->queues.mutex);
-      handle->queues.recvDataQueue.insert(CommPendingRecvData{
+      handle->queues.createDataQueue.insert(CommPendingRecvData{
           .source = status.MPI_SOURCE,
           .header = header,
       });
@@ -698,12 +698,12 @@ void commProcessRecvDataQueue(CommTaskHandle<TM> *handle, CreateDataCB createDat
   if (handle->comm->collectStats) {
     std::lock_guard<std::mutex> statsLock(handle->stats.mutex);
     handle->stats.maxRecvDataQueueSize =
-        std::max(handle->stats.maxRecvDataQueueSize, handle->queues.recvDataQueue.size());
+        std::max(handle->stats.maxRecvDataQueueSize, handle->queues.createDataQueue.size());
   }
 
-  for (auto it = handle->queues.recvDataQueue.begin(); it != handle->queues.recvDataQueue.end();) {
+  for (auto it = handle->queues.createDataQueue.begin(); it != handle->queues.createDataQueue.end();) {
     if (commRecvData(handle, *it, createData)) {
-      handle->queues.recvDataQueue.erase(it++);
+      handle->queues.createDataQueue.erase(it++);
     } else {
       it++;
     }

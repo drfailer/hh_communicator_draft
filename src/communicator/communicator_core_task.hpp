@@ -17,6 +17,50 @@ class CommunicatorTask;
 
 namespace core {
 
+// functors ////////////////////////////////////////////////////////////////////
+
+template <typename... Types>
+struct GetMemory {
+  std::shared_ptr<tool::CommunicatorMemoryManager<Types...>> mm;
+
+  template <typename T>
+  std::shared_ptr<T> operator()() {
+    if (!mm) {
+      if constexpr (std::is_default_constructible_v<T>) {
+        return std::make_shared<T>();
+      } else {
+        throw std::runtime_error(
+            "error: fail to create data in communicator task, provide a memory manager to solve this issue.");
+      }
+    }
+    return mm->template getMemory<T>(false);
+  }
+};
+
+template <typename... Types>
+struct ReturnMemory {
+  std::shared_ptr<tool::CommunicatorMemoryManager<Types...>> mm;
+
+  template <typename T>
+  void operator()(std::shared_ptr<T> data) {
+    if (mm) {
+      mm->returnMemory(std::move(data));
+    }
+  }
+};
+
+template <typename TaskType>
+struct ProcessData {
+  TaskType *task;
+
+  template <typename T>
+  void operator()(std::shared_ptr<T> data) {
+    task->addResult(data);
+  }
+};
+
+// communicator core ///////////////////////////////////////////////////////////
+
 template <typename... Types>
 using CommunicatorCoreTaskBase = GenericCoreTask<CommunicatorTask<Types...>, sizeof...(Types), Types..., Types...>;
 
@@ -29,7 +73,15 @@ public:
   CommunicatorCoreTask(CommunicatorTask<Types...> *task, std::string const &name)
       : CommunicatorCoreTaskBase<Types...>(task, name, 1, false) {}
 
-  [[nodiscard]] bool isConnected(std::vector<bool> const &connections) const {
+  std::vector<bool> createConnectionVector() {
+    std::vector<bool> connections(this->task()->comm()->comm->nbProcesses, true);
+    for (auto receiver : this->task()->comm()->receivers) {
+      connections[receiver] = false;
+    }
+    return connections;
+  }
+
+  bool isConnected(std::vector<bool> const &connections) const {
     for (bool connection : connections) {
       if (connection) {
         return true;
@@ -102,83 +154,64 @@ private:
     }
   }
 
+  void sendDeamonLoopDbg() {
+    static size_t dbg_idx = 0;
+    if (dbg_idx++ == 4000) {
+      dbg_idx = 0;
+      logh::warn("sender still running: channel = ", (int)this->task()->comm()->channel,
+                 ", rank = ", this->task()->comm()->comm->rank,
+                 ", queue size = ", this->task()->comm()->queues.sendOps.size(),
+                 ", hasNotifierConnected = ", this->hasNotifierConnected());
+    }
+  }
+
   void sendDeamon() {
     using namespace std::chrono_literals;
-    auto returnData = [&]<typename T>(std::shared_ptr<T> data) {
-      if (mm_) {
-        mm_->returnMemory(std::move(data));
-      }
-    };
-
     while (!this->canTerminate()) {
-
-      //////////////////////////////////////////////////
-      static size_t dbg_idx = 0;
-      if (dbg_idx++ == 4000) {
-        dbg_idx = 0;
-        logh::warn("sender still running: channel = ", (int)this->task()->comm()->channel,
-                   ", rank = ", this->task()->comm()->comm->rank,
-                   ", queue size = ", this->task()->comm()->queues.sendOps.size(),
-                   ", hasNotifierConnected = ", this->hasNotifierConnected());
-      }
-      //////////////////////////////////////////////////
-
-      comm::commProcessSendOpsQueue(this->task()->comm(), returnData);
+      sendDeamonLoopDbg();
+      comm::commProcessSendOpsQueue(this->task()->comm(), ReturnMemory<Types...>(mm_));
       std::this_thread::sleep_for(4ms);
     }
     comm::commSendSignal(this->task()->comm(), this->task()->comm()->receivers, comm::CommSignal::Disconnect);
     comm::commInfog(logh::IG::SenderDisconnect, "sender disconnect", this->task()->comm());
-    comm::commProcessSendOpsQueue(this->task()->comm(), returnData, true);
+    comm::commProcessSendOpsQueue(this->task()->comm(), ReturnMemory<Types...>(mm_), true);
     comm::commInfog(logh::IG::SenderEnd, "sender end", this->task()->comm());
   }
 
+  void recvDeamonLoopDbg(std::vector<bool> const &connections) {
+    static size_t dbg_idx = 0;
+    if (dbg_idx++ == 4000) {
+      dbg_idx = 0;
+      logh::warn("reciever still running: channel = ", (int)this->task()->comm()->channel,
+                 ", rank = ", this->task()->comm()->comm->rank,
+                 ", data queue size = ", this->task()->comm()->queues.createDataQueue.size(),
+                 ", ops queue size = ", this->task()->comm()->queues.recvOps.size(), ", connections = ", connections,
+                 ", hasNotifierConnected = ", this->hasNotifierConnected());
+    }
+
+    if (!isConnected(connections)) {
+      logh::error("non connected task: ops queue size = ", this->task()->comm()->queues.recvOps.size(),
+                  ", data queue size = ", this->task()->comm()->queues.createDataQueue.size());
+    }
+  }
+
+  // TODO: count messages
   void recvDeamon() {
     using namespace std::chrono_literals;
-    std::vector<bool> connections(this->task()->comm()->comm->nbProcesses, true);
+    std::vector<bool> connections = createConnectionVector();
     int               source = -1;
     comm::CommSignal  signal = comm::CommSignal::None;
     comm::Header      header;
-    auto              createData = [&]<typename T>() {
-      if (!mm_) {
-        if constexpr (std::is_default_constructible_v<T>) {
-          return std::make_shared<T>();
-        } else {
-          throw std::runtime_error(
-                           "error: fail to create data in communicator task, provide a memory manager to solve this issue.");
-        }
-      }
-      return mm_->template getMemory<T>(false);
-    };
-    auto processData = [&]<typename T>(std::shared_ptr<T> data) { this->task()->addResult(data); };
-
-    for (auto receiver : this->task()->comm()->receivers) {
-      connections[receiver] = false;
-    }
 
     // TODO: empty the queue or flush? I think the best here would be to start a
     //       timer when isConnected is false. After the timer, the thread leaves
     //       the loops and flushes the queue, however, this should be reported
     //       as an error in the dot file.
     while (isConnected(connections) || !this->task()->comm()->queues.recvOps.empty()
-           || !this->task()->comm()->queues.recvDataQueue.empty()) {
+           || !this->task()->comm()->queues.createDataQueue.empty()) {
       comm::commRecvSignal(this->task()->comm(), source, signal, header);
 
-      //////////////////////////////////////////////////
-      static size_t dbg_idx = 0;
-      if (dbg_idx++ == 4000) {
-        dbg_idx = 0;
-        logh::warn("reciever still running: channel = ", (int)this->task()->comm()->channel,
-                   ", rank = ", this->task()->comm()->comm->rank,
-                   ", data queue size = ", this->task()->comm()->queues.recvDataQueue.size(),
-                   ", ops queue size = ", this->task()->comm()->queues.recvOps.size(), ", connections = ", connections,
-                   ", hasNotifierConnected = ", this->hasNotifierConnected());
-      }
-      //////////////////////////////////////////////////
-
-      if (!isConnected(connections)) {
-        logh::error("non connected task: ops queue size = ", this->task()->comm()->queues.recvOps.size(),
-                    ", data queue size = ", this->task()->comm()->queues.recvDataQueue.size());
-      }
+      recvDeamonLoopDbg(connections);
 
       switch (signal) {
       case comm::CommSignal::None:
@@ -192,8 +225,8 @@ private:
       case comm::CommSignal::Data:
         break;
       }
-      comm::commProcessRecvDataQueue(this->task()->comm(), createData);
-      comm::commProcessRecvOpsQueue(this->task()->comm(), processData);
+      comm::commProcessRecvDataQueue(this->task()->comm(), GetMemory<Types...>(mm_));
+      comm::commProcessRecvOpsQueue(this->task()->comm(), ProcessData(this->task()));
       std::this_thread::sleep_for(4ms);
     }
     comm::commInfog(logh::IG::ReceiverEnd, "receiver end", this->task()->comm());
