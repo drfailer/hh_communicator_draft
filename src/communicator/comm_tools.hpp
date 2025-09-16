@@ -154,10 +154,12 @@ struct StorageId {
   u32 source;
   u16 packageId;
 };
-static_assert(sizeof(StorageId) == sizeof(u64));
 
 inline bool operator<(StorageId const &lhs, StorageId const &rhs) {
-  return std::bit_cast<u64>(lhs) < std::bit_cast<u64>(rhs);
+  if (lhs.source == rhs.source) {
+    return lhs.packageId < rhs.packageId;
+  }
+  return lhs.source < rhs.source;
 }
 
 template <typename TM>
@@ -191,9 +193,12 @@ struct CommPendingRecvData {
   Header header;
 };
 
+inline int  headerToTag(Header header);
 inline bool operator<(CommPendingRecvData const &lhs, CommPendingRecvData const &rhs) {
-  static_assert(sizeof(CommPendingRecvData) == sizeof(u64));
-  return std::bit_cast<u64>(lhs) < std::bit_cast<u64>(rhs);
+  if (lhs.source == rhs.source) {
+    return headerToTag(lhs.header) < headerToTag(rhs.header);
+  }
+  return lhs.source < rhs.source;
 }
 
 struct CommQueues {
@@ -836,7 +841,8 @@ void commSendStats(CommTaskHandle<TM> *handle) {
   serializer::serialize<Serializer>(buf, 0, handle->stats.maxSendOpsSize, handle->stats.maxRecvOpsSize,
                                     handle->stats.maxCreateDataQueueSize, handle->stats.maxSendStorageSize,
                                     handle->stats.maxRecvStorageSize, handle->stats.storageStats);
-  comm::commInfog(logh::IG::Stats, "stats", handle, "commSendStats -> ", " buf size = ", buf.size());
+  comm::commInfog(logh::IG::Stats, "stats", handle, "commSendStats -> ", " buf size = ", buf.size(),
+                  ", storageStats size = ", handle->stats.storageStats.size());
   commSend(handle->comm, header, 0, Buffer{std::bit_cast<char *>(buf.data()), buf.size()});
 }
 
@@ -847,6 +853,14 @@ template <typename TM>
 std::vector<CommTaskStats> commGatherStats(CommTaskHandle<TM> *handle) {
   int                        bufSize;
   std::vector<CommTaskStats> stats(handle->comm->nbProcesses);
+  int                        tag = headerToTag(Header{
+                             .padding = 0,
+                             .signal = 0,
+                             .typeId = 0,
+                             .channel = handle->channel,
+                             .packageId = 0,
+                             .bufferId = 0,
+  });
 
   stats[0].storageStats = std::move(handle->stats.storageStats);
   stats[0].maxSendOpsSize = handle->stats.maxSendOpsSize;
@@ -855,10 +869,9 @@ std::vector<CommTaskStats> commGatherStats(CommTaskHandle<TM> *handle) {
   stats[0].maxSendStorageSize = handle->stats.maxSendStorageSize;
   stats[0].maxRecvStorageSize = handle->stats.maxRecvStorageSize;
   for (int i = 1; i < handle->comm->nbProcesses; ++i) {
-    comm::commInfog(logh::IG::Stats, "stats", handle, "commGatherStats -> ", " target = ", i);
     std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
     MPI_Status                  status;
-    MPI_Probe(i, MPI_ANY_TAG, handle->comm->comm, &status);
+    MPI_Probe(i, tag, handle->comm->comm, &status);
     MPI_Get_count(&status, MPI_BYTE, &bufSize);
 
     serializer::Bytes buf(bufSize, bufSize);
@@ -868,6 +881,8 @@ std::vector<CommTaskStats> commGatherStats(CommTaskHandle<TM> *handle) {
     serializer::deserialize<Serializer>(buf, 0, stats[i].maxSendOpsSize, stats[i].maxRecvOpsSize,
                                         stats[i].maxCreateDataQueueSize, stats[i].maxSendStorageSize,
                                         stats[i].maxRecvStorageSize, stats[i].storageStats);
+    comm::commInfog(logh::IG::Stats, "stats", handle, "comGather -> ", "target = ", i, " buf size = ", buf.size(),
+                    ", storageStats size = ", stats[i].storageStats.size());
   }
   return stats;
 }
