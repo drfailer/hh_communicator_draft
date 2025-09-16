@@ -41,16 +41,6 @@ enum class IG : int {
     CommunicatorTaskExecute,
 };
 #define HH_ACTIVE_INFO_GROUPS IG::Default
-// #define HH_ACTIVE_INFO_GROUPS \
-//   IG::Default, \
-//   IG::ReceiverDisconnect, \
-//   IG::SenderDisconnect, \
-//   IG::ReceiverEnd, \
-//   IG::SenderEnd, \
-//   IG::Core, \
-//   IG::CoreTaskLoop, \
-//   IG::CoreTerminate, \
-//   IG::CommunicatorTaskExecute
 
 } // namespace hh::logh
 
