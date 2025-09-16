@@ -107,18 +107,24 @@ int main(int argc, char **argv) {
 
     hh::comm::commInit(argc, argv);
     hh::comm::CommHandle *commHandle = hh::comm::commCreate(true);
-    auto                  A = createMatrix<MatrixId::A>(config.M, config.K);
-    auto                  B = createMatrix<MatrixId::B>(config.K, config.N);
-    auto                  C = createMatrix<MatrixId::C>(config.M, config.N);
 
-    std::memset(C->mem, 0, sizeof(MT) * C->rows * C->cols);
+    std::shared_ptr<Matrix<MT, MatrixId::A>> A = nullptr;
+    std::shared_ptr<Matrix<MT, MatrixId::B>> B = nullptr;
+    std::shared_ptr<Matrix<MT, MatrixId::C>> C = nullptr;
+
+    if (commHandle->rank == 0) {
+        A = createMatrix<MatrixId::A>(config.M, config.K);
+        B = createMatrix<MatrixId::B>(config.K, config.N);
+        C = createMatrix<MatrixId::C>(config.M, config.N);
+        std::memset(C->mem, 0, sizeof(MT) * C->rows * C->cols);
+    }
 
     MMGraph graph(commHandle, config.M, config.N, config.K, config.tileSize, config.poolSize);
 
-    hh::GraphSignalHandler<MMGraphIO>::registerGraph(&graph);
-    hh::GraphSignalHandler<MMGraphIO>::setDebugOptions(hh::DebugOptions::ALL);
-    hh::GraphSignalHandler<MMGraphIO>::handleSignal(SIGTERM);
-    hh::GraphSignalHandler<MMGraphIO>::handleSignal(SIGKILL);
+    // hh::GraphSignalHandler<MMGraphIO>::registerGraph(&graph);
+    // hh::GraphSignalHandler<MMGraphIO>::setDebugOptions(hh::DebugOptions::ALL);
+    // hh::GraphSignalHandler<MMGraphIO>::handleSignal(SIGTERM);
+    // hh::GraphSignalHandler<MMGraphIO>::handleSignal(SIGKILL);
 
     graph.executeGraph(true);
 
