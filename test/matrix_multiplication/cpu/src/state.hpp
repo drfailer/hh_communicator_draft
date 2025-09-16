@@ -43,10 +43,13 @@ struct ProductState : hh::AbstractState<ProductStateIO> {
     std::shared_ptr<MMType> mm;
     TileMap<MatrixId::A>    as;
     TileMap<MatrixId::B>    bs;
+    int                     rank;
+    int                     nbProcesses;
 
     ProductState(std::shared_ptr<MMType> mm, size_t M, size_t N, size_t K, int rank, int nbProcesses);
 
     std::shared_ptr<MatrixTile<MT, MatrixId::P>> getPAndUpdateCount(auto a, auto b);
+    bool                                         rankShouldMakeProduct(auto a, auto b);
     void                                         execute(std::shared_ptr<MatrixTile<MT, MatrixId::A>> a) override;
     void                                         execute(std::shared_ptr<MatrixTile<MT, MatrixId::B>> b) override;
 };

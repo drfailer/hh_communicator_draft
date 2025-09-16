@@ -14,7 +14,9 @@ ProductState::ProductState(std::shared_ptr<MMType> mm, size_t M, size_t N, size_
     : hh::AbstractState<ProductStateIO>(),
       mm(mm),
       as(M, K),
-      bs(K, N) {
+      bs(K, N),
+      rank(rank),
+      nbProcesses(nbProcesses) {
     for (size_t row = 0; row < M; ++row) {
         for (size_t col = 0; col < N; ++col) {
             int tileRank = (int)((col + row * N) % nbProcesses);
@@ -40,17 +42,22 @@ std::shared_ptr<MatrixTile<MT, MatrixId::P>> ProductState::getPAndUpdateCount(au
     logh::infog(logh::IG::ProductState, "product state", MPIRank(), " P[", p->rowIdx, ",", p->colIdx, "] = A[",
                 a->rowIdx, ",", a->colIdx, "] x B[", b->rowIdx, ",", b->colIdx, "]");
 
-    // if (--as.count(a->rowIdx, a->colIdx) == 0) {
-    //     as.tile(a->rowIdx, a->colIdx) = nullptr;
-    // }
-    // if (--bs.count(b->rowIdx, b->colIdx) == 0) {
-    //     bs.tile(b->rowIdx, b->colIdx) = nullptr;
-    // }
+    if (--as.count(a->rowIdx, a->colIdx) == 0) {
+        as.tile(a->rowIdx, a->colIdx) = nullptr;
+    }
+    if (--bs.count(b->rowIdx, b->colIdx) == 0) {
+        bs.tile(b->rowIdx, b->colIdx) = nullptr;
+    }
     return p;
 }
 
+bool ProductState::rankShouldMakeProduct(auto a, auto b) {
+    return (int)((b->colIdx + a->rowIdx * bs.cols) % nbProcesses) == rank;
+}
+
 void ProductState::execute(std::shared_ptr<MatrixTile<MT, MatrixId::A>> a) {
-    logh::infog(logh::IG::ProductState, "product state", MPIRank(), " A[", a->rowIdx, ",", a->colIdx, "] tile received");
+    logh::infog(logh::IG::ProductState, "product state", MPIRank(), " A[", a->rowIdx, ",", a->colIdx,
+                "] tile received");
 
     assert(as.tile(a->rowIdx, a->colIdx) == nullptr);
     a->processCount = as.count(a->rowIdx, a->colIdx);
@@ -59,7 +66,7 @@ void ProductState::execute(std::shared_ptr<MatrixTile<MT, MatrixId::A>> a) {
     for (size_t col = 0; col < bs.cols; ++col) {
         auto b = bs.tile(a->colIdx, col);
 
-        if (b != nullptr) {
+        if (b != nullptr && rankShouldMakeProduct(a, b)) {
             assert(a->canBeRecycle() == false);
             assert(b->canBeRecycle() == false);
             assert(b->rowIdx == a->colIdx);
@@ -72,7 +79,8 @@ void ProductState::execute(std::shared_ptr<MatrixTile<MT, MatrixId::A>> a) {
 }
 
 void ProductState::execute(std::shared_ptr<MatrixTile<MT, MatrixId::B>> b) {
-    logh::infog(logh::IG::ProductState, "product state", MPIRank(), " B[", b->rowIdx, ",", b->colIdx, "] tile received");
+    logh::infog(logh::IG::ProductState, "product state", MPIRank(), " B[", b->rowIdx, ",", b->colIdx,
+                "] tile received");
 
     assert(bs.tile(b->rowIdx, b->colIdx) == nullptr);
     b->processCount = bs.count(b->rowIdx, b->colIdx);
@@ -81,7 +89,7 @@ void ProductState::execute(std::shared_ptr<MatrixTile<MT, MatrixId::B>> b) {
     for (size_t row = 0; row < as.rows; ++row) {
         auto a = as.tile(row, b->rowIdx);
 
-        if (a != nullptr) {
+        if (a != nullptr && rankShouldMakeProduct(a, b)) {
             assert(a->canBeRecycle() == false);
             assert(b->canBeRecycle() == false);
             assert(a->rowIdx == row);
@@ -99,7 +107,8 @@ void ProductState::execute(std::shared_ptr<MatrixTile<MT, MatrixId::B>> b) {
 
 SumState::SumState(std::shared_ptr<MMType> mm, size_t M, size_t N, size_t K, int rank, size_t nbProcesses)
     : hh::AbstractState<SumStateIO>(),
-      mm(mm), processCount(K) {
+      mm(mm),
+      processCount(K) {
     for (size_t row = 0; row < M; ++row) {
         for (size_t col = 0; col < N; ++col) {
             int tileRank = (int)((col + row * N) % nbProcesses);
@@ -135,7 +144,8 @@ void SumState::execute(std::shared_ptr<ProductData<MT>> data) {
     auto [a, b, p] = *data;
     auto key = std::make_pair(p->rowIdx, p->colIdx);
 
-    logh::infog(logh::IG::SumState, "sum state", MPIRank(), " product data received, P[", p->rowIdx, ",", p->colIdx, "]");
+    logh::infog(logh::IG::SumState, "sum state", MPIRank(), " product data received, P[", p->rowIdx, ",", p->colIdx,
+                "]");
 
     if (!queues.contains(key)) {
         logh::error("(product data) queue does not contain key = ", key);
@@ -152,14 +162,15 @@ void SumState::execute(std::shared_ptr<ProductData<MT>> data) {
     }
 
     // FIXME: returning memory here causes problems
-    --a->processCount;
-    mm->returnMemory(std::move(a));
-    --b->processCount;
-    mm->returnMemory(std::move(b));
+    // --a->processCount;
+    // mm->returnMemory(std::move(a));
+    // --b->processCount;
+    // mm->returnMemory(std::move(b));
 }
 
 void SumState::execute(std::shared_ptr<SumData<MT>> data) {
-    logh::infog(logh::IG::SumState, "sum state", MPIRank(), " sum data received, C[", data->c->rowIdx, ",", data->c->colIdx, "]");
+    logh::infog(logh::IG::SumState, "sum state", MPIRank(), " sum data received, C[", data->c->rowIdx, ",",
+                data->c->colIdx, "]");
 
     auto key = std::make_pair(data->c->rowIdx, data->c->colIdx);
     if (!queues.contains(key)) {
