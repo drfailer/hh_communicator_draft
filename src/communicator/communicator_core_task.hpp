@@ -280,8 +280,8 @@ public:
         auto packingDelay = transmissionStats.at(typeId).packingDelay;
         auto unpackingDelay = transmissionStats.at(typeId).unpackingDelay;
         auto bandWidth = transmissionStats.at(typeId).bandWidth;
-        strAppend(infos, "packing: ", packingDelay, "us, (count = ", packingDelay.size(), ")");
-        strAppend(infos, "unpacking: ", unpackingDelay, "us, (count = ", unpackingDelay.size(), ")");
+        strAppend(infos, "packing: ", packingDelay, ", (count = ", packingDelay.size(), ")");
+        strAppend(infos, "unpacking: ", unpackingDelay, ", (count = ", unpackingDelay.size(), ")");
         strAppend(infos, "bandWidth: ", bandWidth, "MB/s");
         infos.append("transmission: {\\l");
         for (size_t sender = 0; sender < nbProcesses; ++sender) {
@@ -290,7 +290,7 @@ public:
               continue;
             }
             strAppend(infos, "    [", sender, " -> ", receiver,
-                      "] = ", transmissionDelays[sender * nbProcesses + receiver], "us");
+                      "] = ", transmissionDelays[sender * nbProcesses + receiver]);
           }
         }
         strAppend(infos, "}");
@@ -303,6 +303,26 @@ public:
   }
 
 private:
+  static std::string durationPrinter(std::chrono::nanoseconds const &ns) {
+    std::ostringstream oss;
+
+    // Cast with precision loss
+    auto s = std::chrono::duration_cast<std::chrono::seconds>(ns);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(ns);
+    auto us = std::chrono::duration_cast<std::chrono::microseconds>(ns);
+
+    if (s > std::chrono::seconds::zero()) {
+      oss << s.count() << "." << std::setfill('0') << std::setw(3) << (ms - s).count() << "s";
+    } else if (ms > std::chrono::milliseconds::zero()) {
+      oss << ms.count() << "." << std::setfill('0') << std::setw(3) << (us - ms).count() << "ms";
+    } else if (us > std::chrono::microseconds::zero()) {
+      oss << us.count() << "." << std::setfill('0') << std::setw(3) << (ns - us).count() << "us";
+    } else {
+      oss << ns.count() << "ns";
+    }
+    return oss.str();
+  }
+
   static void strAppend(std::string &str, auto const &...args) {
     std::ostringstream oss;
     (
@@ -310,12 +330,35 @@ private:
           if constexpr (std::is_same_v<decltype(args), std::vector<double> const &>) {
             auto avg = computeAvg(args);
             oss << avg.first << " +- " << avg.second;
+          } else if constexpr (std::is_same_v<decltype(args), std::vector<std::chrono::nanoseconds> const &>) {
+            auto avg = computeAvgDuration(args);
+            oss << durationPrinter(avg.first) << " +- " << durationPrinter(avg.second);
           } else {
             oss << args;
           }
         }(),
         ...);
     str.append(oss.str() + "\\l");
+  }
+
+  static std::pair<std::chrono::nanoseconds, std::chrono::nanoseconds>
+  computeAvgDuration(std::vector<std::chrono::nanoseconds> nss) {
+    if (nss.size() == 0) {
+      return {std::chrono::nanoseconds::zero(), std::chrono::nanoseconds::zero()};
+    }
+    std::chrono::nanoseconds sum = std::chrono::nanoseconds::zero(), mean = std::chrono::nanoseconds::zero();
+    double                   sd = 0;
+
+    for (auto ns : nss) {
+      sum += ns;
+    }
+    mean = sum / (nss.size());
+
+    for (auto ns : nss) {
+      auto diff = (double)(ns.count() - mean.count());
+      sd += diff * diff;
+    }
+    return {mean, std::chrono::nanoseconds((int64_t)std::sqrt(sd / (double)nss.size()))};
   }
 
   static std::pair<double, double> computeAvg(std::vector<double> const &values) {
@@ -339,10 +382,10 @@ private:
   }
 
   struct TransmissionStat {
-    std::vector<double>              packingDelay;
-    std::vector<double>              unpackingDelay;
-    std::vector<std::vector<double>> transmissionDelays;
-    std::vector<double>              bandWidth;
+    std::vector<std::chrono::nanoseconds>              packingDelay;
+    std::vector<std::chrono::nanoseconds>              unpackingDelay;
+    std::vector<std::vector<std::chrono::nanoseconds>> transmissionDelays;
+    std::vector<double>                                bandWidth;
   };
 
   std::map<comm::u8, TransmissionStat> computeTransmissionStats(std::vector<comm::CommTaskStats> const &stats) const {
@@ -364,18 +407,18 @@ private:
                 TransmissionStat{
                     .packingDelay = {},
                     .unpackingDelay = {},
-                    .transmissionDelays = std::vector<std::vector<double>>(nbProcesses * nbProcesses),
+                    .transmissionDelays = std::vector<std::vector<std::chrono::nanoseconds>>(nbProcesses * nbProcesses),
                     .bandWidth = {},
                 },
             });
           }
-          auto delay = std::chrono::duration_cast<std::chrono::nanoseconds>(recvInfos.recvtp - sendInfos.sendtp);
-          transmissionStats.at(typeId).transmissionDelays[source * nbProcesses + receiverRank].push_back(
-              delay.count() / 1'000'000'000.);
-          transmissionStats.at(typeId).packingDelay.push_back(sendInfos.packingTime.count() / 1'000'000'000.);
-          transmissionStats.at(typeId).unpackingDelay.push_back(recvInfos.unpackingTime.count() / 1'000'000'000.);
-          transmissionStats.at(typeId).bandWidth.push_back((sendInfos.dataSize / (1024. * 1024.))
-                                                           / (delay.count() / 1'000'000'000.));
+          auto delay_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(recvInfos.recvtp - sendInfos.sendtp);
+          transmissionStats.at(typeId).transmissionDelays[source * nbProcesses + receiverRank].push_back(delay_ns);
+          transmissionStats.at(typeId).packingDelay.push_back(sendInfos.packingTime);
+          transmissionStats.at(typeId).unpackingDelay.push_back(recvInfos.unpackingTime);
+          double dataSizeMB = sendInfos.dataSize / (1024. * 1024.);
+          double delay_s = delay_ns.count() / 1'000'000'000.;
+          transmissionStats.at(typeId).bandWidth.push_back(dataSizeMB / delay_s);
         }
       }
     }
