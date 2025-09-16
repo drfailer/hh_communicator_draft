@@ -167,6 +167,7 @@ struct PackageStorage {
   u64                ttlBufferCount;
   u8                 typeId;
   variant_type_t<TM> data;
+  bool               returnMemory;
 };
 
 template <typename TM>
@@ -433,6 +434,7 @@ bool commCreateRecvStorage(CommTaskHandle<TM> *handle, StorageId storageId, u8 t
         .ttlBufferCount = package.data.size(),
         .typeId = typeId,
         .data = data,
+        .returnMemory = true,
     };
     handle->wh.recvStorage.insert({storageId, storage});
   });
@@ -497,7 +499,8 @@ void commSendSignal(CommTaskHandle<TM> *handle, std::vector<int> dests, CommSign
  * Send data to the given destinations.
  */
 template <typename T, typename TM>
-void commSendData(CommTaskHandle<TM> *handle, std::vector<int> dests, std::shared_ptr<T> data) {
+void commSendData(CommTaskHandle<TM> *handle, std::vector<int> dests, std::shared_ptr<T> data,
+                  bool returnMemory = true) {
   time_t tpackingStart, tpackingEnd;
   u16    packageId = commGeneratePackageId();
   Header header = {
@@ -521,6 +524,7 @@ void commSendData(CommTaskHandle<TM> *handle, std::vector<int> dests, std::share
       .ttlBufferCount = package.data.size() * dests.size(),
       .typeId = header.typeId,
       .data = data,
+      .returnMemory = returnMemory,
   };
   StorageId storageId = {
       .source = (u32)handle->comm->rank,
@@ -602,7 +606,9 @@ void commProcessSendOpsQueue(CommTaskHandle<TM> *handle, ReturnDataCB cb, bool f
               // support the 'pack' operation
               delete[] storage.package.data[0].mem;
             }
-            cb.template operator()<T>(std::get<std::shared_ptr<T>>(storage.data));
+            if (storage.returnMemory) {
+              cb.template operator()<T>(std::get<std::shared_ptr<T>>(storage.data));
+            }
           });
           handle->wh.sendStorage.erase(it->storageId);
         }

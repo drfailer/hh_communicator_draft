@@ -12,8 +12,8 @@ void SplitTask::split(std::shared_ptr<Matrix<MT, Id>> matrix) {
 
     for (size_t row = 0; row < nbTileRow; ++row) {
         for (size_t col = 0; col < nbTileCol; ++col) {
-            // auto tile = mm->template getMemory<MatrixTile<MT, Id>>();
-            auto tile = std::make_shared<MatrixTile<MT, Id>>(tileSize);
+            auto tile = mm->template getMemory<MatrixTile<MT, Id>>();
+            // auto tile = std::make_shared<MatrixTile<MT, Id>>(tileSize);
 
             tile->rows = std::min(tileSize, matrix->rows - row * tileSize);
             tile->cols = std::min(tileSize, matrix->cols - col * tileSize);

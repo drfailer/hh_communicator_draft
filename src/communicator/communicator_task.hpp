@@ -34,6 +34,7 @@ public:
   void execute(std::shared_ptr<Input> data) override {
     logh::infog(logh::IG::CommunicatorTaskExecute, "communicator task execute", "[", (int)task_->comm()->channel,
                 "]: rank = ", task_->comm()->comm->rank, ", isReceiver_ = ", isReceiver_);
+    bool returnMemory = true;
     if (preSendCB_) {
       preSendCB_(data);
     }
@@ -55,9 +56,10 @@ public:
         if (rankIt != dests.end()) {
           task_->addResult(data);
           dests.erase(rankIt);
+          returnMemory = false;
         }
         if (!dests.empty()) {
-          comm::commSendData<Input>(task_->comm(), dests, data);
+          comm::commSendData<Input>(task_->comm(), dests, data, returnMemory);
         }
       } else {
         if (task_->options().scatter) {
@@ -66,13 +68,14 @@ public:
           if (receiver == task_->comm()->comm->rank) {
             task_->addResult(data);
           } else {
-            comm::commSendData<Input>(task_->comm(), {receiver}, data);
+            comm::commSendData<Input>(task_->comm(), {receiver}, data, returnMemory);
           }
         } else {
           if (task_->options().sendersAreReceivers) {
             task_->addResult(data);
+            returnMemory = false;
           }
-          comm::commSendData(task_->comm(), receivers_, data);
+          comm::commSendData(task_->comm(), receivers_, data, returnMemory);
         }
       }
     }

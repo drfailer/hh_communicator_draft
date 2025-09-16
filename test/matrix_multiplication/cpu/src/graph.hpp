@@ -60,32 +60,32 @@ struct MMGraph : hh::Graph<MMGraphIO> {
 
         distributeTask->template destCB<MatrixTile<MT, MatrixId::A>>([nbProcesses, TN](auto tile) {
             std::vector<int> dests = {(int)(tile->rowIdx * TN % nbProcesses)};
+            tile->processCount = dests[0] == 0 ? 1 : 0;
             for (size_t colIdx = 1; colIdx < TN; ++colIdx) {
                 int rank = (colIdx + tile->rowIdx * TN) % nbProcesses;
                 if (rank == dests[0]) {
                     break;
                 }
+                if (rank == 0) {
+                    tile->processCount = 1;
+                }
                 dests.push_back(rank);
-            }
-            if (std::find(dests.begin(), dests.end(), 0) != dests.end()) {
-                // make sure the tile is not recycled if it is still used on the current process
-                tile->processCount = 1;
             }
             logh::infog(logh::IG::DestDB, "DestCB", "A[", tile->rowIdx, ",", tile->colIdx, "] => ", dests);
             return dests;
         });
         distributeTask->template destCB<MatrixTile<MT, MatrixId::B>>([nbProcesses, TM, TN](auto tile) {
             std::vector<int> dests = {(int)(tile->colIdx % nbProcesses)};
+            tile->processCount = dests[0] == 0 ? 1 : 0;
             for (size_t rowIdx = 1; rowIdx < TM; ++rowIdx) {
                 int rank = (tile->colIdx + rowIdx * TN) % nbProcesses;
                 if (rank == dests[0]) {
                     break;
                 }
+                if (rank == 0) {
+                    tile->processCount = 1;
+                }
                 dests.push_back(rank);
-            }
-            if (std::find(dests.begin(), dests.end(), 0) != dests.end()) {
-                // make sure the tile is not recycled if it is still used on the current process
-                tile->processCount = 1;
             }
             logh::infog(logh::IG::DestDB, "DestCB", "B[", tile->rowIdx, ",", tile->colIdx, "] => ", dests);
             return dests;

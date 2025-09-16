@@ -23,7 +23,6 @@ struct MemoryPool {
   std::shared_ptr<T> getMemory(bool wait = true) {
     std::unique_lock<std::mutex> poolLock(mutex);
 
-    ++nbGetMemory;
     if (memory.empty()) {
       if (wait) {
         logh::warn("waiting for memory pool: ", std::string(typeid(memory.data()).name()));
@@ -33,6 +32,7 @@ struct MemoryPool {
         return nullptr;
       }
     }
+    ++nbGetMemory;
     auto data = memory.back();
     memory.pop_back();
     return data;
