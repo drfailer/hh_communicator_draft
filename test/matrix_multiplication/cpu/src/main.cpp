@@ -93,7 +93,7 @@ UTest(mm_result, std::shared_ptr<Matrix<MT, MatrixId::A>> A, std::shared_ptr<Mat
             MT eval = expected.mem[col + row * C->ld];
             MT fval = C->mem[col + row * C->ld];
             if constexpr (std::is_floating_point_v<MT>) {
-                uassert_float_equal(fval, eval, 1e-3);
+                uassert_float_equal(fval, eval, 1e-6);
             } else {
                 uassert_equal(fval, eval);
             }

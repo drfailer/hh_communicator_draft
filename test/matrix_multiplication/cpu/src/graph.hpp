@@ -28,7 +28,7 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         mm = std::make_shared<MMType>();
         mm->template fill<MatrixTile<MT, MatrixId::A>>(TM * TK, tileSize);
         mm->template fill<MatrixTile<MT, MatrixId::B>>(TK * TN, tileSize);
-        mm->template fill<MatrixTile<MT, MatrixId::C>>(TM * TM, tileSize);
+        mm->template fill<MatrixTile<MT, MatrixId::C>>(TM * TN, tileSize);
         mm->template fill<MatrixTile<MT, MatrixId::P>>(poolSize, tileSize);
 
         std::vector<int> distributeTaskReceivers;
