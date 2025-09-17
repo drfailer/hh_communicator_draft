@@ -2,6 +2,8 @@
 #include "../../../src/communicator/communicator_core_task.hpp"
 #include "../../../src/communicator/communicator_task.hpp"
 #include "../../common/ap.h"
+#include "../../common/utest.h"
+#include "../../common/timer.h"
 #include "log.hpp"
 #include <hedgehog/hedgehog.h>
 #include <iostream>
@@ -189,7 +191,7 @@ struct EndState : hh::AbstractState<EndStateIO> {
                 logh::infog(logh::IG::EndState, "end state", "matrix C completed");
             }
         }
-        tileMM->returnMemory(data->tiles);
+        tileMM->returnMemory(std::move(data->tiles));
     }
 };
 
@@ -216,9 +218,9 @@ struct HadamardProductGraph : hh::Graph<HadamardProductGraphIO> {
         scatterTask->setMemoryManager(tileMM);
         gatherTask->setMemoryManager(tileMM);
 
-        auto splitTask = std::make_shared<hh::LambdaTask<1, MatrixTriplet<T>, TileTriplet<T>>>("splitTask", 5);
-        auto productTask = std::make_shared<hh::LambdaTask<1, TileTriplet<T>, TileTriplet<T>>>("ProductTask", 5);
-        auto copyTask = std::make_shared<hh::LambdaTask<1, MatrixTilePair<T>, MatrixTilePair<T>>>("CopyTask", 5);
+        auto splitTask = std::make_shared<hh::LambdaTask<1, MatrixTriplet<T>, TileTriplet<T>>>("splitTask", 20 / commHandle->nbProcesses);
+        auto productTask = std::make_shared<hh::LambdaTask<1, TileTriplet<T>, TileTriplet<T>>>("ProductTask", 40 / commHandle->nbProcesses);
+        auto copyTask = std::make_shared<hh::LambdaTask<1, MatrixTilePair<T>, MatrixTilePair<T>>>("CopyTask", 20 / commHandle->nbProcesses);
         auto copyState = std::make_shared<hh::StateManager<CopyStateIO>>(std::make_shared<CopyState<T>>(), "CopyState");
         auto endState = std::make_shared<hh::StateManager<EndStateIO>>(std::make_shared<EndState<T>>(tileSize, tileMM),
                                                                        "EndState");
@@ -229,7 +231,7 @@ struct HadamardProductGraph : hh::Graph<HadamardProductGraphIO> {
 
             for (size_t rowIdx = 0; rowIdx < nbTileRow; ++rowIdx) {
                 for (size_t colIdx = 0; colIdx < nbTileCol; ++colIdx) {
-                    auto   tiles = tileMM->template getMemoryOrWait<TileTriplet<T>>();
+                    auto   tiles = tileMM->template getMemory<TileTriplet<T>>(true);
                     size_t tileRows = std::min(tileSize, data->a->rows - rowIdx * tileSize);
                     size_t tileCols = std::min(tileSize, data->a->cols - colIdx * tileSize);
 
@@ -307,7 +309,7 @@ std::shared_ptr<Matrix<T>> createMatrix(size_t cols, size_t rows) {
 }
 
 template <typename T>
-void test(std::shared_ptr<Matrix<T>> A, std::shared_ptr<Matrix<T>> B, std::shared_ptr<Matrix<T>> C) {
+UTest(hadamardProduct, std::shared_ptr<Matrix<T>> A, std::shared_ptr<Matrix<T>> B, std::shared_ptr<Matrix<T>> C) {
     for (size_t row = 0; row < C->rows; ++row) {
         for (size_t col = 0; col < C->cols; ++col) {
             T eval = A->mem[col + row * A->ld] * B->mem[col + row * B->ld];
@@ -376,6 +378,7 @@ int main(int argc, char **argv) {
     hh::GraphSignalHandler<1, MatrixTriplet<MatrixType>, Matrix<MatrixType>>::handleSignal(SIGKILL);
 
     graph.executeGraph(true);
+    timer_start(graph);
     if (commHandle->rank == 0) {
         graph.pushData(std::make_shared<MatrixTriplet<MatrixType>>(A, B, C));
     }
@@ -383,6 +386,10 @@ int main(int argc, char **argv) {
     std::cout << "finish pushing data" << std::endl;
     graph.finishPushingData();
     graph.waitForTermination();
+    timer_end(graph);
+    if (commHandle->rank == 0) {
+        timer_report_prec(graph, milliseconds);
+    }
     std::cout << "graph terminated" << std::endl;
     graph.createDotFile(std::to_string(commHandle->rank) + "graph.dot", hh::ColorScheme::EXECUTION,
                         hh::StructureOptions::QUEUE);
@@ -395,7 +402,9 @@ int main(int argc, char **argv) {
     }
 
     if (commHandle->rank == 0) {
-        test(A, B, C);
+        utest_start();
+        urun_test(hadamardProduct<MatrixType>, A, B, C);
+        utest_end();
     }
 
     hh::comm::commDestroy(commHandle);
