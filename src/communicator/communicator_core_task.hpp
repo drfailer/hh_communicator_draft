@@ -21,7 +21,7 @@ namespace core {
 
 template <typename... Types>
 struct GetMemory {
-  std::shared_ptr<tool::CommunicatorMemoryManager<Types...>> mm;
+  std::shared_ptr<tool::MemoryPool<Types...>> mm;
 
   template <typename T>
   std::shared_ptr<T> operator()() {
@@ -39,7 +39,7 @@ struct GetMemory {
 
 template <typename... Types>
 struct ReturnMemory {
-  std::shared_ptr<tool::CommunicatorMemoryManager<Types...>> mm;
+  std::shared_ptr<tool::MemoryPool<Types...>> mm;
 
   template <typename T>
   void operator()(std::shared_ptr<T> data) {
@@ -428,7 +428,7 @@ private:
   }
 
 public:
-  void setMemoryManager(std::shared_ptr<tool::CommunicatorMemoryManager<Types...>> mm) {
+  void setMemoryManager(std::shared_ptr<tool::MemoryPool<Types...>> mm) {
     this->mm_ = mm;
   }
 
@@ -438,7 +438,7 @@ public:
 
 private:
   std::thread                                                deamon_;
-  std::shared_ptr<tool::CommunicatorMemoryManager<Types...>> mm_;
+  std::shared_ptr<tool::MemoryPool<Types...>> mm_;
   comm::CommTaskHandle<TypesIds>                            *comm_;
   bool                                                       senderDisconnect_;
 

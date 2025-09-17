@@ -170,9 +170,9 @@ struct EndState : hh::AbstractState<EndStateIO> {
     size_t                                                               count = 0;
     std::shared_ptr<Matrix<T>>                                           c = nullptr;
     size_t                                                               tileSize = 0;
-    std::shared_ptr<hh::tool::CommunicatorMemoryManager<TileTriplet<T>>> tileMM = nullptr;
+    std::shared_ptr<hh::tool::MemoryPool<TileTriplet<T>>> tileMM = nullptr;
 
-    EndState(size_t tileSize, std::shared_ptr<hh::tool::CommunicatorMemoryManager<TileTriplet<T>>> tileMM)
+    EndState(size_t tileSize, std::shared_ptr<hh::tool::MemoryPool<TileTriplet<T>>> tileMM)
         : tileSize(tileSize),
           tileMM(tileMM) {}
 
@@ -201,8 +201,8 @@ template <typename T>
 struct HadamardProductGraph : hh::Graph<HadamardProductGraphIO> {
     HadamardProductGraph(hh::comm::CommHandle *commHandle, size_t tileSize)
         : hh::Graph<HadamardProductGraphIO>("HadamardProductGraph") {
-        auto tileMM = std::make_shared<hh::tool::CommunicatorMemoryManager<TileTriplet<T>>>();
-        tileMM->template preallocate<TileTriplet<T>>(200, tileSize, tileSize);
+        auto tileMM = std::make_shared<hh::tool::MemoryPool<TileTriplet<T>>>();
+        tileMM->template fill<TileTriplet<T>>(200, tileSize, tileSize);
 
         std::vector<int> scatterTaskReceivers;
         for (int i = 1; i < commHandle->nbProcesses; ++i) {

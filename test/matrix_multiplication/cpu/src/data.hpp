@@ -139,7 +139,7 @@ struct SumData {
 using MatrixTilePair
     = std::pair<std::shared_ptr<Matrix<MT, MatrixId::C>>, std::shared_ptr<MatrixTile<MT, MatrixId::C>>>;
 
-using MMType = hh::tool::CommunicatorMemoryManager<MatrixTile<MT, MatrixId::A>, MatrixTile<MT, MatrixId::B>,
-                                                   MatrixTile<MT, MatrixId::C>, MatrixTile<MT, MatrixId::P>>;
+using MMType = hh::tool::MemoryPool<MatrixTile<MT, MatrixId::A>, MatrixTile<MT, MatrixId::B>,
+                                    MatrixTile<MT, MatrixId::C>, MatrixTile<MT, MatrixId::P>>;
 
 #endif

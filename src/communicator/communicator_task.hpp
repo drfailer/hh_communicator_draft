@@ -50,7 +50,8 @@ public:
      * The CommunicatorTask has the following behavior:
      * - if the rank is a receiver, then just transmit input data (we stay on one node)
      * - if the rank is a sender:
-     *   - if scatter then scatter the data between the receivers (and optionally the current rank)
+     *   - if the destCB_ has been specified, use it to know the destination ranks
+     *   - else if scatter then scatter the data between the receivers (and optionally the current rank)
      *   - else, send the data to all the receivers (and optionally the current rank)
      */
     if (isReceiver_) {
@@ -187,7 +188,7 @@ public:
   }
 
   template <typename... MMTypes>
-  void setMemoryManager(std::shared_ptr<tool::CommunicatorMemoryManager<MMTypes...>> mm) {
+  void setMemoryManager(std::shared_ptr<tool::MemoryPool<MMTypes...>> mm) {
     this->coreTask_->setMemoryManager(mm->template convert<Types...>());
   }
 

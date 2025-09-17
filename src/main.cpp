@@ -21,8 +21,8 @@ struct TestGraph1 : hh::Graph<1, int, int> {
     auto bn0 = std::make_shared<hh::CommunicatorTask<int>>(commHandle, std::vector<int>({0}));
     auto out = std::make_shared<hh::LambdaTask<1, int, int>>("output", 1);
 
-    auto mm = std::make_shared<hh::tool::CommunicatorMemoryManager<int>>();
-    mm->template preallocate<int>(5);
+    auto mm = std::make_shared<hh::tool::MemoryPool<int>>();
+    mm->template fill<int>(5);
 
     b01->setMemoryManager(mm);
     b02->setMemoryManager(mm);

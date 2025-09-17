@@ -12,8 +12,16 @@ namespace hh {
 
 namespace tool {
 
+/*
+ * Memory pool for one data type.
+ *
+ * The data type can implement the following methods:
+ * - postProcess: called when returnMemory is called (even when the memory is not recycled)
+ * - canBeRecycled: return true if the memory can be return to the pool.
+ * - cleanMemory: called before the memory returns to the pool.
+ */
 template <typename T>
-struct MemoryPool {
+struct SingleTypeMemoryPool {
   std::vector<std::shared_ptr<T>> memory;
   std::mutex                      mutex;
   std::condition_variable         cv;
@@ -76,17 +84,17 @@ struct MemoryPool {
 };
 
 template <typename... Types>
-struct CommunicatorMemoryManager {
-  std::tuple<std::shared_ptr<MemoryPool<Types>>...> pools = {};
+struct MemoryPool {
+  std::tuple<std::shared_ptr<SingleTypeMemoryPool<Types>>...> pools = {};
 
   template <typename T>
-  std::shared_ptr<MemoryPool<T>> &pool() {
-    return std::get<std::shared_ptr<MemoryPool<T>>>(pools);
+  std::shared_ptr<SingleTypeMemoryPool<T>> &pool() {
+    return std::get<std::shared_ptr<SingleTypeMemoryPool<T>>>(pools);
   }
 
   template <typename T>
-  std::shared_ptr<MemoryPool<T>> pool() const {
-    return std::get<std::shared_ptr<MemoryPool<T>>>(pools);
+  std::shared_ptr<SingleTypeMemoryPool<T>> pool() const {
+    return std::get<std::shared_ptr<SingleTypeMemoryPool<T>>>(pools);
   }
 
   template <typename T>
@@ -94,7 +102,7 @@ struct CommunicatorMemoryManager {
     auto &pool = this->template pool<T>();
 
     if (pool == nullptr) {
-      pool = std::make_shared<MemoryPool<T>>();
+      pool = std::make_shared<SingleTypeMemoryPool<T>>();
     }
     pool->fill(size, std::forward<decltype(args)>(args)...);
   }
@@ -116,15 +124,15 @@ struct CommunicatorMemoryManager {
 
     // FIXME: there is now way to know if the input data belongs to the mm, therefore we add it anyway for now
     if (pool == nullptr) {
-      pool = std::make_shared<MemoryPool<T>>();
+      pool = std::make_shared<SingleTypeMemoryPool<T>>();
     }
 
     return pool->returnMemory(std::move(data));
   }
 
   template <typename... SubsetTypes>
-  std::shared_ptr<CommunicatorMemoryManager<SubsetTypes...>> convert() {
-    auto mm = std::make_shared<CommunicatorMemoryManager<SubsetTypes...>>();
+  std::shared_ptr<MemoryPool<SubsetTypes...>> convert() {
+    auto mm = std::make_shared<MemoryPool<SubsetTypes...>>();
     ((mm->template pool<SubsetTypes>() = this->template pool<SubsetTypes>()), ...);
     return mm;
   }
