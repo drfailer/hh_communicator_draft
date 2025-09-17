@@ -67,7 +67,6 @@ struct MMGraph : hh::Graph<MMGraphIO> {
                 }
                 dests.push_back(rank);
             }
-            tile->sendCount = dests.size();
             logh::infog(logh::IG::DestDB, "DestCB", "A[", tile->rowIdx, ",", tile->colIdx, "] => ", dests);
             return dests;
         });
@@ -80,7 +79,6 @@ struct MMGraph : hh::Graph<MMGraphIO> {
                 }
                 dests.push_back(rank);
             }
-            tile->sendCount = dests.size();
             logh::infog(logh::IG::DestDB, "DestCB", "B[", tile->rowIdx, ",", tile->colIdx, "] => ", dests);
             return dests;
         });
@@ -88,7 +86,6 @@ struct MMGraph : hh::Graph<MMGraphIO> {
             size_t           idx = tile->colIdx + tile->rowIdx * TN;
             std::vector<int> dests = {(int)(idx % nbProcesses)};
             logh::infog(logh::IG::DestDB, "DestCB", "C[", tile->rowIdx, ",", tile->colIdx, "] => ", dests);
-            tile->sendCount = 1;
             return dests;
         });
 
