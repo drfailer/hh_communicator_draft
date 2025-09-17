@@ -31,6 +31,13 @@ public:
   CommunicatorSend(TaskType *task)
       : task_(task) {}
 
+  void addResult(std::shared_ptr<Input> data) {
+    if constexpr (requires { data->postSend(); }) {
+      data->postSend();
+    }
+    task_->addResult(data);
+  }
+
   void execute(std::shared_ptr<Input> data) override {
     logh::infog(logh::IG::CommunicatorTaskExecute, "communicator task execute", "[", (int)task_->comm()->channel,
                 "]: rank = ", task_->comm()->comm->rank, ", isReceiver_ = ", isReceiver_);
@@ -47,14 +54,14 @@ public:
      *   - else, send the data to all the receivers (and optionally the current rank)
      */
     if (isReceiver_) {
-      task_->addResult(data);
+      addResult(data);
     } else {
       if (destCB_) {
         auto dests = destCB_(data);
         auto rankIt = std::find(dests.begin(), dests.end(), task_->comm()->comm->rank);
 
         if (rankIt != dests.end()) {
-          task_->addResult(data);
+          addResult(data);
           dests.erase(rankIt);
           returnMemory = false;
         }
@@ -66,13 +73,13 @@ public:
           int receiver = receivers_[rankIdx_];
           rankIdx_ = (rankIdx_ + 1) % receivers_.size();
           if (receiver == task_->comm()->comm->rank) {
-            task_->addResult(data);
+            addResult(data);
           } else {
             comm::commSendData<Input>(task_->comm(), {receiver}, data, returnMemory);
           }
         } else {
           if (task_->options().sendersAreReceivers) {
-            task_->addResult(data);
+            addResult(data);
             returnMemory = false;
           }
           comm::commSendData(task_->comm(), receivers_, data, returnMemory);
