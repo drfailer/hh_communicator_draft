@@ -161,11 +161,10 @@ void SumState::execute(std::shared_ptr<ProductData<MT>> data) {
         queue.push(data->p);
     }
 
-    // FIXME: returning memory here causes problems
-    // --a->processCount;
-    // mm->returnMemory(std::move(a));
-    // --b->processCount;
-    // mm->returnMemory(std::move(b));
+    --a->processCount;
+    mm->returnMemory(std::move(a));
+    --b->processCount;
+    mm->returnMemory(std::move(b));
 }
 
 void SumState::execute(std::shared_ptr<SumData<MT>> data) {

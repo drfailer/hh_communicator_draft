@@ -49,6 +49,7 @@ struct MatrixTile {
     size_t            matrixCols = 0;
     T                *mem = nullptr;
     size_t            processCount = 0;
+    size_t            sendCount = 0;
     serializer::Bytes buf;
 
     size_t bufSize() const {
@@ -113,8 +114,12 @@ struct MatrixTile {
     // }
     // void unpack(hh::comm::Package &&) {}
 
+    void postSend() {
+        --sendCount;
+    }
+
     bool canBeRecycle() const {
-        return processCount == 0;
+        return processCount == 0 && sendCount == 0;
     }
 };
 
