@@ -48,6 +48,7 @@ struct SingleTypeMemoryPool {
   }
 
   bool returnMemory(std::shared_ptr<T> &&data) {
+    // TODO: in debug mode, we should be able to detect when memory is returned multiple times
     if constexpr (requires { data->postProcess(); }) {
       data->postProcess();
     }
@@ -122,7 +123,6 @@ struct MemoryPool {
   bool returnMemory(std::shared_ptr<T> &&data) {
     auto &pool = this->template pool<T>();
 
-    // FIXME: there is now way to know if the input data belongs to the mm, therefore we add it anyway for now
     if (pool == nullptr) {
       pool = std::make_shared<SingleTypeMemoryPool<T>>();
     }
