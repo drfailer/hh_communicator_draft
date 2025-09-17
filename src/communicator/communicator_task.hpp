@@ -20,31 +20,35 @@ using DestCBType = std::function<std::vector<int>(std::shared_ptr<T>)>;
 template <typename TaskType, typename TypesIds, typename Input>
 struct CommunicatorSend : tool::BehaviorMultiExecuteTypeDeducer_t<std::tuple<Input>> {
 private:
-  size_t                                      rankIdx_ = 0;
-  TaskType                                   *task_ = nullptr;
-  bool                                        isReceiver_ = false;
-  std::vector<int>                            receivers_;
-  std::function<void(std::shared_ptr<Input>)> preSendCB_ = nullptr;
-  DestCBType<Input>                           destCB_ = nullptr;
+  size_t            rankIdx_ = 0;
+  TaskType         *task_ = nullptr;
+  bool              isReceiver_ = false;
+  std::vector<int>  receivers_;
+  DestCBType<Input> destCB_ = nullptr;
 
 public:
   CommunicatorSend(TaskType *task)
       : task_(task) {}
 
   void addResult(std::shared_ptr<Input> data) {
+    task_->addResult(data);
+  }
+
+  void callPreSend(std::shared_ptr<Input> data) {
+    if constexpr (requires { data->preSend(); }) {
+      data->preSend();
+    }
+  }
+
+  void callPostSend(std::shared_ptr<Input> data) {
     if constexpr (requires { data->postSend(); }) {
       data->postSend();
     }
-    task_->addResult(data);
   }
 
   void execute(std::shared_ptr<Input> data) override {
     logh::infog(logh::IG::CommunicatorTaskExecute, "communicator task execute", "[", (int)task_->comm()->channel,
                 "]: rank = ", task_->comm()->comm->rank, ", isReceiver_ = ", isReceiver_);
-    bool returnMemory = true;
-    if (preSendCB_) {
-      preSendCB_(data);
-    }
 
     /*
      * The CommunicatorTask has the following behavior:
@@ -57,35 +61,58 @@ public:
     if (isReceiver_) {
       addResult(data);
     } else {
+      callPreSend(data);
       if (destCB_) {
-        auto dests = destCB_(data);
-        auto rankIt = std::find(dests.begin(), dests.end(), task_->comm()->comm->rank);
-
-        if (rankIt != dests.end()) {
-          addResult(data);
-          dests.erase(rankIt);
-          returnMemory = false;
-        }
-        if (!dests.empty()) {
-          comm::commSendData<Input>(task_->comm(), dests, data, returnMemory);
-        }
+        sendWithDestCB(data);
+      } else if (task_->options().scatter) {
+        sendScatter(data);
       } else {
-        if (task_->options().scatter) {
-          int receiver = receivers_[rankIdx_];
-          rankIdx_ = (rankIdx_ + 1) % receivers_.size();
-          if (receiver == task_->comm()->comm->rank) {
-            addResult(data);
-          } else {
-            comm::commSendData<Input>(task_->comm(), {receiver}, data, returnMemory);
-          }
-        } else {
-          if (task_->options().sendersAreReceivers) {
-            addResult(data);
-            returnMemory = false;
-          }
-          comm::commSendData(task_->comm(), receivers_, data, returnMemory);
-        }
+        sendDistribute(data);
       }
+    }
+  }
+
+  void sendWithDestCB(std::shared_ptr<Input> data) {
+    auto dests = destCB_(data);
+    auto rankIt = std::find(dests.begin(), dests.end(), task_->comm()->comm->rank);
+    bool returnMemory = true;
+
+    if (rankIt != dests.end()) {
+      addResult(data);
+      dests.erase(rankIt);
+      returnMemory = false;
+    }
+    if (!dests.empty()) {
+      comm::commSendData<Input>(task_->comm(), dests, data, returnMemory);
+    } else {
+      callPostSend(data);
+    }
+  }
+
+  void sendScatter(std::shared_ptr<Input> data) {
+    int  receiver = receivers_[rankIdx_];
+    bool returnMemory = true;
+
+    rankIdx_ = (rankIdx_ + 1) % receivers_.size();
+    if (receiver == task_->comm()->comm->rank) {
+      addResult(data);
+      callPostSend(data);
+    } else {
+      comm::commSendData<Input>(task_->comm(), {receiver}, data, returnMemory);
+    }
+  }
+
+  void sendDistribute(std::shared_ptr<Input> data) {
+    bool returnMemory = true;
+
+    if (task_->options().sendersAreReceivers) {
+      addResult(data);
+      returnMemory = false;
+    }
+    if (!receivers_.empty()) {
+      comm::commSendData(task_->comm(), receivers_, data, returnMemory);
+    } else {
+      callPostSend(data);
     }
   }
 
@@ -95,10 +122,6 @@ public:
     if (!isReceiver_ && task_->options().sendersAreReceivers && task_->options().scatter) {
       receivers_.push_back(task_->comm()->comm->rank);
     }
-  }
-
-  void preSendCB(std::function<void(std::shared_ptr<Input>)> cb) {
-    preSendCB_ = cb;
   }
 
   void destCB(DestCBType<Input> cb) {
@@ -114,11 +137,6 @@ struct CommunicatorMultiSend<TaskType, TypeTable, std::tuple<Inputs...>>
     : CommunicatorSend<TaskType, TypeTable, Inputs>... {
   CommunicatorMultiSend(TaskType *task)
       : CommunicatorSend<TaskType, TypeTable, Inputs>(task)... {}
-
-  template <typename Input>
-  void preSendCB(std::function<void(std::shared_ptr<Input>)> cb) {
-    CommunicatorSend<TaskType, TypeTable, Input>::preSendCB(cb);
-  }
 
   template <typename Input>
   void destCB(DestCBType<Input> cb) {
