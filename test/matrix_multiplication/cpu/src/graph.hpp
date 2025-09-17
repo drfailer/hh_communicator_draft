@@ -26,10 +26,10 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         openblas_set_num_threads(1);
 
         mm = std::make_shared<MMType>();
-        mm->template preallocate<MatrixTile<MT, MatrixId::A>>(TM * TK, tileSize);
-        mm->template preallocate<MatrixTile<MT, MatrixId::B>>(TK * TN, tileSize);
-        mm->template preallocate<MatrixTile<MT, MatrixId::C>>(TM * TM, tileSize);
-        mm->template preallocate<MatrixTile<MT, MatrixId::P>>(poolSize, tileSize);
+        mm->template fill<MatrixTile<MT, MatrixId::A>>(TM * TK, tileSize);
+        mm->template fill<MatrixTile<MT, MatrixId::B>>(TK * TN, tileSize);
+        mm->template fill<MatrixTile<MT, MatrixId::C>>(TM * TM, tileSize);
+        mm->template fill<MatrixTile<MT, MatrixId::P>>(poolSize, tileSize);
 
         std::vector<int> distributeTaskReceivers;
         for (size_t i = 1; i < nbProcesses; ++i) {

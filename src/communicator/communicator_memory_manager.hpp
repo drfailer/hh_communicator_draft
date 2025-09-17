@@ -26,9 +26,9 @@ struct MemoryPool {
 
     if (memory.empty()) {
       if (wait) {
-        logh::warn("waiting for memory pool: ", std::string(typeid(memory.data()).name()));
+        logh::warn("waiting for memory pool: ", std::string(typeToStr<T>()));
         cv.wait(poolLock, [&]() { return !memory.empty(); });
-        logh::warn("end waiting");
+        logh::warn("end waiting for memory pool: ", std::string(typeToStr<T>()));
       } else {
         return nullptr;
       }
@@ -58,7 +58,7 @@ struct MemoryPool {
     return true;
   }
 
-  void preallocate(size_t size, auto &&...args) {
+  void fill(size_t size, auto &&...args) {
     std::lock_guard<std::mutex> poolLock(mutex);
     preallocatedSize = size;
     memory.resize(size, nullptr);
@@ -90,13 +90,13 @@ struct CommunicatorMemoryManager {
   }
 
   template <typename T>
-  void preallocate(size_t size, auto &&...args) {
+  void fill(size_t size, auto &&...args) {
     auto &pool = this->template pool<T>();
 
     if (pool == nullptr) {
       pool = std::make_shared<MemoryPool<T>>();
     }
-    pool->preallocate(size, std::forward<decltype(args)>(args)...);
+    pool->fill(size, std::forward<decltype(args)>(args)...);
   }
 
   template <typename T>
