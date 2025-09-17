@@ -127,7 +127,7 @@ struct MatrixTile {
         processCount = 0;
     }
 
-    bool canBeRecycle() const {
+    bool canBeRecycled() const {
         return processCount == 0 && sent;
     }
 };

@@ -52,8 +52,8 @@ struct SingleTypeMemoryPool {
     if constexpr (requires { data->postProcess(); }) {
       data->postProcess();
     }
-    if constexpr (requires { data->canBeRecycle(); }) {
-      if (!data->canBeRecycle()) {
+    if constexpr (requires { data->canBeRecycled(); }) {
+      if (!data->canBeRecycled()) {
         return false;
       }
     }

@@ -67,8 +67,8 @@ void ProductState::execute(std::shared_ptr<MatrixTile<MT, MatrixId::A>> a) {
         auto b = bs.tile(a->colIdx, col);
 
         if (b != nullptr && rankShouldMakeProduct(a, b)) {
-            assert(a->canBeRecycle() == false);
-            assert(b->canBeRecycle() == false);
+            assert(a->canBeRecycled() == false);
+            assert(b->canBeRecycled() == false);
             assert(b->rowIdx == a->colIdx);
             assert(b->colIdx == col);
             auto p = getPAndUpdateCount(a, b);
@@ -90,8 +90,8 @@ void ProductState::execute(std::shared_ptr<MatrixTile<MT, MatrixId::B>> b) {
         auto a = as.tile(row, b->rowIdx);
 
         if (a != nullptr && rankShouldMakeProduct(a, b)) {
-            assert(a->canBeRecycle() == false);
-            assert(b->canBeRecycle() == false);
+            assert(a->canBeRecycled() == false);
+            assert(b->canBeRecycled() == false);
             assert(a->rowIdx == row);
             assert(a->colIdx == b->rowIdx);
             auto p = getPAndUpdateCount(a, b);

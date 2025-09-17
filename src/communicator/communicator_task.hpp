@@ -46,6 +46,15 @@ public:
     }
   }
 
+  bool shouldReturnMemory(std::shared_ptr<Input> data, bool isDataProcessedOnThisRank) {
+    // FIXME: we consider that canBeRecycled is always correct?
+    if constexpr (requires { data->canBeRecycled(); }) {
+      return true;
+    } else {
+      return !isDataProcessedOnThisRank;
+    }
+  }
+
   void execute(std::shared_ptr<Input> data) override {
     logh::infog(logh::IG::CommunicatorTaskExecute, "communicator task execute", "[", (int)task_->comm()->channel,
                 "]: rank = ", task_->comm()->comm->rank, ", isReceiver_ = ", isReceiver_);
@@ -75,15 +84,15 @@ public:
   void sendWithDestCB(std::shared_ptr<Input> data) {
     auto dests = destCB_(data);
     auto rankIt = std::find(dests.begin(), dests.end(), task_->comm()->comm->rank);
-    bool returnMemory = true;
+    bool isDataProcessedOnThisRank = false;
 
     if (rankIt != dests.end()) {
       addResult(data);
       dests.erase(rankIt);
-      returnMemory = false;
+      isDataProcessedOnThisRank = true;
     }
     if (!dests.empty()) {
-      comm::commSendData<Input>(task_->comm(), dests, data, returnMemory);
+      comm::commSendData<Input>(task_->comm(), dests, data, shouldReturnMemory(data, isDataProcessedOnThisRank));
     } else {
       callPostSend(data);
     }
@@ -91,26 +100,25 @@ public:
 
   void sendScatter(std::shared_ptr<Input> data) {
     int  receiver = receivers_[rankIdx_];
-    bool returnMemory = true;
 
     rankIdx_ = (rankIdx_ + 1) % receivers_.size();
     if (receiver == task_->comm()->comm->rank) {
       addResult(data);
       callPostSend(data);
     } else {
-      comm::commSendData<Input>(task_->comm(), {receiver}, data, returnMemory);
+      comm::commSendData<Input>(task_->comm(), {receiver}, data, shouldReturnMemory(data, false));
     }
   }
 
   void sendDistribute(std::shared_ptr<Input> data) {
-    bool returnMemory = true;
+    bool isDataProcessedOnThisRank = false;
 
     if (task_->options().sendersAreReceivers) {
       addResult(data);
-      returnMemory = false;
+      isDataProcessedOnThisRank = true;
     }
     if (!receivers_.empty()) {
-      comm::commSendData(task_->comm(), receivers_, data, returnMemory);
+      comm::commSendData(task_->comm(), receivers_, data, shouldReturnMemory(data, isDataProcessedOnThisRank));
     } else {
       callPostSend(data);
     }

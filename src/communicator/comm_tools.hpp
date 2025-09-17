@@ -596,7 +596,6 @@ void commPostSend(CommTaskHandle<TM> *, StorageId, PackageStorage<TM> storage, R
     std::shared_ptr<T> data = std::get<std::shared_ptr<T>>(storage.data);
     if constexpr (requires { data->postSend(); }) {
       data->postSend();
-      storage.returnMemory = true; // FIXME: not sure about that :/
     }
     if constexpr (!requires { data->pack(); }) {
       // the buffer is dynamically allocated when the data type does not
