@@ -485,7 +485,6 @@ inline void commSend(CommHandle *handle, Header const &header, int dest, Buffer 
 template <typename RT>
 void commSendAsync(CommHandle *handle, Header const &header, int dest, Buffer const &buf, RT request) {
   int tag = headerToTag(header);
-  ;
   checkMPI(MPI_Isend(buf.mem, buf.len, MPI_BYTE, dest, tag, handle->comm, request));
 }
 
