@@ -1,7 +1,7 @@
 #ifndef COMMUNICATOR_COMM_TOOLS
 #define COMMUNICATOR_COMM_TOOLS
 #include "../log.hpp"
-#include "serializer/serialize.hpp"
+#include "hedgehog/src/tools/meta_functions.h"
 #include "type_map.hpp"
 #include <cassert>
 #include <chrono>
@@ -11,7 +11,9 @@
 #include <mpi.h>
 #include <serializer/serializer.hpp>
 #include <set>
+#include <stdexcept>
 #include <thread>
+#include <type_traits>
 #include <variant>
 
 /*
@@ -288,11 +290,13 @@ Package commPack(std::shared_ptr<T> data) {
 
   if constexpr (requires { data->pack(); }) {
     package = data->pack();
-  } else {
-    serializer::Bytes bytes(64, 64);
-    size_t            size = serializer::serialize<serializer::Serializer<serializer::Bytes>>(bytes, 0, data);
-    Buffer            buf = Buffer{.mem = bytes.dropMem<char *>(), .len = size};
+  } else if constexpr (std::is_trivially_copyable_v<T>) {
+    Buffer buf = Buffer{.mem = new char[sizeof(T)], .len = sizeof(T)};
+    std::memcpy(buf.mem, data.get(), sizeof(T));
     package.data.push_back(buf);
+  } else {
+    throw std::invalid_argument("type " + tool::typeToStr<T>()
+                                + " does not implement `pack()` and is not trivially copyable.");
   }
   return package;
 }
@@ -305,8 +309,11 @@ template <typename T>
 Package commPackage(std::shared_ptr<T> data) {
   if constexpr (requires { data->package(); }) {
     return data->package();
+  } else if constexpr (std::is_trivially_copyable_v<T>) {
+    return Package{.data = std::vector<Buffer>({Buffer{new char[sizeof(T)], sizeof(T)}})};
   } else {
-    return Package{.data = std::vector<Buffer>({Buffer{new char[64], 64}})};
+    throw std::invalid_argument("type " + tool::typeToStr<T>()
+                                + " does not implement `package()` and is not trivially copyable.");
   }
 }
 
@@ -318,10 +325,12 @@ template <typename T>
 void commUnpack(Package &&package, std::shared_ptr<T> data) {
   if constexpr (requires { data->unpack(std::move(package)); }) {
     data->unpack(std::move(package));
-  } else if constexpr (!requires { data->package(); }) {
-    serializer::Bytes bytes(std::bit_cast<std::byte *>(package.data.front().mem), package.data.front().len,
-                            package.data.front().len);
-    serializer::deserialize<serializer::Serializer<serializer::Bytes>>(bytes, 0, data);
+  } else if constexpr (std::is_trivially_copyable_v<T>) {
+    std::memcpy(data.get(), package.data[0].mem, sizeof(T));
+    delete[] package.data[0].mem;
+  } else {
+    throw std::invalid_argument("type " + tool::typeToStr<T>()
+                                + " does not implement `unpack(Package)` and is not trivially copyable.");
   }
 }
 
