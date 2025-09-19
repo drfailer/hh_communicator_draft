@@ -73,7 +73,7 @@ struct TestGraph1 : hh::Graph<1, int, int> {
 };
 
 int main(int argc, char **argv) {
-  hh::comm::commInit(argc, argv);
+  hh::comm::commInit(&argc, &argv);
   hh::comm::CommHandle *ch = hh::comm::commCreate(true);
   auto data = std::make_shared<int>(4);
   TestGraph1 graph(ch);

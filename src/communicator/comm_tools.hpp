@@ -846,9 +846,9 @@ inline void commBarrier() {
   MPI_Barrier(MPI_COMM_WORLD);
 }
 
-inline void commInit(int argc, char **argv) {
+inline void commInit(int *argc, char ***argv) {
   int32_t provided = 0;
-  MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
+  MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided);
 }
 
 inline void commFinalize() {

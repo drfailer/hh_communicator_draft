@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(mpi_bridge)
+project(hh_communicator)
 
 set(CMAKE_CXX_STANDARD 20)
 
@@ -25,15 +25,15 @@ endif (NOT MSVC)
 set(source_files src/main.cpp)
 
 # executable
-add_executable(mpi_bridge ${source_files})
+add_executable(hh_communicator ${source_files})
 add_definitions(-DOMPI_SKIP_MPICXX)
-target_include_directories(mpi_bridge
+target_include_directories(hh_communicator
     PUBLIC
     lib/serializer-cpp/
     lib/hedgehog/
     ${MPI_INCLUDE_PATH}
 )
-target_link_libraries(mpi_bridge
+target_link_libraries(hh_communicator
     PRIVATE
     ${MPI_C_LIBRARIES}
 )

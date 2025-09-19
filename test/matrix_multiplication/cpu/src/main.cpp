@@ -105,7 +105,7 @@ UTest(mm_result, std::shared_ptr<Matrix<MT, MatrixId::A>> A, std::shared_ptr<Mat
 int main(int argc, char **argv) {
     Config config = parseArgs(argc, argv);
 
-    hh::comm::commInit(argc, argv);
+    hh::comm::commInit(&argc, &argv);
     hh::comm::CommHandle *commHandle = hh::comm::commCreate(true);
 
     std::shared_ptr<Matrix<MT, MatrixId::A>> A = nullptr;
