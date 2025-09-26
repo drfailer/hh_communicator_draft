@@ -5,6 +5,8 @@
 // TODO: add -I
 #include "/home/rvc1/Programming/usr/include/cblas.h"
 
+int GLOBAL_RANK = 0;
+
 template <MatrixId Id>
 std::shared_ptr<Matrix<MT, Id>> createMatrix(size_t cols, size_t rows) {
     auto matrix = std::make_shared<Matrix<MT, Id>>(cols, rows);
@@ -40,6 +42,7 @@ struct Config {
     size_t K;
     size_t tileSize;
     size_t poolSize;
+    size_t threads;
 };
 
 Config parseArgs(int argc, char **argv) {
@@ -52,6 +55,7 @@ Config parseArgs(int argc, char **argv) {
     ap::add_size_t_arg(&ap, "-tileSize", &config.tileSize, 256);
     ap::add_size_t_arg(&ap, "-poolSize", &config.poolSize, 256,
                        "size of the memory pool for the block (there are 4 pools for A, B, C and P blocks)");
+    ap::add_size_t_arg(&ap, "-threads", &config.threads, 40);
     auto status = ap::argument_parser_run(&ap);
 
     if (status != ap::ArgumentParserStatus::Ok) {
@@ -73,7 +77,7 @@ UTest(mm_result, std::shared_ptr<Matrix<MT, MatrixId::A>> A, std::shared_ptr<Mat
 
     // int nbProcesses = -1;
     // MPI_Comm_size(MPI_COMM_WORLD, &nbProcesses);
-    openblas_set_num_threads_local(20);
+    openblas_set_num_threads(20);
 
     if constexpr (std::is_same_v<MT, float>) {
         cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, M, N, K, 1.f, (const float *)A->mem, A->ld,
@@ -105,8 +109,11 @@ UTest(mm_result, std::shared_ptr<Matrix<MT, MatrixId::A>> A, std::shared_ptr<Mat
 int main(int argc, char **argv) {
     Config config = parseArgs(argc, argv);
 
-    hh::comm::commInit(&argc, &argv);
     hh::comm::CommHandle *commHandle = hh::comm::commCreate(true);
+    hh::comm::commInit(commHandle, &argc, &argv);
+
+    // TODO: we need an function in comm tool to interface this
+    GLOBAL_RANK = clh_node_id(commHandle->clh);
 
     std::shared_ptr<Matrix<MT, MatrixId::A>> A = nullptr;
     std::shared_ptr<Matrix<MT, MatrixId::B>> B = nullptr;
@@ -119,7 +126,7 @@ int main(int argc, char **argv) {
         std::memset(C->mem, 0, sizeof(MT) * C->rows * C->cols);
     }
 
-    MMGraph graph(commHandle, config.M, config.N, config.K, config.tileSize, config.poolSize);
+    MMGraph graph(commHandle, config.M, config.N, config.K, config.tileSize, config.poolSize, config.threads);
 
     // hh::GraphSignalHandler<MMGraphIO>::registerGraph(&graph);
     // hh::GraphSignalHandler<MMGraphIO>::setDebugOptions(hh::DebugOptions::ALL);
@@ -134,7 +141,7 @@ int main(int argc, char **argv) {
         graph.pushData(B);
         graph.pushData(C);
     }
-    hh::comm::commBarrier();
+    hh::comm::commBarrier(commHandle);
     graph.finishPushingData();
     graph.waitForTermination();
     logh::info("graph terminated");
@@ -143,27 +150,30 @@ int main(int argc, char **argv) {
     timer_start(create_dot_files);
     graph.createDotFile("build/graph" + std::to_string(commHandle->rank) + ".dot", hh::ColorScheme::EXECUTION,
                         hh::StructureOptions::QUEUE);
-    hh::comm::commBarrier();
+    hh::comm::commBarrier(commHandle);
     timer_end(create_dot_files);
 
-    if (commHandle->rank == 0 && config.M < 10 && config.N < 10 && config.K < 10) {
+    hh::comm::commBarrier(commHandle);
+    hh::comm::commFinalize(commHandle);
+    hh::comm::commDestroy(commHandle);
+
+    if (GLOBAL_RANK != 0) {
+        return 0;
+    }
+
+    if (config.M < 10 && config.N < 10 && config.K < 10) {
         printMatrix("A", A);
         printMatrix("B", B);
         printMatrix("C", C);
     }
 
-    if (commHandle->rank == 0) {
-        utest_start();
-        urun_test(mm_result, A, B, C);
-        utest_end();
-
-        timer_report_prec(graph_execution, milliseconds);
-        timer_report_prec(create_dot_files, milliseconds);
-    }
-
+    timer_report_prec(graph_execution, milliseconds);
+    timer_report_prec(create_dot_files, milliseconds);
     std::cout << "test" << graph.mm->extraPrintingInformation() << std::endl;
 
-    hh::comm::commDestroy(commHandle);
-    hh::comm::commFinalize();
+    utest_start();
+    urun_test(mm_result, A, B, C);
+    utest_end();
+
     return 0;
 }

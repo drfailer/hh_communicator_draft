@@ -1,9 +1,9 @@
 #include "state.hpp"
 
+extern int GLOBAL_RANK;
+
 std::string MPIRank() {
-    int rank = -1;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    return "(" + std::to_string(rank) + ")";
+    return "(" + std::to_string(GLOBAL_RANK) + ")";
 }
 
 /******************************************************************************/

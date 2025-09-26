@@ -12,13 +12,12 @@ set(Hedgehog_INCLUDE_DIR lib/hedgehog/)
 
 # Need to defined variable Hedgehog_INCLUDE_DIR to the hedgehog path hedgehog
 find_package(Hedgehog REQUIRED)
-find_package(MPI REQUIRED)
 
 set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} ${Hedgehog_CXX_FLAGS})
 
 if (NOT MSVC)
-	# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Werror -Wuninitialized -pedantic -g")
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Werror -Wuninitialized -pedantic -O3")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Werror -Wuninitialized -pedantic -g")
+	# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Werror -Wuninitialized -Wno-sign-compare -pedantic -O3")
 endif (NOT MSVC)
 
 # files
@@ -26,14 +25,18 @@ set(source_files src/main.cpp)
 
 # executable
 add_executable(hh_communicator ${source_files})
-add_definitions(-DOMPI_SKIP_MPICXX)
 target_include_directories(hh_communicator
     PUBLIC
     lib/serializer-cpp/
     lib/hedgehog/
-    ${MPI_INCLUDE_PATH}
+    /home/rvc1/Programming/usr/include
+    /home/rvc1/Programming/projects/clh/
+)
+target_link_directories(hh_communicator
+    PRIVATE
+    /home/rvc1/Programming/projects/clh/build/lib/
 )
 target_link_libraries(hh_communicator
     PRIVATE
-    ${MPI_C_LIBRARIES}
+    clh
 )

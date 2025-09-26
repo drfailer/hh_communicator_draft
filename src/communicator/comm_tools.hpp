@@ -1,5 +1,7 @@
 #ifndef COMMUNICATOR_COMM_TOOLS
 #define COMMUNICATOR_COMM_TOOLS
+#include "../../../clh/clh/buffer.h"
+#include "../../../clh/clh/clh.h"
 #include "../log.hpp"
 #include "hedgehog/src/tools/meta_functions.h"
 #include "type_map.hpp"
@@ -8,7 +10,6 @@
 #include <cstddef>
 #include <cstdlib>
 #include <map>
-#include <mpi.h>
 #include <serializer/serializer.hpp>
 #include <set>
 #include <stdexcept>
@@ -59,10 +60,11 @@
  *
  * ## Protocol detail
  *
- * - Header (MPI tag): [channel(8b), signal(1b), typeId(6b), packageId(14b), bufferId(2b)]
+ * - Header (tag):     [source(32b), channel(8b), signal(1b), typeId(6b), packageId(14b), bufferId(2b)]
  * - Content (buffer): [Signal(8bits)|Data(?)]
  *
  * Header components:
+ * - channel: identifier of the CommunicatorTask ------------------- [limit = MAX_UINT]
  * - channel: identifier of the CommunicatorTask ------------------- [limit = 256]
  * - signal: boolean (signal or data?) ----------------------------- [NA]
  * - typeId: identifier of the transimitted type (cf type map) ----- [limit = 64]
@@ -96,9 +98,8 @@ struct CommHandle {
   int           rank;
   int           nbProcesses;
   unsigned char idGenerator;
-  MPI_Comm      comm;
-  std::mutex    mpiMutex;
   bool          collectStats;
+  CLH_Handle    clh;
 };
 
 inline CommHandle *commCreate(bool collectStats = false) {
@@ -107,10 +108,8 @@ inline CommHandle *commCreate(bool collectStats = false) {
   handle->rank = -1;
   handle->nbProcesses = -1;
   handle->idGenerator = 0;
-  handle->comm = MPI_COMM_WORLD;
   handle->collectStats = collectStats;
-  MPI_Comm_rank(handle->comm, &handle->rank);
-  MPI_Comm_size(handle->comm, &handle->nbProcesses);
+  handle->clh = nullptr;
   return handle;
 }
 
@@ -125,10 +124,7 @@ using u32 = unsigned int;
 using u16 = unsigned short;
 using u8 = unsigned char;
 
-struct Buffer {
-  char *mem;
-  u64   len;
-};
+using Buffer = CLH_Buffer;
 
 struct Package {
   std::vector<Buffer> data;
@@ -143,14 +139,14 @@ inline size_t commPackageSize(Package const &package) {
 }
 
 struct Header {
-  u8  padding : 1; // must be a positive number... :D
-  u8  signal : 1; // 0 -> data | 1 -> signal
+  u32 source : 32;
+  u8  signal : 2; // 0 -> data | 1 -> signal
   u8  typeId : 6; // 64 types (number of types managed by one task)
   u8  channel : 8; // 256 channels (number of CommTasks)
   u16 packageId : 14; // 16384 packages
   u8  bufferId : 2; // 4 buffers per package
 };
-static_assert(sizeof(Header) <= sizeof(u32));
+static_assert(sizeof(Header) <= sizeof(u64));
 
 enum class CommSignal : unsigned char {
   None,
@@ -194,7 +190,7 @@ struct PackageWarehouse {
 struct CommOperation {
   u16         packageId;
   u8          bufferId;
-  MPI_Request request;
+  CLH_Request request;
   StorageId   storageId;
 };
 
@@ -203,7 +199,7 @@ struct CommPendingRecvData {
   Header header;
 };
 
-inline int  headerToTag(Header header);
+inline u64  headerToTag(Header header);
 inline bool operator<(CommPendingRecvData const &lhs, CommPendingRecvData const &rhs) {
   if (lhs.source == rhs.source) {
     return headerToTag(lhs.header) < headerToTag(rhs.header);
@@ -212,8 +208,8 @@ inline bool operator<(CommPendingRecvData const &lhs, CommPendingRecvData const 
 }
 
 struct CommQueues {
-  std::vector<CommOperation>    sendOps; // send operations (MPI_Request)
-  std::vector<CommOperation>    recvOps; // recv operations (MPI_Request)
+  std::vector<CommOperation>    sendOps; // send operations (CLH_Request)
+  std::vector<CommOperation>    recvOps; // recv operations (CLH_Request)
   std::set<CommPendingRecvData> createDataQueue; // wait for memory manager
   std::mutex                    mutex;
 };
@@ -348,35 +344,59 @@ inline u16 commGeneratePackageId() {
 
 // Helper //////////////////////////////////////////////////////////////////////
 
-inline void dbg_print_binary(int i) {
-  std::string str = "0b00000000000000000000000000000000";
+inline void dbg_print_binary(u64 i) {
+  std::string str = "0b0000000000000000000000000000000000000000000000000000000000000000";
   size_t      idx = 0;
 
-  while (idx < 32) {
+  while (idx < 64) {
     str[str.size() - idx - 1] = (i >> idx) % 2 == 0 ? '0' : '1';
     ++idx;
   }
-  printf("%d = %s\n", i, str.c_str());
+  printf("%ld = %s\n", i, str.c_str());
 }
 
-inline int headerToTag(Header header) {
-  int tag = 0;
-  tag |= 0b01000000000000000000000000000000 & (header.signal << (2 + 14 + 8 + 6));
-  tag |= 0b00111111000000000000000000000000 & (header.typeId << (2 + 14 + 8));
-  tag |= 0b00000000111111110000000000000000 & (header.channel << (2 + 14));
-  tag |= 0b00000000000000001111111111111100 & (header.packageId << (2));
-  tag |= 0b00000000000000000000000000000011 & (header.bufferId);
+enum HeaderFields {
+  SOURCE = 0,
+  SIGNAL = 1,
+  TYPE_ID = 2,
+  CHANNEL = 3,
+  PACKAGE_ID = 4,
+  BUFFER_ID = 5,
+};
+
+struct HeaderFieldInfo {
+  size_t offset;
+  u64    mask;
+};
+
+constexpr HeaderFieldInfo HEADER_FIELDS[]{
+    {.offset = 32, .mask = 0b1111111111111111111111111111111100000000000000000000000000000000},
+    {.offset = 30, .mask = 0b0000000000000000000000000000000011000000000000000000000000000000},
+    {.offset = 24, .mask = 0b0000000000000000000000000000000000111111000000000000000000000000},
+    {.offset = 16, .mask = 0b0000000000000000000000000000000000000000111111110000000000000000},
+    {.offset = 2, .mask = 0b0000000000000000000000000000000000000000000000001111111111111100},
+    {.offset = 0, .mask = 0b0000000000000000000000000000000000000000000000000000000000000011},
+};
+
+inline u64 headerToTag(Header header) {
+  u64 tag = 0;
+  tag |= (u64)header.source << HEADER_FIELDS[SOURCE].offset;
+  tag |= (u64)header.signal << HEADER_FIELDS[SIGNAL].offset;
+  tag |= (u64)header.typeId << HEADER_FIELDS[TYPE_ID].offset;
+  tag |= (u64)header.channel << HEADER_FIELDS[CHANNEL].offset;
+  tag |= (u64)header.packageId << HEADER_FIELDS[PACKAGE_ID].offset;
+  tag |= (u64)header.bufferId << HEADER_FIELDS[BUFFER_ID].offset;
   return tag;
 }
 
-inline Header tagToHeader(int tag) {
+inline Header tagToHeader(u64 tag) {
   Header header;
-  header.padding = 0;
-  header.signal = (tag & 0b01000000000000000000000000000000) >> (2 + 14 + 8 + 6);
-  header.typeId = (tag & 0b00111111000000000000000000000000) >> (2 + 14 + 8);
-  header.channel = (tag & 0b00000000111111110000000000000000) >> (2 + 14);
-  header.packageId = (tag & 0b00000000000000001111111111111100) >> (2);
-  header.bufferId = (tag & 0b00000000000000000000000000000011);
+  header.source = (tag & HEADER_FIELDS[SOURCE].mask) >> HEADER_FIELDS[SOURCE].offset;
+  header.signal = (tag & HEADER_FIELDS[SIGNAL].mask) >> HEADER_FIELDS[SIGNAL].offset;
+  header.typeId = (tag & HEADER_FIELDS[TYPE_ID].mask) >> HEADER_FIELDS[TYPE_ID].offset;
+  header.channel = (tag & HEADER_FIELDS[CHANNEL].mask) >> HEADER_FIELDS[CHANNEL].offset;
+  header.packageId = (tag & HEADER_FIELDS[PACKAGE_ID].mask) >> HEADER_FIELDS[PACKAGE_ID].offset;
+  header.bufferId = (tag & HEADER_FIELDS[BUFFER_ID].mask) >> HEADER_FIELDS[BUFFER_ID].offset;
   return header;
 }
 
@@ -389,14 +409,12 @@ void commInfog(logh::IG ig, std::string const &name, auto handle, Ts &&...args) 
   }
 }
 
-inline void checkMPI(int code) {
-  if (code == 0) {
-    return;
+inline bool checkCLH(CLH_Status code) {
+  if (code == CLH_STATUS_SUCCESS) {
+    return true;
   }
-  char error[100] = {0};
-  int  len = 0;
-  MPI_Error_string(code, error, &len);
-  logh::error("mpi error: ", std::string(error, error + len));
+  logh::error("clh error: ", clh_status_string(code));
+  return false;
 }
 
 /*
@@ -405,22 +423,13 @@ inline void checkMPI(int code) {
 template <typename TM>
 void commFlushQueueAndWarehouse(CommTaskHandle<TM> *handle, std::vector<CommOperation> &queue,
                                 std::map<StorageId, PackageStorage<TM>> &wh) {
-  std::vector<MPI_Request> requests;
+  std::vector<CLH_Request> requests;
 
   for (auto &op : queue) {
-    std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
     logh::error("request canceled");
-    checkMPI(MPI_Cancel(&op.request));
+    clh_cancel(handle->comm->clh, &op.request);
     requests.push_back(op.request);
   }
-
-  int done = false;
-  do {
-    std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
-    using namespace std::chrono_literals;
-    std::this_thread::sleep_for(4ms);
-    checkMPI(MPI_Testall(requests.size(), requests.data(), &done, MPI_STATUSES_IGNORE));
-  } while (!done);
   queue.clear();
 
   for (auto it : wh) {
@@ -472,20 +481,22 @@ bool commCreateRecvStorage(CommTaskHandle<TM> *handle, StorageId storageId, u8 t
 // Send ////////////////////////////////////////////////////////////////////////
 
 /*
- * Interface to MPI_Send.
+ * Interface to clh_send
  */
 inline void commSend(CommHandle *handle, Header const &header, int dest, Buffer const &buf) {
-  int tag = headerToTag(header);
-  checkMPI(MPI_Send(buf.mem, buf.len, MPI_BYTE, dest, tag, handle->comm));
+  u64         tag = headerToTag(header);
+  CLH_Request request = clh_request_create();
+  checkCLH(clh_send(handle->clh, dest, tag, buf, &request));
+  checkCLH(clh_wait(handle->clh, &request));
+  clh_request_destroy(&request);
 }
 
 /*
- * Interface to MPI_Isend.
+ * Interface to clh_send
  */
-template <typename RT>
-void commSendAsync(CommHandle *handle, Header const &header, int dest, Buffer const &buf, RT request) {
-  int tag = headerToTag(header);
-  checkMPI(MPI_Isend(buf.mem, buf.len, MPI_BYTE, dest, tag, handle->comm, request));
+inline void commSendAsync(CommHandle *handle, Header const &header, int dest, Buffer const &buf, CLH_Request *request) {
+  u64 tag = headerToTag(header);
+  checkCLH(clh_send(handle->clh, dest, tag, buf, request));
 }
 
 /*
@@ -494,7 +505,7 @@ void commSendAsync(CommHandle *handle, Header const &header, int dest, Buffer co
 template <typename TM>
 void commSendSignal(CommTaskHandle<TM> *handle, std::vector<int> const &dests, CommSignal signal) {
   Header header = {
-      .padding = 0,
+      .source = (u32)handle->comm->rank,
       .signal = 1,
       .typeId = 0,
       .channel = handle->channel,
@@ -511,7 +522,6 @@ void commSendSignal(CommTaskHandle<TM> *handle, std::vector<int> const &dests, C
       std::memcpy(&buf[1], &handle->packagesCount[dest], size);
       len = 1 + size;
     }
-    std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
     commSend(handle->comm, header, dest, Buffer{buf, len});
   }
 }
@@ -563,7 +573,7 @@ void commSendData(CommTaskHandle<TM> *handle, std::vector<int> const &dests, std
                   bool returnMemory = true) {
   auto [storageId, storage] = commCreateSendStorage(handle, dests, data, returnMemory);
   Header header = {
-      .padding = 0,
+      .source = (u32)handle->comm->rank,
       .signal = 0,
       .typeId = storage.typeId,
       .channel = handle->channel,
@@ -586,10 +596,9 @@ void commSendData(CommTaskHandle<TM> *handle, std::vector<int> const &dests, std
       handle->queues.sendOps.push_back(CommOperation{
           .packageId = storageId.packageId,
           .bufferId = header.bufferId,
-          .request = {},
+          .request = clh_request_create(),
           .storageId = storageId,
       });
-      std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
       commSendAsync(handle->comm, header, dest, storage.package.data[i], &handle->queues.sendOps.back().request);
     }
   }
@@ -630,13 +639,9 @@ void commProcessSendOpsQueue(CommTaskHandle<TM> *handle, ReturnDataCB returnMemo
   }
 
   do {
+    clh_progress_all(handle->comm->clh); // ???
     for (auto it = handle->queues.sendOps.begin(); it != handle->queues.sendOps.end();) {
-      int                         flag = 0;
-      MPI_Status                  status;
-      std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
-      checkMPI(MPI_Test(&it->request, &flag, &status));
-
-      if (flag) {
+      if (clh_request_completed(handle->comm->clh, &it->request)) {
         std::lock_guard<std::mutex> whLock(handle->wh.mutex);
         assert(handle->wh.sendStorage.contains(it->storageId));
         PackageStorage<TM> &storage = handle->wh.sendStorage.at(it->storageId);
@@ -646,6 +651,7 @@ void commProcessSendOpsQueue(CommTaskHandle<TM> *handle, ReturnDataCB returnMemo
           commPostSend(handle, it->storageId, storage, returnMemory);
           handle->wh.sendStorage.erase(it->storageId);
         }
+        clh_request_destroy(&it->request);
         handle->queues.sendOps.erase(it);
       } else {
         it++;
@@ -657,18 +663,34 @@ void commProcessSendOpsQueue(CommTaskHandle<TM> *handle, ReturnDataCB returnMemo
 // Recv ////////////////////////////////////////////////////////////////////////
 
 /*
- * Interface to MPI_Recv.
+ * Interface to clh_recv.
  */
-inline void commRecv(CommHandle *handle, int source, int tag, Buffer const &buf, MPI_Status *status) {
-  checkMPI(MPI_Recv(buf.mem, buf.len, MPI_BYTE, source, tag, handle->comm, status));
+inline void commRecv(CommHandle *handle, u64 tag, u64 tagMask, Buffer const &buf, CLH_Request *request) {
+  checkCLH(clh_recv(handle->clh, tag, tagMask, buf, request));
+  checkCLH(clh_wait(handle->clh, request));
+  clh_request_destroy(request);
 }
 
 /*
- * Interface to MPI_Irecv.
+ * Interface to clh_recv.
  */
-inline void commRecvAsync(CommHandle *handle, int source, Header header, Buffer const &buf, MPI_Request *request) {
-  int tag = headerToTag(header);
-  checkMPI(MPI_Irecv(buf.mem, buf.len, MPI_BYTE, source, tag, handle->comm, request));
+inline void commRecvAsync(CommHandle *handle, Header header, Buffer const &buf, CLH_Request *request) {
+  u64 tag = headerToTag(header);
+  checkCLH(clh_recv(handle->clh, tag, 0xFFFFFFFFFFFFFFFF, buf, request));
+}
+
+template <typename TM>
+inline bool commProbe(CommTaskHandle<TM> *handle, CLH_Request *request) {
+  Header header = {
+      .source = 0,
+      .signal = 0,
+      .typeId = 0,
+      .channel = handle->channel,
+      .packageId = 0,
+      .bufferId = 0,
+  };
+  u64 tag = headerToTag(header), tagMask = HEADER_FIELDS[CHANNEL].mask;
+  return clh_probe(handle->comm->clh, tag, tagMask, request);
 }
 
 /*
@@ -678,35 +700,30 @@ inline void commRecvAsync(CommHandle *handle, int source, Header header, Buffer 
  */
 template <typename TM>
 void commRecvSignal(CommTaskHandle<TM> *handle, int &source, CommSignal &signal, Header &header, Buffer &buf) {
-  MPI_Status status;
-  int        flag = false;
+  CLH_Request request = clh_request_create();
 
   signal = CommSignal::None;
   source = -1;
-  std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
-  checkMPI(MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, handle->comm->comm, &flag, &status));
 
-  if (flag) {
-    header = tagToHeader(status.MPI_TAG);
-
-    if (header.channel != handle->channel) {
-      return;
-    }
+  // TODO: probe for my rank / my channel
+  if (commProbe(handle, &request)) {
+    u64 tag = clh_request_tag(&request);
+    header = tagToHeader(tag);
 
     if (header.signal == 0) {
       std::lock_guard<std::mutex> queuesLock(handle->queues.mutex);
       handle->queues.createDataQueue.insert(CommPendingRecvData{
-          .source = status.MPI_SOURCE,
+          .source = (int)header.source,
           .header = header,
       });
       signal = CommSignal::Data;
     } else {
       // TODO: do we want async here?
-      commRecv(handle->comm, status.MPI_SOURCE, status.MPI_TAG, buf, &status);
+      commRecv(handle->comm, tag, 0xFFFFFFFFFFFFFFFF, buf, &request);
       signal = (CommSignal)buf.mem[0];
     }
-    source = status.MPI_SOURCE;
-    comm::commInfog(logh::IG::Comm, "comm", handle, "commRecvSignal -> ", " source = ", status.MPI_SOURCE,
+    source = (int)header.source;
+    comm::commInfog(logh::IG::Comm, "comm", handle, "commRecvSignal -> ", " source = ", source,
                     " signal = ", (int)signal);
   }
 }
@@ -741,12 +758,10 @@ bool commRecvData(CommTaskHandle<TM> *handle, CommPendingRecvData const &prd, Cr
   handle->queues.recvOps.push_back(CommOperation{
       .packageId = packageId,
       .bufferId = bufferId,
-      .request = {},
+      .request = clh_request_create(),
       .storageId = storageId,
   });
-  std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
-  commRecvAsync(handle->comm, prd.source, prd.header, storage.package.data[bufferId],
-                &handle->queues.recvOps.back().request);
+  commRecvAsync(handle->comm, prd.header, storage.package.data[bufferId], &handle->queues.recvOps.back().request);
   return true;
 }
 
@@ -806,20 +821,16 @@ void commPostRecv(CommTaskHandle<TM> *handle, StorageId storageId, PackageStorag
 template <typename TM, typename ProcessCB>
 void commProcessRecvOpsQueue(CommTaskHandle<TM> *handle, ProcessCB processData, bool flush = false) {
   std::lock_guard<std::mutex> queuesLock(handle->queues.mutex);
+
+  clh_progress_all(handle->comm->clh); // ???
   for (auto it = handle->queues.recvOps.begin(); it != handle->queues.recvOps.end();) {
-    int        flag = 0;
-    MPI_Status status;
-
-    std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
-    checkMPI(MPI_Test(&it->request, &flag, &status));
-
     if (handle->comm->collectStats) {
       std::lock_guard<std::mutex> statsLock(handle->stats.mutex);
       handle->stats.maxRecvOpsSize = std::max(handle->stats.maxRecvOpsSize, handle->queues.recvOps.size());
       handle->stats.maxRecvStorageSize = std::max(handle->stats.maxRecvStorageSize, handle->wh.recvStorage.size());
     }
 
-    if (flag) {
+    if (clh_request_completed(handle->comm->clh, &it->request)) {
       std::lock_guard<std::mutex> whLock(handle->wh.mutex);
       assert(handle->wh.recvStorage.contains(it->storageId));
       auto &storage = handle->wh.recvStorage.at(it->storageId);
@@ -829,6 +840,7 @@ void commProcessRecvOpsQueue(CommTaskHandle<TM> *handle, ProcessCB processData, 
         commPostRecv(handle, it->storageId, storage, processData);
         handle->wh.recvStorage.erase(it->storageId);
       }
+      clh_request_destroy(&it->request);
       handle->queues.recvOps.erase(it);
     } else {
       it++;
@@ -842,17 +854,18 @@ void commProcessRecvOpsQueue(CommTaskHandle<TM> *handle, ProcessCB processData, 
 
 // Other functions /////////////////////////////////////////////////////////////
 
-inline void commBarrier() {
-  MPI_Barrier(MPI_COMM_WORLD);
+inline void commBarrier(CommHandle *handle) {
+  clh_barrier(handle->clh);
 }
 
-inline void commInit(int *argc, char ***argv) {
-  int32_t provided = 0;
-  MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided);
+inline void commInit(CommHandle *handle, int *, char ***) {
+  clh_init(&handle->clh);
+  handle->rank = clh_node_id(handle->clh);
+  handle->nbProcesses = clh_nb_nodes(handle->clh);
 }
 
-inline void commFinalize() {
-  MPI_Finalize();
+inline void commFinalize(CommHandle *handle) {
+  clh_finalize(handle->clh);
 }
 
 // stats exchange //////////////////////////////////////////////////////////////
@@ -862,15 +875,14 @@ inline void commFinalize() {
  */
 template <typename TM>
 void commSendStats(CommTaskHandle<TM> *handle) {
-  std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
-  serializer::Bytes           buf;
-  Header                      header = {
-                           .padding = 0,
-                           .signal = 0,
-                           .typeId = 0,
-                           .channel = handle->channel,
-                           .packageId = 0,
-                           .bufferId = 0,
+  serializer::Bytes buf;
+  Header            header = {
+                 .source = (u32)handle->comm->rank,
+                 .signal = 0,
+                 .typeId = 0,
+                 .channel = handle->channel,
+                 .packageId = 0,
+                 .bufferId = 0,
   };
 
   using Serializer = serializer::Serializer<serializer::Bytes>;
@@ -880,6 +892,7 @@ void commSendStats(CommTaskHandle<TM> *handle) {
   comm::commInfog(logh::IG::Stats, "stats", handle, "commSendStats -> ", " buf size = ", buf.size(),
                   ", storageStats size = ", handle->stats.storageStats.size());
   commSend(handle->comm, header, 0, Buffer{std::bit_cast<char *>(buf.data()), buf.size()});
+  clh_progress_all(handle->comm->clh);
 }
 
 /*
@@ -887,16 +900,16 @@ void commSendStats(CommTaskHandle<TM> *handle) {
  */
 template <typename TM>
 std::vector<CommTaskStats> commGatherStats(CommTaskHandle<TM> *handle) {
-  int                        bufSize;
   std::vector<CommTaskStats> stats(handle->comm->nbProcesses);
-  int                        tag = headerToTag(Header{
-                             .padding = 0,
-                             .signal = 0,
-                             .typeId = 0,
-                             .channel = handle->channel,
-                             .packageId = 0,
-                             .bufferId = 0,
-  });
+  int                        bufSize;
+  Header                     header = {
+                          .source = 0,
+                          .signal = 0,
+                          .typeId = 0,
+                          .channel = handle->channel,
+                          .packageId = 0,
+                          .bufferId = 0,
+  };
 
   stats[0].storageStats = std::move(handle->stats.storageStats);
   stats[0].maxSendOpsSize = handle->stats.maxSendOpsSize;
@@ -905,13 +918,19 @@ std::vector<CommTaskStats> commGatherStats(CommTaskHandle<TM> *handle) {
   stats[0].maxSendStorageSize = handle->stats.maxSendStorageSize;
   stats[0].maxRecvStorageSize = handle->stats.maxRecvStorageSize;
   for (int i = 1; i < handle->comm->nbProcesses; ++i) {
-    std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
-    MPI_Status                  status;
-    MPI_Probe(i, tag, handle->comm->comm, &status);
-    MPI_Get_count(&status, MPI_BYTE, &bufSize);
+    header.source = i;
+    CLH_Request request;
+    u64     tag = headerToTag(header);
+    u64     tagMask = HEADER_FIELDS[SOURCE].mask | HEADER_FIELDS[CHANNEL].mask;
+    while (!clh_probe(handle->comm->clh, tag, tagMask, &request)) {
+      using namespace std::chrono_literals;
+      clh_progress_all(handle->comm->clh);
+      std::this_thread::sleep_for(1ms);
+    }
+    bufSize = clh_request_buffer_len(&request);
 
     serializer::Bytes buf(bufSize, bufSize);
-    commRecv(handle->comm, i, status.MPI_TAG, Buffer{std::bit_cast<char *>(buf.data()), buf.size()}, &status);
+    commRecv(handle->comm, tag, tagMask, Buffer{std::bit_cast<char *>(buf.data()), buf.size()}, &request);
 
     using Serializer = serializer::Serializer<serializer::Bytes>;
     serializer::deserialize<Serializer>(buf, 0, stats[i].maxSendOpsSize, stats[i].maxRecvOpsSize,

@@ -3,7 +3,6 @@
 #include "log.hpp"
 #include <hedgehog/hedgehog.h>
 #include <iostream>
-#include <mpi.h>
 #include <mutex>
 
 std::mutex stdout_mutex;
@@ -73,8 +72,9 @@ struct TestGraph1 : hh::Graph<1, int, int> {
 };
 
 int main(int argc, char **argv) {
-  hh::comm::commInit(&argc, &argv);
   hh::comm::CommHandle *ch = hh::comm::commCreate(true);
+
+  hh::comm::commInit(ch, &argc, &argv);
   auto data = std::make_shared<int>(4);
   TestGraph1 graph(ch);
   std::vector<int> results;
@@ -83,7 +83,7 @@ int main(int argc, char **argv) {
 
   graph.executeGraph(true);
   graph.pushData(data);
-  hh::comm::commBarrier();
+  hh::comm::commBarrier(ch);
   graph.finishPushingData();
 
   if (ch->rank == 0) {
@@ -94,13 +94,13 @@ int main(int argc, char **argv) {
 
   graph.waitForTermination();
 
-  graph.createDotFile(std::to_string(ch->rank) + "test.dot");
-  hh::comm::commBarrier();
+  graph.createDotFile("graph_" + std::to_string(ch->rank) + ".dot");
+  hh::comm::commBarrier(ch);
   if (ch->rank == 0) {
     HH_DBG(results);
   }
 
+  hh::comm::commFinalize(ch);
   hh::comm::commDestroy(ch);
-  hh::comm::commFinalize();
   return 0;
 }

@@ -147,10 +147,12 @@ private:
   void sendDeamon() {
     using namespace std::chrono_literals;
     while (!senderDisconnect_) {
-      sendDeamonLoopDbg();
+      // sendDeamonLoopDbg();
       comm::commProcessSendOpsQueue(comm_, ReturnMemory<Types...>(mm_));
+      // clh_progress_all(comm_->comm->clh); // ???
       std::this_thread::sleep_for(4ms);
     }
+    comm::commProcessSendOpsQueue(comm_, ReturnMemory<Types...>(mm_), true);
     comm::commSendSignal(comm_, comm_->receivers, comm::CommSignal::Disconnect);
     comm::commInfog(logh::IG::SenderDisconnect, "sender disconnect", comm_);
     comm::commProcessSendOpsQueue(comm_, ReturnMemory<Types...>(mm_), true);
@@ -173,8 +175,7 @@ private:
     while (isConnected(connections) || !comm_->queues.recvOps.empty() || !comm_->queues.createDataQueue.empty()) {
       comm::commRecvSignal(comm_, source, signal, header, buf);
 
-      recvDeamonLoopDbg(connections);
-
+      // recvDeamonLoopDbg(connections);
       switch (signal) {
       case comm::CommSignal::None:
         break;
@@ -187,6 +188,7 @@ private:
       }
       comm::commProcessRecvDataQueue(comm_, GetMemory<Types...>(mm_));
       comm::commProcessRecvOpsQueue(comm_, ProcessData(this->task()));
+      // clh_progress_all(comm_->comm->clh); // ???
       std::this_thread::sleep_for(4ms);
     }
     comm::commInfog(logh::IG::ReceiverEnd, "receiver end", comm_);
@@ -237,7 +239,7 @@ public:
       return infos;
     }
 
-    comm::commBarrier();
+    comm::commBarrier(comm_->comm);
 
     size_t nbProcesses = comm_->comm->nbProcesses;
     if (comm_->comm->rank == 0) {
@@ -437,10 +439,10 @@ public:
   }
 
 private:
-  std::thread                                                deamon_;
+  std::thread                                 deamon_;
   std::shared_ptr<tool::MemoryPool<Types...>> mm_;
-  comm::CommTaskHandle<TypesIds>                            *comm_;
-  bool                                                       senderDisconnect_;
+  comm::CommTaskHandle<TypesIds>             *comm_;
+  bool                                        senderDisconnect_;
 
 private:
   std::vector<bool> connectionsDbg(std::vector<Connection> const &connections) const {
@@ -456,7 +458,7 @@ private:
 
   void sendDeamonLoopDbg() {
     static size_t dbg_idx = 0;
-    if (dbg_idx++ == 4000) {
+    if (dbg_idx++ == 40000) {
       dbg_idx = 0;
       logh::warn("sender still running: channel = ", (int)comm_->channel, ", rank = ", comm_->comm->rank,
                  ", queue size = ", comm_->queues.sendOps.size(),
@@ -466,17 +468,20 @@ private:
 
   void recvDeamonLoopDbg(std::vector<Connection> const &connections) {
     static size_t dbg_idx = 0;
-    if (dbg_idx++ == 4000) {
+    if (dbg_idx++ == 40000) {
       dbg_idx = 0;
-      logh::warn("reciever still running: channel = ", (int)comm_->channel, ", rank = ", comm_->comm->rank,
-                 ", data queue size = ", comm_->queues.createDataQueue.size(),
-                 ", ops queue size = ", comm_->queues.recvOps.size(), ", connections = ", connectionsDbg(connections),
-                 ", hasNotifierConnected = ", this->hasNotifierConnected());
-    }
 
-    if (!isConnected(connections)) {
-      logh::error("non connected task: ops queue size = ", comm_->queues.recvOps.size(),
-                  ", data queue size = ", comm_->queues.createDataQueue.size());
+      if (isConnected(connections)) {
+        logh::warn("reciever still running: channel = ", (int)comm_->channel, ", rank = ", comm_->comm->rank,
+                   ", data queue size = ", comm_->queues.createDataQueue.size(),
+                   ", ops queue size = ", comm_->queues.recvOps.size(), ", connections = ", connectionsDbg(connections),
+                   ", hasNotifierConnected = ", this->hasNotifierConnected());
+      } else {
+        logh::error("non connected receiver still running: channel = ",
+                (int)comm_->channel, ", rank = ", comm_->comm->rank,
+                ", ops queue size = ", comm_->queues.recvOps.size(),
+                ", data queue size = ", comm_->queues.createDataQueue.size());
+      }
     }
   }
 
