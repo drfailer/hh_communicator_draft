@@ -147,7 +147,7 @@ private:
   void sendDeamon() {
     using namespace std::chrono_literals;
     while (!senderDisconnect_) {
-      // sendDeamonLoopDbg();
+      sendDeamonLoopDbg();
       comm::commProcessSendOpsQueue(comm_, ReturnMemory<Types...>(mm_));
       // clh_progress_all(comm_->comm->clh); // ???
       std::this_thread::sleep_for(4ms);
@@ -175,7 +175,7 @@ private:
     while (isConnected(connections) || !comm_->queues.recvOps.empty() || !comm_->queues.createDataQueue.empty()) {
       comm::commRecvSignal(comm_, source, signal, header, buf);
 
-      // recvDeamonLoopDbg(connections);
+      recvDeamonLoopDbg(connections);
       switch (signal) {
       case comm::CommSignal::None:
         break;
