@@ -190,7 +190,7 @@ struct PackageWarehouse {
 struct CommOperation {
   u16         packageId;
   u8          bufferId;
-  CLH_Request request;
+  CLH_Request* request;
   StorageId   storageId;
 };
 
@@ -208,8 +208,8 @@ inline bool operator<(CommPendingRecvData const &lhs, CommPendingRecvData const 
 }
 
 struct CommQueues {
-  std::vector<CommOperation>    sendOps; // send operations (CLH_Request)
-  std::vector<CommOperation>    recvOps; // recv operations (CLH_Request)
+  std::vector<CommOperation>    sendOps; // send operations (CLH_Request*)
+  std::vector<CommOperation>    recvOps; // recv operations (CLH_Request*)
   std::set<CommPendingRecvData> createDataQueue; // wait for memory manager
   std::mutex                    mutex;
 };
@@ -423,7 +423,7 @@ inline bool checkCLH(CLH_Status code) {
 template <typename TM>
 void commFlushQueueAndWarehouse(CommTaskHandle<TM> *handle, std::vector<CommOperation> &queue,
                                 std::map<StorageId, PackageStorage<TM>> &wh) {
-  std::vector<CLH_Request> requests;
+  std::vector<CLH_Request*> requests;
 
   for (auto &op : queue) {
     logh::error("request canceled");
@@ -485,7 +485,7 @@ bool commCreateRecvStorage(CommTaskHandle<TM> *handle, StorageId storageId, u8 t
  */
 inline void commSend(CommHandle *handle, Header const &header, int dest, Buffer const &buf) {
   u64         tag = headerToTag(header);
-  CLH_Request request = clh_request_create();
+  CLH_Request* request = clh_request_create();
   checkCLH(clh_send(handle->clh, dest, tag, buf, request));
   checkCLH(clh_wait(handle->clh, request));
   clh_request_destroy(request);
@@ -494,7 +494,7 @@ inline void commSend(CommHandle *handle, Header const &header, int dest, Buffer 
 /*
  * Interface to clh_send
  */
-inline void commSendAsync(CommHandle *handle, Header const &header, int dest, Buffer const &buf, CLH_Request request) {
+inline void commSendAsync(CommHandle *handle, Header const &header, int dest, Buffer const &buf, CLH_Request* request) {
   u64 tag = headerToTag(header);
   checkCLH(clh_send(handle->clh, dest, tag, buf, request));
 }
@@ -665,21 +665,23 @@ void commProcessSendOpsQueue(CommTaskHandle<TM> *handle, ReturnDataCB returnMemo
 /*
  * Interface to clh_recv.
  */
-inline void commRecv(CommHandle *handle, u64 tag, u64 tagMask, Buffer const &buf, CLH_Request request) {
+inline void commRecv(CommHandle *handle, u64 tag, u64 tagMask, Buffer const &buf) {
+  CLH_Request* request = clh_request_create();
   checkCLH(clh_recv(handle->clh, tag, tagMask, buf, request));
   checkCLH(clh_wait(handle->clh, request));
+  clh_request_destroy(request);
 }
 
 /*
  * Interface to clh_recv.
  */
-inline void commRecvAsync(CommHandle *handle, Header header, Buffer const &buf, CLH_Request request) {
+inline void commRecvAsync(CommHandle *handle, Header header, Buffer const &buf, CLH_Request* request) {
   u64 tag = headerToTag(header);
   checkCLH(clh_recv(handle->clh, tag, 0xFFFFFFFFFFFFFFFF, buf, request));
 }
 
 template <typename TM>
-inline bool commProbe(CommTaskHandle<TM> *handle, CLH_Request request) {
+inline bool commProbe(CommTaskHandle<TM> *handle, CLH_Request* request) {
   Header header = {
       .source = 0,
       .signal = 0,
@@ -699,7 +701,7 @@ inline bool commProbe(CommTaskHandle<TM> *handle, CLH_Request request) {
  */
 template <typename TM>
 void commRecvSignal(CommTaskHandle<TM> *handle, int &source, CommSignal &signal, Header &header, Buffer &buf) {
-  CLH_Request request = clh_request_create();
+  CLH_Request* request = clh_request_create();
 
   signal = CommSignal::None;
   source = -1;
@@ -708,6 +710,8 @@ void commRecvSignal(CommTaskHandle<TM> *handle, int &source, CommSignal &signal,
   if (commProbe(handle, request)) {
     u64 tag = clh_request_tag(request);
     header = tagToHeader(tag);
+
+    assert(header.source != (u32)clh_node_id(handle->comm->clh));
 
     if (header.signal == 0) {
       std::lock_guard<std::mutex> queuesLock(handle->queues.mutex);
@@ -718,7 +722,7 @@ void commRecvSignal(CommTaskHandle<TM> *handle, int &source, CommSignal &signal,
       signal = CommSignal::Data;
     } else {
       // TODO: do we want async here?
-      commRecv(handle->comm, tag, 0xFFFFFFFFFFFFFFFF, buf, request);
+      commRecv(handle->comm, tag, tag, buf);
       signal = (CommSignal)buf.mem[0];
     }
     source = (int)header.source;
@@ -819,7 +823,7 @@ void commPostRecv(CommTaskHandle<TM> *handle, StorageId storageId, PackageStorag
  * that have an associated recv data storage that will store the buffers.
  */
 template <typename TM, typename ProcessCB>
-void commProcessRecvOpsQueue(CommTaskHandle<TM> *handle, ProcessCB processData, bool flush = false) {
+void commProcessRecvOpsQueue(CommTaskHandle<TM> *handle, ProcessCB processData, [[maybe_unused]] bool flush = false) {
   std::lock_guard<std::mutex> queuesLock(handle->queues.mutex);
 
   // clh_progress_all(handle->comm->clh); // ???
@@ -919,7 +923,7 @@ std::vector<CommTaskStats> commGatherStats(CommTaskHandle<TM> *handle) {
   stats[0].maxRecvStorageSize = handle->stats.maxRecvStorageSize;
   for (int i = 1; i < handle->comm->nbProcesses; ++i) {
     header.source = i;
-    CLH_Request request = clh_request_create();
+    CLH_Request* request = clh_request_create();
     u64     tag = headerToTag(header);
     u64     tagMask = HEADER_FIELDS[SOURCE].mask | HEADER_FIELDS[CHANNEL].mask;
     while (!clh_probe(handle->comm->clh, tag, tagMask, request)) {
@@ -930,7 +934,7 @@ std::vector<CommTaskStats> commGatherStats(CommTaskHandle<TM> *handle) {
     bufSize = clh_request_buffer_len(request);
 
     serializer::Bytes buf(bufSize, bufSize);
-    commRecv(handle->comm, tag, tagMask, Buffer{std::bit_cast<char *>(buf.data()), buf.size()}, request);
+    commRecv(handle->comm, tag, tagMask, Buffer{std::bit_cast<char *>(buf.data()), buf.size()});
 
     using Serializer = serializer::Serializer<serializer::Bytes>;
     serializer::deserialize<Serializer>(buf, 0, stats[i].maxSendOpsSize, stats[i].maxRecvOpsSize,

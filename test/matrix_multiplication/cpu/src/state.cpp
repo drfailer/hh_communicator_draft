@@ -189,6 +189,7 @@ void SumState::execute(std::shared_ptr<SumData<MT>> data) {
         if (queues.empty()) {
             logh::warn(MPIRank(), " terminate sum state");
         }
+        return;
     }
 
     if (queue.empty()) {

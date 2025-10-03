@@ -164,8 +164,8 @@ private:
     std::vector<Connection> connections = createConnectionVector();
     int                     source = -1;
     comm::CommSignal        signal = comm::CommSignal::None;
-    comm::Header            header;
-    char                    bufMem[100];
+    comm::Header            header = {0, 0, 0, 0, 0, 0};
+    char                    bufMem[100] = {0};
     comm::Buffer            buf{bufMem, 100};
 
     // TODO: empty the queue or flush? I think the best here would be to start a
@@ -458,7 +458,7 @@ private:
 
   void sendDeamonLoopDbg() {
     static size_t dbg_idx = 0;
-    if (dbg_idx++ == 40000) {
+    if (dbg_idx++ == 1000) {
       dbg_idx = 0;
       logh::warn("sender still running: channel = ", (int)comm_->channel, ", rank = ", comm_->comm->rank,
                  ", queue size = ", comm_->queues.sendOps.size(),
@@ -468,7 +468,7 @@ private:
 
   void recvDeamonLoopDbg(std::vector<Connection> const &connections) {
     static size_t dbg_idx = 0;
-    if (dbg_idx++ == 40000) {
+    if (dbg_idx++ == 1000) {
       dbg_idx = 0;
 
       if (isConnected(connections)) {

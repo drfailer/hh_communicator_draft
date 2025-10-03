@@ -5,15 +5,15 @@ CXXFLAGS=\
 		 -ggdb \
 		 -I../../../lib/hedgehog/ -I../../../lib/serializer-cpp/ \
 		 -I$(HOME)/Programming/usr/include/ \
-		 -I$(HOME)/Programming/projects/clh/ \
+		 -I$(HOME)/Programming/projects/nist/clh/clh/ \
 		 -Wall -Wextra -Wuninitialized \
 		 -MMD \
 		 -fdiagnostics-color=auto
 LDFLAGS=\
 		-L$(HOME)/Programming/usr/lib/ \
-		-L$(HOME)/Programming/projects/clh/build/lib \
-		-lclh -ltbb -lopenblas \
-		-Wl,-rpath,/home/rvc1/Programming/projects/clh/build/lib
+		-L$(HOME)/Programming/projects/nist/clh/build/lib/ \
+		-lclh -lopenblas \
+		-Wl,-rpath,$(HOME)/Programming/projects/nist/clh/build/lib/
 SRC=$(wildcard src/*.cpp)
 OBJ=$(addprefix build/,$(SRC:src/%.cpp=%.o))
 DEP=$(addprefix build/,$(SRC:src/%.cpp=%.d))
