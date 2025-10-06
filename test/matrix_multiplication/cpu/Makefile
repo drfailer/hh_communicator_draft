@@ -5,13 +5,13 @@ CXXFLAGS=\
 		 -ggdb \
 		 -I../../../lib/hedgehog/ -I../../../lib/serializer-cpp/ \
 		 -I/usr/lib/x86_64-linux-gnu/openmpi/include/ \
-		 $(shell pkg-config /usr/lib/x86_64-linux-gnu/openmpi/lib/pkgconfig/ompi-c.pc --cflags) -DOMPI_SKIP_MPICXX \
+		 -I$(HOME)/Programming/usr/include \
+		 $(shell pkg-config ompi-c --cflags) -DOMPI_SKIP_MPICXX \
 		 -Wall -Wextra -Wuninitialized \
 		 -MMD \
 		 -fdiagnostics-color=auto
 LDFLAGS=\
-		$(shell pkg-config /usr/lib/x86_64-linux-gnu/openmpi/lib/pkgconfig/ompi-c.pc --libs) -DOMPI_SKIP_MPICXX \
-		-ltbb \
+		$(shell pkg-config ompi-c --libs) -DOMPI_SKIP_MPICXX \
 		-L$(HOME)/Programming/usr/lib/ -lopenblas
 SRC=$(wildcard src/*.cpp)
 OBJ=$(addprefix build/,$(SRC:src/%.cpp=%.o))
