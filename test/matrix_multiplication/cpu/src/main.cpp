@@ -108,7 +108,7 @@ UTest(mm_result, std::shared_ptr<Matrix<MT, MatrixId::A>> A, std::shared_ptr<Mat
 int main(int argc, char **argv) {
     Config config = parseArgs(argc, argv);
 
-    hh::comm::CommHandle *commHandle = hh::comm::commCreate(false);
+    hh::comm::CommHandle *commHandle = hh::comm::commCreate(true);
     hh::comm::commInit(commHandle, &argc, &argv);
 
     // TODO: we need an function in comm tool to interface this

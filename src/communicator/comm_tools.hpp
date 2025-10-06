@@ -188,10 +188,10 @@ struct PackageWarehouse {
 // Queues //////////////////////////////////////////////////////////////////////
 
 struct CommOperation {
-  u16         packageId;
-  u8          bufferId;
-  CLH_Request* request;
-  StorageId   storageId;
+  u16          packageId;
+  u8           bufferId;
+  CLH_Request *request;
+  StorageId    storageId;
 };
 
 struct CommPendingRecvData {
@@ -423,7 +423,7 @@ inline bool checkCLH(CLH_Status code) {
 template <typename TM>
 void commFlushQueueAndWarehouse(CommTaskHandle<TM> *handle, std::vector<CommOperation> &queue,
                                 std::map<StorageId, PackageStorage<TM>> &wh) {
-  std::vector<CLH_Request*> requests;
+  std::vector<CLH_Request *> requests;
 
   for (auto &op : queue) {
     logh::error("request canceled");
@@ -435,7 +435,7 @@ void commFlushQueueAndWarehouse(CommTaskHandle<TM> *handle, std::vector<CommOper
   for (auto it : wh) {
     auto storage = it.second;
     type_map::apply(TM(), storage.typeId, [&]<typename T>() {
-      if constexpr (!requires(T * data) { data->pack(); }) {
+      if constexpr (!requires(T *data) { data->pack(); }) {
         delete[] storage.package.data[0].mem;
       }
     });
@@ -484,19 +484,21 @@ bool commCreateRecvStorage(CommTaskHandle<TM> *handle, StorageId storageId, u8 t
  * Interface to clh_send
  */
 inline void commSend(CommHandle *handle, Header const &header, int dest, Buffer const &buf) {
-  u64         tag = headerToTag(header);
-  CLH_Request* request = clh_request_create();
+  u64          tag = headerToTag(header);
+  CLH_Request *request = clh_request_create(handle->clh);
   checkCLH(clh_send(handle->clh, dest, tag, buf, request));
   checkCLH(clh_wait(handle->clh, request));
-  clh_request_destroy(request);
+  clh_request_destroy(handle->clh, request);
 }
 
 /*
  * Interface to clh_send
  */
-inline void commSendAsync(CommHandle *handle, Header const &header, int dest, Buffer const &buf, CLH_Request* request) {
-  u64 tag = headerToTag(header);
+inline CLH_Request *commSendAsync(CommHandle *handle, Header const &header, int dest, Buffer const &buf) {
+  u64          tag = headerToTag(header);
+  CLH_Request *request = clh_request_create(handle->clh);
   checkCLH(clh_send(handle->clh, dest, tag, buf, request));
+  return request;
 }
 
 /*
@@ -593,13 +595,13 @@ void commSendData(CommTaskHandle<TM> *handle, std::vector<int> const &dests, std
     for (size_t i = 0; i < storage.package.data.size(); ++i) {
       header.bufferId = (u8)i;
       std::lock_guard<std::mutex> queuesLock(handle->queues.mutex);
+      CLH_Request                *request = commSendAsync(handle->comm, header, dest, storage.package.data[i]);
       handle->queues.sendOps.push_back(CommOperation{
           .packageId = storageId.packageId,
           .bufferId = header.bufferId,
-          .request = clh_request_create(),
+          .request = request,
           .storageId = storageId,
       });
-      commSendAsync(handle->comm, header, dest, storage.package.data[i], handle->queues.sendOps.back().request);
     }
   }
 }
@@ -651,7 +653,7 @@ void commProcessSendOpsQueue(CommTaskHandle<TM> *handle, ReturnDataCB returnMemo
           commPostSend(handle, it->storageId, storage, returnMemory);
           handle->wh.sendStorage.erase(it->storageId);
         }
-        clh_request_destroy(it->request);
+        clh_request_destroy(handle->comm->clh, it->request);
         handle->queues.sendOps.erase(it);
       } else {
         it++;
@@ -666,22 +668,24 @@ void commProcessSendOpsQueue(CommTaskHandle<TM> *handle, ReturnDataCB returnMemo
  * Interface to clh_recv.
  */
 inline void commRecv(CommHandle *handle, u64 tag, u64 tagMask, Buffer const &buf) {
-  CLH_Request* request = clh_request_create();
+  CLH_Request *request = clh_request_create(handle->clh);
   checkCLH(clh_recv(handle->clh, tag, tagMask, buf, request));
   checkCLH(clh_wait(handle->clh, request));
-  clh_request_destroy(request);
+  clh_request_destroy(handle->clh, request);
 }
 
 /*
  * Interface to clh_recv.
  */
-inline void commRecvAsync(CommHandle *handle, Header header, Buffer const &buf, CLH_Request* request) {
-  u64 tag = headerToTag(header);
+inline CLH_Request *commRecvAsync(CommHandle *handle, Header header, Buffer const &buf) {
+  CLH_Request *request = clh_request_create(handle->clh);
+  u64          tag = headerToTag(header);
   checkCLH(clh_recv(handle->clh, tag, 0xFFFFFFFFFFFFFFFF, buf, request));
+  return request;
 }
 
 template <typename TM>
-inline bool commProbe(CommTaskHandle<TM> *handle, CLH_Request* request) {
+inline bool commProbe(CommTaskHandle<TM> *handle, CLH_Request *request) {
   Header header = {
       .source = 0,
       .signal = 0,
@@ -701,7 +705,7 @@ inline bool commProbe(CommTaskHandle<TM> *handle, CLH_Request* request) {
  */
 template <typename TM>
 void commRecvSignal(CommTaskHandle<TM> *handle, int &source, CommSignal &signal, Header &header, Buffer &buf) {
-  CLH_Request* request = clh_request_create();
+  CLH_Request *request = clh_request_create(handle->comm->clh);
 
   signal = CommSignal::None;
   source = -1;
@@ -729,7 +733,7 @@ void commRecvSignal(CommTaskHandle<TM> *handle, int &source, CommSignal &signal,
     comm::commInfog(logh::IG::Comm, "comm", handle, "commRecvSignal -> ", " source = ", source,
                     " signal = ", (int)signal);
   }
-  clh_request_destroy(request);
+  clh_request_destroy(handle->comm->clh, request);
 }
 
 /*
@@ -758,14 +762,14 @@ bool commRecvData(CommTaskHandle<TM> *handle, CommPendingRecvData const &prd, Cr
       return false;
     }
   }
-  auto &storage = handle->wh.recvStorage.at(storageId);
+  auto        &storage = handle->wh.recvStorage.at(storageId);
+  CLH_Request *request = commRecvAsync(handle->comm, prd.header, storage.package.data[bufferId]);
   handle->queues.recvOps.push_back(CommOperation{
       .packageId = packageId,
       .bufferId = bufferId,
-      .request = clh_request_create(),
+      .request = request,
       .storageId = storageId,
   });
-  commRecvAsync(handle->comm, prd.header, storage.package.data[bufferId], handle->queues.recvOps.back().request);
   return true;
 }
 
@@ -844,7 +848,7 @@ void commProcessRecvOpsQueue(CommTaskHandle<TM> *handle, ProcessCB processData, 
         commPostRecv(handle, it->storageId, storage, processData);
         handle->wh.recvStorage.erase(it->storageId);
       }
-      clh_request_destroy(it->request);
+      clh_request_destroy(handle->comm->clh, it->request);
       handle->queues.recvOps.erase(it);
     } else {
       it++;
@@ -923,9 +927,9 @@ std::vector<CommTaskStats> commGatherStats(CommTaskHandle<TM> *handle) {
   stats[0].maxRecvStorageSize = handle->stats.maxRecvStorageSize;
   for (int i = 1; i < handle->comm->nbProcesses; ++i) {
     header.source = i;
-    CLH_Request* request = clh_request_create();
-    u64     tag = headerToTag(header);
-    u64     tagMask = HEADER_FIELDS[SOURCE].mask | HEADER_FIELDS[CHANNEL].mask;
+    CLH_Request *request = clh_request_create(handle->comm->clh);
+    u64          tag = headerToTag(header);
+    u64          tagMask = HEADER_FIELDS[SOURCE].mask | HEADER_FIELDS[CHANNEL].mask;
     while (!clh_probe(handle->comm->clh, tag, tagMask, request)) {
       using namespace std::chrono_literals;
       // clh_progress_all(handle->comm->clh);
@@ -942,7 +946,7 @@ std::vector<CommTaskStats> commGatherStats(CommTaskHandle<TM> *handle) {
                                         stats[i].maxRecvStorageSize, stats[i].storageStats);
     comm::commInfog(logh::IG::Stats, "stats", handle, "comGather -> ", "target = ", i, " buf size = ", buf.size(),
                     ", storageStats size = ", stats[i].storageStats.size());
-    clh_request_destroy(request);
+    clh_request_destroy(handle->comm->clh, request);
   }
   return stats;
 }
