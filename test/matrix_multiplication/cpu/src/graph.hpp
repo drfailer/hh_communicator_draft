@@ -16,9 +16,14 @@ struct MMGraph : hh::Graph<MMGraphIO> {
     /*
      * C[m,n] = A[m,k]*B[k,n] + C[m,n]
      */
-    MMGraph(hh::comm::CommHandle *commHandle, size_t M, size_t N, size_t K, size_t tileSize, size_t poolSize)
+    MMGraph(hh::comm::CommHandle *commHandle, size_t M, size_t N, size_t K, size_t tileSize, size_t poolSize, size_t threads)
         : hh::Graph<MMGraphIO>("MMGraph") {
-        size_t nbProcesses = commHandle->nbProcesses;
+        size_t NB_PROCESSES = commHandle->nbProcesses;
+        size_t RANK = commHandle->rank;
+        size_t SPLIT_TASK_THREADS = std::max<size_t>(1, threads / 2);
+        size_t PRODUCT_TASK_THREADS = std::max<size_t>(1, threads / NB_PROCESSES);
+        size_t SUM_TASK_THREADS = std::max<size_t>(1, threads / (4 * NB_PROCESSES));
+        size_t COPY_TILE_TASK_THREADS = std::max<size_t>(1, threads / 2);
         size_t TM = M / tileSize + (M % tileSize > 0 ? 1 : 0);
         size_t TN = N / tileSize + (N % tileSize > 0 ? 1 : 0);
         size_t TK = K / tileSize + (K % tileSize > 0 ? 1 : 0);
@@ -32,11 +37,11 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         mm->template fill<MatrixTile<MT, MatrixId::P>>(poolSize, tileSize);
 
         std::vector<int> distributeTaskReceivers;
-        for (size_t i = 1; i < nbProcesses; ++i) {
+        for (size_t i = 1; i < NB_PROCESSES; ++i) {
             distributeTaskReceivers.emplace_back(i);
         }
 
-        auto splitTask = std::make_shared<SplitTask>(tileSize, mm, 20);
+        auto splitTask = std::make_shared<SplitTask>(tileSize, mm, SPLIT_TASK_THREADS);
         auto distributeTask
             = std::make_shared<hh::CommunicatorTask<MatrixTile<MT, MatrixId::A>, MatrixTile<MT, MatrixId::B>,
                                                     MatrixTile<MT, MatrixId::C>>>(
@@ -44,24 +49,24 @@ struct MMGraph : hh::Graph<MMGraphIO> {
                 hh::CommunicatorTaskOpt{.sendersAreReceivers = true, .scatter = true});
 
         auto productState = std::make_shared<hh::StateManager<ProductStateIO>>(
-            std::make_shared<ProductState>(mm, TM, TN, TK, commHandle->rank, commHandle->nbProcesses));
-        auto productTask = std::make_shared<ProductTask>(40 / commHandle->nbProcesses);
+            std::make_shared<ProductState>(mm, TM, TN, TK, RANK, NB_PROCESSES));
+        auto productTask = std::make_shared<ProductTask>(PRODUCT_TASK_THREADS);
 
         auto sumState = std::make_shared<SumStateManager>(
-            std::make_shared<SumState>(mm, TM, TN, TK, commHandle->rank, nbProcesses));
-        auto sumTask = std::make_shared<SumTask>(8 / commHandle->nbProcesses);
+            std::make_shared<SumState>(mm, TM, TN, TK, RANK, NB_PROCESSES));
+        auto sumTask = std::make_shared<SumTask>(SUM_TASK_THREADS);
 
         auto gatherTask = std::make_shared<hh::CommunicatorTask<MatrixTile<MT, MatrixId::C>>>(
             commHandle, std::vector<int>({0}), hh::CommunicatorTaskOpt{.sendersAreReceivers = false, .scatter = false});
 
         auto copyTileState
-            = std::make_shared<CopyTileStateManager>(std::make_shared<CopyTileState>(mm, TM, TN, commHandle->rank));
-        auto copyTileTask = std::make_shared<CopyTileTask>(20);
+            = std::make_shared<CopyTileStateManager>(std::make_shared<CopyTileState>(mm, TM, TN, RANK));
+        auto copyTileTask = std::make_shared<CopyTileTask>(COPY_TILE_TASK_THREADS);
 
-        distributeTask->template destCB<MatrixTile<MT, MatrixId::A>>([nbProcesses, TN](auto tile) {
-            std::vector<int> dests = {(int)(tile->rowIdx * TN % nbProcesses)};
+        distributeTask->template destCB<MatrixTile<MT, MatrixId::A>>([NB_PROCESSES, TN](auto tile) {
+            std::vector<int> dests = {(int)(tile->rowIdx * TN % NB_PROCESSES)};
             for (size_t colIdx = 1; colIdx < TN; ++colIdx) {
-                int rank = (colIdx + tile->rowIdx * TN) % nbProcesses;
+                int rank = (colIdx + tile->rowIdx * TN) % NB_PROCESSES;
                 if (rank == dests[0]) {
                     break;
                 }
@@ -70,10 +75,10 @@ struct MMGraph : hh::Graph<MMGraphIO> {
             logh::infog(logh::IG::DestDB, "DestCB", "A[", tile->rowIdx, ",", tile->colIdx, "] => ", dests);
             return dests;
         });
-        distributeTask->template destCB<MatrixTile<MT, MatrixId::B>>([nbProcesses, TM, TN](auto tile) {
-            std::vector<int> dests = {(int)(tile->colIdx % nbProcesses)};
+        distributeTask->template destCB<MatrixTile<MT, MatrixId::B>>([NB_PROCESSES, TM, TN](auto tile) {
+            std::vector<int> dests = {(int)(tile->colIdx % NB_PROCESSES)};
             for (size_t rowIdx = 1; rowIdx < TM; ++rowIdx) {
-                int rank = (tile->colIdx + rowIdx * TN) % nbProcesses;
+                int rank = (tile->colIdx + rowIdx * TN) % NB_PROCESSES;
                 if (rank == dests[0]) {
                     break;
                 }
@@ -82,9 +87,9 @@ struct MMGraph : hh::Graph<MMGraphIO> {
             logh::infog(logh::IG::DestDB, "DestCB", "B[", tile->rowIdx, ",", tile->colIdx, "] => ", dests);
             return dests;
         });
-        distributeTask->template destCB<MatrixTile<MT, MatrixId::C>>([nbProcesses, TN](auto tile) {
+        distributeTask->template destCB<MatrixTile<MT, MatrixId::C>>([NB_PROCESSES, TN](auto tile) {
             size_t           idx = tile->colIdx + tile->rowIdx * TN;
-            std::vector<int> dests = {(int)(idx % nbProcesses)};
+            std::vector<int> dests = {(int)(idx % NB_PROCESSES)};
             logh::infog(logh::IG::DestDB, "DestCB", "C[", tile->rowIdx, ",", tile->colIdx, "] => ", dests);
             return dests;
         });

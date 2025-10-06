@@ -39,6 +39,7 @@ struct Config {
     size_t K;
     size_t tileSize;
     size_t poolSize;
+    size_t threads;
 };
 
 Config parseArgs(int argc, char **argv) {
@@ -51,6 +52,7 @@ Config parseArgs(int argc, char **argv) {
     ap::add_size_t_arg(&ap, "-tileSize", &config.tileSize, 256);
     ap::add_size_t_arg(&ap, "-poolSize", &config.poolSize, 256,
                        "size of the memory pool for the block (there are 4 pools for A, B, C and P blocks)");
+    ap::add_size_t_arg(&ap, "-threads", &config.threads, 20);
     auto status = ap::argument_parser_run(&ap);
 
     if (status != ap::ArgumentParserStatus::Ok) {
@@ -118,7 +120,7 @@ int main(int argc, char **argv) {
         std::memset(C->mem, 0, sizeof(MT) * C->rows * C->cols);
     }
 
-    MMGraph graph(commHandle, config.M, config.N, config.K, config.tileSize, config.poolSize);
+    MMGraph graph(commHandle, config.M, config.N, config.K, config.tileSize, config.poolSize, config.threads);
 
     // hh::GraphSignalHandler<MMGraphIO>::registerGraph(&graph);
     // hh::GraphSignalHandler<MMGraphIO>::setDebugOptions(hh::DebugOptions::ALL);
