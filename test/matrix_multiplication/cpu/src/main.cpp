@@ -2,8 +2,7 @@
 #include "../../../common/timer.h"
 #include "../../../common/utest.h"
 #include "graph.hpp"
-// TODO: add -I
-#include "/home/rvc1/Programming/usr/include/cblas.h"
+#include <openblas/cblas.h>
 
 template <MatrixId Id>
 std::shared_ptr<Matrix<MT, Id>> createMatrix(size_t cols, size_t rows) {
