@@ -1,7 +1,7 @@
 #ifndef GRAPH
 #define GRAPH
 #include "../.././src/communicator/communicator_task.hpp"
-#include <openblas/cblas.h>
+#include <cblas.h>
 #include "data.hpp"
 #include "log.hpp"
 #include "state.hpp"
