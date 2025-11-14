@@ -3,6 +3,7 @@ CXXFLAGS=\
 		 -std=c++20 \
 		 -O3 \
 		 -ggdb \
+		 -I$(HOME)/Programming/usr/include/ \
 		 -I../../../lib/hedgehog/ -I../../../lib/serializer-cpp/ \
 		 -I/usr/lib/x86_64-linux-gnu/openmpi/include/ \
 		 $(shell pkg-config /usr/lib/x86_64-linux-gnu/openmpi/lib/pkgconfig/ompi-c.pc --cflags) -DOMPI_SKIP_MPICXX \
