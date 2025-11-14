@@ -1,7 +1,7 @@
 #ifndef COMMUNICATOR_COMM_TOOLS
 #define COMMUNICATOR_COMM_TOOLS
-#include "../../../clh/clh/buffer.h"
-#include "../../../clh/clh/clh.h"
+#include "clh/buffer.h"
+#include "clh/clh.h"
 #include "../log.hpp"
 #include "hedgehog/src/tools/meta_functions.h"
 #include "type_map.hpp"

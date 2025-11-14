@@ -1,3 +1,6 @@
+CLH_PATH=$(HOME)/Programming/projects/clh.git/app-thread/
+TRACER_PATH=$(HOME)/Programming/projects/tracer-c/tracer/
+
 CC=g++
 CXXFLAGS=\
 		 -std=c++20 \
@@ -5,16 +8,15 @@ CXXFLAGS=\
 		 -ggdb \
 		 -I../../../lib/hedgehog/ -I../../../lib/serializer-cpp/ \
 		 -I$(HOME)/Programming/usr/include/ \
-		 -I$(HOME)/Programming/projects/clh/clh/ \
-		 -I$(HOME)/Programming/projects/tracer-c/tracer/ \
+		 -I$(CLH_PATH) -I$(TRACER_PATH) \
 		 -Wall -Wextra -Wuninitialized \
 		 -MMD \
 		 -fdiagnostics-color=auto
 LDFLAGS=\
 		-L$(HOME)/Programming/usr/lib/ \
-		-L$(HOME)/Programming/projects/clh/build/lib/ \
+		-L$(CLH_PATH)/build/lib/ \
 		-lclh -lopenblas -lpmix \
-		-Wl,-rpath,$(HOME)/Programming/projects/clh/build/lib/
+		-Wl,-rpath,$(CLH_PATH)/build/lib/
 SRC=$(wildcard src/*.cpp)
 OBJ=$(addprefix build/,$(SRC:src/%.cpp=%.o))
 DEP=$(addprefix build/,$(SRC:src/%.cpp=%.d))
