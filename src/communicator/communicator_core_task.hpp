@@ -149,7 +149,6 @@ private:
     while (!senderDisconnect_) {
       sendDeamonLoopDbg();
       comm::commProcessSendOpsQueue(comm_, ReturnMemory<Types...>(mm_));
-      // clh_progress_all(comm_->comm->clh); // ???
       std::this_thread::sleep_for(4ms);
     }
     comm::commProcessSendOpsQueue(comm_, ReturnMemory<Types...>(mm_), true);
@@ -188,7 +187,6 @@ private:
       }
       comm::commProcessRecvDataQueue(comm_, GetMemory<Types...>(mm_));
       comm::commProcessRecvOpsQueue(comm_, ProcessData(this->task()));
-      // clh_progress_all(comm_->comm->clh); // ???
       std::this_thread::sleep_for(4ms);
     }
     comm::commInfog(logh::IG::ReceiverEnd, "receiver end", comm_);
@@ -468,7 +466,7 @@ private:
 
   void recvDeamonLoopDbg(std::vector<Connection> const &connections) {
     static size_t dbg_idx = 0;
-    if (dbg_idx++ == 1000) {
+    if (dbg_idx++ == 4000) {
       dbg_idx = 0;
 
       if (isConnected(connections)) {
