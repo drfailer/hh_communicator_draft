@@ -1,5 +1,5 @@
 #include "task.hpp"
-#include "/home/rvc1/Programming/usr/include/cblas.h"
+#include <cblas.h>
 
 /******************************************************************************/
 /*                                 split task                                 */
