@@ -2,8 +2,9 @@
 #include "../../../common/timer.h"
 #include "../../../common/utest.h"
 #include "graph.hpp"
-// TODO: add -I
-#include "/home/rvc1/Programming/usr/include/cblas.h"
+#include <cblas.h>
+
+int GLOBAL_RANK = 0;
 
 template <MatrixId Id>
 std::shared_ptr<Matrix<MT, Id>> createMatrix(size_t cols, size_t rows) {
@@ -40,6 +41,7 @@ struct Config {
     size_t K;
     size_t tileSize;
     size_t poolSize;
+    size_t threads;
 };
 
 Config parseArgs(int argc, char **argv) {
@@ -52,6 +54,7 @@ Config parseArgs(int argc, char **argv) {
     ap::add_size_t_arg(&ap, "-tileSize", &config.tileSize, 256);
     ap::add_size_t_arg(&ap, "-poolSize", &config.poolSize, 256,
                        "size of the memory pool for the block (there are 4 pools for A, B, C and P blocks)");
+    ap::add_size_t_arg(&ap, "-threads", &config.threads, 40);
     auto status = ap::argument_parser_run(&ap);
 
     if (status != ap::ArgumentParserStatus::Ok) {
@@ -108,6 +111,9 @@ int main(int argc, char **argv) {
     hh::comm::commInit(argc, argv);
     hh::comm::CommHandle *commHandle = hh::comm::commCreate(true);
 
+    // TODO: we need an function in comm tool to interface this
+    GLOBAL_RANK = commHandle->rank;
+
     std::shared_ptr<Matrix<MT, MatrixId::A>> A = nullptr;
     std::shared_ptr<Matrix<MT, MatrixId::B>> B = nullptr;
     std::shared_ptr<Matrix<MT, MatrixId::C>> C = nullptr;
@@ -119,7 +125,7 @@ int main(int argc, char **argv) {
         std::memset(C->mem, 0, sizeof(MT) * C->rows * C->cols);
     }
 
-    MMGraph graph(commHandle, config.M, config.N, config.K, config.tileSize, config.poolSize);
+    MMGraph graph(commHandle, config.M, config.N, config.K, config.tileSize, config.poolSize, config.threads);
 
     // hh::GraphSignalHandler<MMGraphIO>::registerGraph(&graph);
     // hh::GraphSignalHandler<MMGraphIO>::setDebugOptions(hh::DebugOptions::ALL);
@@ -146,24 +152,27 @@ int main(int argc, char **argv) {
     hh::comm::commBarrier();
     timer_end(create_dot_files);
 
-    if (commHandle->rank == 0 && config.M < 10 && config.N < 10 && config.K < 10) {
+    hh::comm::commBarrier();
+    hh::comm::commDestroy(commHandle);
+    hh::comm::commFinalize();
+
+    if (GLOBAL_RANK != 0) {
+        return 0;
+    }
+
+    if (config.M < 10 && config.N < 10 && config.K < 10) {
         printMatrix("A", A);
         printMatrix("B", B);
         printMatrix("C", C);
     }
 
-    if (commHandle->rank == 0) {
-        utest_start();
-        urun_test(mm_result, A, B, C);
-        utest_end();
-
-        timer_report_prec(graph_execution, milliseconds);
-        timer_report_prec(create_dot_files, milliseconds);
-    }
-
+    timer_report_prec(graph_execution, milliseconds);
+    timer_report_prec(create_dot_files, milliseconds);
     std::cout << "test" << graph.mm->extraPrintingInformation() << std::endl;
 
-    hh::comm::commDestroy(commHandle);
-    hh::comm::commFinalize();
+    utest_start();
+    urun_test(mm_result, A, B, C);
+    utest_end();
+
     return 0;
 }
