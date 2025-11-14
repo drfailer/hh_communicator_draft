@@ -76,7 +76,7 @@ UTest(mm_result, std::shared_ptr<Matrix<MT, MatrixId::A>> A, std::shared_ptr<Mat
 
     // int nbProcesses = -1;
     // MPI_Comm_size(MPI_COMM_WORLD, &nbProcesses);
-    // openblas_set_num_threads(20);
+    openblas_set_num_threads_local(20);
 
     if constexpr (std::is_same_v<MT, float>) {
         cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, M, N, K, 1.f, (const float *)A->mem, A->ld,
@@ -170,9 +170,9 @@ int main(int argc, char **argv) {
     timer_report_prec(create_dot_files, milliseconds);
     std::cout << "test" << graph.mm->extraPrintingInformation() << std::endl;
 
-    // utest_start();
-    // urun_test(mm_result, A, B, C);
-    // utest_end();
+    utest_start();
+    urun_test(mm_result, A, B, C);
+    utest_end();
 
     return 0;
 }
