@@ -1,7 +1,7 @@
 #ifndef COMMUNICATOR_COMMUNICATOR_TASK
 #define COMMUNICATOR_COMMUNICATOR_TASK
-#include "comm_tools.hpp"
 #include "communicator_core_task.hpp"
+#include "task_communicator.hpp"
 #include <functional>
 #include <hedgehog/hedgehog.h>
 
@@ -15,16 +15,16 @@ struct CommunicatorTaskOpt {
 };
 
 template <typename T>
-using DestCBType = std::function<std::vector<int>(std::shared_ptr<T>)>;
+using DestCBType = std::function<std::vector<std::uint32_t>(std::shared_ptr<T>)>;
 
 template <typename TaskType, typename TypesIds, typename Input>
 struct CommunicatorSend : tool::BehaviorMultiExecuteTypeDeducer_t<std::tuple<Input>> {
 private:
-  size_t            rankIdx_ = 0;
-  TaskType         *task_ = nullptr;
-  bool              isReceiver_ = false;
-  std::vector<int>  receivers_;
-  DestCBType<Input> destCB_ = nullptr;
+  size_t                     rankIdx_ = 0;
+  TaskType                  *task_ = nullptr;
+  bool                       isReceiver_ = false;
+  std::vector<std::uint32_t> receivers_;
+  DestCBType<Input>          destCB_ = nullptr;
 
 public:
   CommunicatorSend(TaskType *task)
@@ -56,8 +56,8 @@ public:
   }
 
   void execute(std::shared_ptr<Input> data) override {
-    logh::infog(logh::IG::CommunicatorTaskExecute, "communicator task execute", "[", (int)task_->comm()->channel,
-                "]: rank = ", task_->comm()->comm->rank, ", isReceiver_ = ", isReceiver_);
+    logh::infog(logh::IG::CommunicatorTaskExecute, "communicator task execute", "[", (int)task_->comm()->channel(),
+                "]: rank = ", task_->comm()->communicator()->rank(), ", isReceiver_ = ", isReceiver_);
 
     /*
      * The CommunicatorTask has the following behavior:
@@ -83,7 +83,7 @@ public:
 
   void sendWithDestCB(std::shared_ptr<Input> data) {
     auto dests = destCB_(data);
-    auto rankIt = std::find(dests.begin(), dests.end(), task_->comm()->comm->rank);
+    auto rankIt = std::find(dests.begin(), dests.end(), task_->comm()->communicator()->rank());
     bool isDataProcessedOnThisRank = false;
 
     if (rankIt != dests.end()) {
@@ -92,21 +92,21 @@ public:
       isDataProcessedOnThisRank = true;
     }
     if (!dests.empty()) {
-      comm::commSendData<Input>(task_->comm(), dests, data, shouldReturnMemory(data, isDataProcessedOnThisRank));
+      task_->comm()->sendData(dests, data, shouldReturnMemory(data, isDataProcessedOnThisRank));
     } else {
       callPostSend(data);
     }
   }
 
   void sendScatter(std::shared_ptr<Input> data) {
-    int  receiver = receivers_[rankIdx_];
+    std::uint32_t receiver = receivers_[rankIdx_];
 
     rankIdx_ = (rankIdx_ + 1) % receivers_.size();
-    if (receiver == task_->comm()->comm->rank) {
+    if (receiver == task_->comm()->communicator()->rank()) {
       addResult(data);
       callPostSend(data);
     } else {
-      comm::commSendData<Input>(task_->comm(), {receiver}, data, shouldReturnMemory(data, false));
+      task_->comm()->sendData({receiver}, data, shouldReturnMemory(data, false));
     }
   }
 
@@ -118,17 +118,18 @@ public:
       isDataProcessedOnThisRank = true;
     }
     if (!receivers_.empty()) {
-      comm::commSendData(task_->comm(), receivers_, data, shouldReturnMemory(data, isDataProcessedOnThisRank));
+      task_->comm()->sendData(receivers_, data, shouldReturnMemory(data, isDataProcessedOnThisRank));
     } else {
       callPostSend(data);
     }
   }
 
   void initialize() {
-    receivers_ = task_->comm()->receivers;
-    isReceiver_ = std::find(receivers_.begin(), receivers_.end(), task_->comm()->comm->rank) != receivers_.end();
+    receivers_ = task_->comm()->receivers();
+    isReceiver_
+        = std::find(receivers_.begin(), receivers_.end(), task_->comm()->communicator()->rank()) != receivers_.end();
     if (!isReceiver_ && task_->options().sendersAreReceivers && task_->options().scatter) {
-      receivers_.push_back(task_->comm()->comm->rank);
+      receivers_.push_back(task_->comm()->communicator()->rank());
     }
   }
 
@@ -178,9 +179,9 @@ private:
   CommunicatorTaskOpt                 options_;
 
 public:
-  explicit CommunicatorTask(comm::CommHandle *commHandle, std::vector<int> const &receivers,
+  explicit CommunicatorTask(comm::Communicator *communicator, std::vector<int> const &receivers,
                             CommunicatorTaskOpt opt = {}, std::string const &name = "CommunicatorTask")
-      : behavior::TaskNode(std::make_shared<CoreTaskType>(this, commHandle, receivers, name)),
+      : behavior::TaskNode(std::make_shared<CoreTaskType>(this, communicator, receivers, name)),
         behavior::Copyable<SelfType>(1),
         CommunicatorMultiSend<CommunicatorTask<Types...>, TypesIds, Inputs>(this),
         tool::BehaviorTaskMultiSendersTypeDeducer_t<Outputs>((std::dynamic_pointer_cast<CoreTaskType>(this->core()))),
@@ -197,7 +198,7 @@ public:
     CommunicatorMultiSend<CommunicatorTask<Types...>, TypesIds, Inputs>::initialize();
   }
 
-  [[nodiscard]] comm::CommTaskHandle<TypesIds> *comm() const {
+  [[nodiscard]] comm::TaskCommunicator<TypesIds> *comm() const {
     return coreTask_->comm();
   }
 

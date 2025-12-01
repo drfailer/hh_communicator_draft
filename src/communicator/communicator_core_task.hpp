@@ -1,9 +1,9 @@
 #ifndef COMMUNICATOR_COMMUNICATOR_CORE_TASK
 #define COMMUNICATOR_COMMUNICATOR_CORE_TASK
 #include "../log.hpp"
-#include "comm_tools.hpp"
 #include "communicator_memory_manager.hpp"
 #include "generic_core_task.hpp"
+#include "task_communicator.hpp"
 #include <algorithm>
 #include <condition_variable>
 #include <numeric>
@@ -70,15 +70,13 @@ private:
   using TypesIds = typename CommunicatorTask<Types...>::TypesIds;
 
 public:
-  CommunicatorCoreTask(CommunicatorTask<Types...> *task, comm::CommHandle *commHandle,
+  CommunicatorCoreTask(CommunicatorTask<Types...> *task, comm::Communicator *communicator,
                        std::vector<int> const &receivers, std::string const &name)
       : CommunicatorCoreTaskBase<Types...>(task, name, 1, false),
-        comm_(comm::commTaskHandleCreate<TypesIds>(commHandle, receivers)),
+        communicator_(communicator, receivers),
         senderDisconnect_(false) {}
 
-  ~CommunicatorCoreTask() {
-    comm::commTaskHandleDestroy(comm_);
-  }
+  ~CommunicatorCoreTask() {}
 
 public:
   void run() override {
@@ -86,28 +84,28 @@ public:
     this->nvtxProfiler()->initialize(this->threadId(), this->graphId());
     this->preRun();
 
-    auto receivers = comm_->receivers;
-    bool isReceiver = std::find(receivers.begin(), receivers.end(), comm_->comm->rank) != receivers.end();
+    auto receivers = communicator_.receivers();
+    bool isReceiver = std::find(receivers.begin(), receivers.end(), communicator_.communicator()->rank()) != receivers.end();
 
     if (isReceiver) {
-      comm::commInfog(logh::IG::Core, "core", comm_, "start receiver");
+      communicator_.infog(logh::IG::Core, "core", "start receiver");
       this->deamon_ = std::thread(&CommunicatorCoreTask<Types...>::recvDeamon, this);
     } else {
-      comm::commInfog(logh::IG::Core, "core", comm_, "start sender");
+      communicator_.infog(logh::IG::Core, "core", "start sender");
       this->deamon_ = std::thread(&CommunicatorCoreTask<Types...>::sendDeamon, this);
     }
 
     taskLoop();
 
     if (this->deamon_.joinable()) {
-      comm::commInfog(logh::IG::Core, "core", comm_, "join ", isReceiver ? "receiver" : "sender");
+      communicator_.infog(logh::IG::Core, "core", "join ", isReceiver ? "receiver" : "sender");
       this->deamon_.join();
     }
 
     this->postRun();
     this->wakeUp();
 
-    comm::commInfog(logh::IG::CoreTerminate, "core terminate", comm_);
+    communicator_.infog(logh::IG::CoreTerminate, "core terminate");
   }
 
 private:
@@ -118,7 +116,7 @@ private:
     std::vector<int>                                   receivers;
     bool                                               canTerminate = false;
 
-    comm::commInfog(logh::IG::CoreTaskLoop, "core task loop", comm_, "start task loop, canTerminate = ", canTerminate);
+    communicator_.infog(logh::IG::CoreTaskLoop, "core task loop", "start task loop, canTerminate = ", canTerminate);
 
     // Actual computation loop
     senderDisconnect_ = false;
@@ -131,7 +129,7 @@ private:
       this->nvtxProfiler()->endRangeWaiting();
       this->incrementWaitDuration(std::chrono::duration_cast<std::chrono::nanoseconds>(finish - start));
 
-      comm::commInfog(logh::IG::CoreTaskLoop, "core task loop", comm_, "run task loop, canTerminate = ", canTerminate);
+      communicator_.infog(logh::IG::CoreTaskLoop, "core task loop", "run task loop, canTerminate = ", canTerminate);
 
       // If loop can terminate break the loop early
       if (canTerminate) {
@@ -147,22 +145,21 @@ private:
   void sendDeamon() {
     using namespace std::chrono_literals;
     while (!senderDisconnect_) {
-      sendDeamonLoopDbg();
-      comm::commProcessSendOpsQueue(comm_, ReturnMemory<Types...>(mm_));
+      communicator_.processSendOpsQueue(ReturnMemory<Types...>(mm_));
       std::this_thread::sleep_for(4ms);
     }
-    comm::commProcessSendOpsQueue(comm_, ReturnMemory<Types...>(mm_), true);
-    comm::commSendSignal(comm_, comm_->receivers, comm::CommSignal::Disconnect);
-    comm::commInfog(logh::IG::SenderDisconnect, "sender disconnect", comm_);
-    comm::commProcessSendOpsQueue(comm_, ReturnMemory<Types...>(mm_), true);
-    comm::commInfog(logh::IG::SenderEnd, "sender end", comm_);
+    communicator_.processSendOpsQueue(ReturnMemory<Types...>(mm_), true);
+    communicator_.sendSignal(communicator_.receivers(), comm::Signal::Disconnect);
+    communicator_.infog(logh::IG::SenderDisconnect, "sender disconnect");
+    communicator_.processSendOpsQueue(ReturnMemory<Types...>(mm_), true);
+    communicator_.infog(logh::IG::SenderEnd, "sender end");
   }
 
   void recvDeamon() {
     using namespace std::chrono_literals;
     std::vector<Connection> connections = createConnectionVector();
     int                     source = -1;
-    comm::CommSignal        signal = comm::CommSignal::None;
+    comm::Signal            signal = comm::Signal::None;
     comm::Header            header = {0, 0, 0, 0, 0, 0};
     char                    bufMem[100] = {0};
     comm::Buffer            buf{bufMem, 100};
@@ -171,25 +168,26 @@ private:
     //       timer when isConnected is false. After the timer, the thread leaves
     //       the loops and flushes the queue, however, this should be reported
     //       as an error in the dot file.
-    while (isConnected(connections) || !comm_->queues.recvOps.empty() || !comm_->queues.createDataQueue.empty()) {
-      comm::commRecvSignal(comm_, source, signal, header, buf);
+    while (isConnected(connections) || !communicator_.queues().recvOps.empty()
+           || !communicator_.queues().createDataQueue.empty()) {
+      communicator_.recvSignal(source, signal, header, buf);
 
-      recvDeamonLoopDbg(connections);
+      // recvDeamonLoopDbg(connections);
       switch (signal) {
-      case comm::CommSignal::None:
+      case comm::Signal::None:
         break;
-      case comm::CommSignal::Disconnect:
+      case comm::Signal::Disconnect:
         disconnect(connections, source, buf);
         break;
-      case comm::CommSignal::Data:
+      case comm::Signal::Data:
         ++connections[source].recvCount;
         break;
       }
-      comm::commProcessRecvDataQueue(comm_, GetMemory<Types...>(mm_));
-      comm::commProcessRecvOpsQueue(comm_, ProcessData(this->task()));
+      communicator_.processRecvDataQueue(GetMemory<Types...>(mm_));
+      communicator_.processRecvOpsQueue(ProcessData(this->task()));
       std::this_thread::sleep_for(4ms);
     }
-    comm::commInfog(logh::IG::ReceiverEnd, "receiver end", comm_);
+    communicator_.infog(logh::IG::ReceiverEnd, "receiver end");
   }
 
 public:
@@ -200,8 +198,8 @@ public:
   };
 
   std::vector<Connection> createConnectionVector() {
-    std::vector<Connection> connections(comm_->comm->nbProcesses, Connection{true, 0, 0});
-    for (auto receiver : comm_->receivers) {
+    std::vector<Connection> connections(communicator_.communicator()->nbProcesses(), Connection{true, 0, 0});
+    for (auto receiver : communicator_.receivers()) {
       connections[receiver].connected = false;
     }
     return connections;
@@ -233,15 +231,15 @@ public:
       infos += mm_->extraPrintingInformation();
     }
 
-    if (!comm_->comm->collectStats || comm_->comm->nbProcesses == 1) {
+    if (!communicator_.communicator()->collectStats() || communicator_.communicator()->nbProcesses() == 1) {
       return infos;
     }
 
-    comm::commBarrier(comm_->comm);
+    communicator_.communicator()->barrier();
 
-    size_t nbProcesses = comm_->comm->nbProcesses;
-    if (comm_->comm->rank == 0) {
-      stats = comm::commGatherStats(comm_);
+    size_t nbProcesses = communicator_.communicator()->nbProcesses();
+    if (communicator_.communicator()->rank() == 0) {
+      stats = communicator_.gatherStats();
       std::map<comm::StorageId, comm::StorageInfo> storageStats;
       size_t                                       maxSendOpsSize = 0;
       size_t                                       maxRecvOpsSize = 0;
@@ -251,9 +249,9 @@ public:
       auto                                         transmissionStats = computeTransmissionStats(stats);
 
       infos.append("nbProcesses = " + std::to_string(nbProcesses) + "\\l");
-      std::string receiversStr = "[" + std::to_string(comm_->receivers[0]);
-      for (size_t i = 1; i < comm_->receivers.size(); ++i) {
-        receiversStr += ", " + std::to_string(comm_->receivers[i]);
+      std::string receiversStr = "[" + std::to_string(communicator_.receivers()[0]);
+      for (size_t i = 1; i < communicator_.receivers().size(); ++i) {
+        receiversStr += ", " + std::to_string(communicator_.receivers()[i]);
       }
       receiversStr += "]";
       strAppend(infos, "receivers = " + receiversStr);
@@ -271,7 +269,7 @@ public:
       strAppend(infos, "maxSendStorageSize = " + std::to_string(maxSendStorageSize));
       strAppend(infos, "maxRecvStorageSize = " + std::to_string(maxRecvStorageSize));
 
-      for (comm::u8 typeId = 0; typeId < TypesIds().size; ++typeId) {
+      for (std::uint8_t typeId = 0; typeId < TypesIds().size; ++typeId) {
         if (!transmissionStats.contains(typeId)) {
           continue;
         }
@@ -298,7 +296,7 @@ public:
         strAppend(infos, "}");
       }
     } else {
-      comm::commSendStats(comm_);
+      communicator_.sendStats();
     }
     // exchange stats
     return infos;
@@ -390,16 +388,17 @@ private:
     std::vector<double>                                bandWidth;
   };
 
-  std::map<comm::u8, TransmissionStat> computeTransmissionStats(std::vector<comm::CommTaskStats> const &stats) const {
-    std::map<comm::u8, TransmissionStat> transmissionStats;
-    size_t                               nbProcesses = comm_->comm->nbProcesses;
+  std::map<std::uint8_t, TransmissionStat>
+  computeTransmissionStats(std::vector<comm::CommTaskStats> const &stats) const {
+    std::map<std::uint8_t, TransmissionStat> transmissionStats;
+    size_t                                         nbProcesses = communicator_.communicator()->nbProcesses();
 
-    for (auto receiverRank : comm_->receivers) {
+    for (auto receiverRank : communicator_.receivers()) {
       for (auto recvStorageStat : stats[receiverRank].storageStats) {
-        comm::StorageId   storageId = recvStorageStat.first;
-        comm::StorageInfo recvInfos = recvStorageStat.second;
-        comm::u32         source = storageId.source;
-        comm::u8          typeId = recvInfos.typeId;
+        comm::StorageId     storageId = recvStorageStat.first;
+        comm::StorageInfo   recvInfos = recvStorageStat.second;
+        std::uint32_t source = storageId.source;
+        std::uint8_t  typeId = recvInfos.typeId;
 
         if (stats[source].storageStats.contains(storageId)) {
           auto sendInfos = stats[source].storageStats.at(storageId);
@@ -432,14 +431,14 @@ public:
     this->mm_ = mm;
   }
 
-  comm::CommTaskHandle<TypesIds> *comm() {
-    return comm_;
+  comm::TaskCommunicator<TypesIds> *comm() {
+    return &communicator_;
   }
 
 private:
   std::thread                                 deamon_;
   std::shared_ptr<tool::MemoryPool<Types...>> mm_;
-  comm::CommTaskHandle<TypesIds>             *comm_;
+  comm::TaskCommunicator<TypesIds>            communicator_;
   bool                                        senderDisconnect_;
 
 private:
@@ -458,8 +457,8 @@ private:
     static size_t dbg_idx = 0;
     if (dbg_idx++ == 1000) {
       dbg_idx = 0;
-      logh::warn("sender still running: channel = ", (int)comm_->channel, ", rank = ", comm_->comm->rank,
-                 ", queue size = ", comm_->queues.sendOps.size(),
+      logh::warn("sender still running: channel = ", (int)communicator_.channel(),
+                 ", rank = ", communicator_.communicator()->rank(), ", queue size = ", communicator_.queues().sendOps.size(),
                  ", hasNotifierConnected = ", this->hasNotifierConnected());
     }
   }
@@ -470,22 +469,22 @@ private:
       dbg_idx = 0;
 
       if (isConnected(connections)) {
-        logh::warn("reciever still running: channel = ", (int)comm_->channel, ", rank = ", comm_->comm->rank,
-                   ", data queue size = ", comm_->queues.createDataQueue.size(),
-                   ", ops queue size = ", comm_->queues.recvOps.size(), ", connections = ", connectionsDbg(connections),
-                   ", hasNotifierConnected = ", this->hasNotifierConnected());
+        logh::warn(
+            "reciever still running: channel = ", (int)communicator_.channel(), ", rank = ", communicator_.communicator()->rank(),
+            ", data queue size = ", communicator_.queues.createDataQueue.size(),
+            ", ops queue size = ", communicator_.queues.recvOps.size(),
+            ", connections = ", connectionsDbg(connections), ", hasNotifierConnected = ", this->hasNotifierConnected());
       } else {
-        logh::error("non connected receiver still running: channel = ",
-                (int)comm_->channel, ", rank = ", comm_->comm->rank,
-                ", ops queue size = ", comm_->queues.recvOps.size(),
-                ", data queue size = ", comm_->queues.createDataQueue.size());
+        logh::error("non connected receiver still running: channel = ", (int)communicator_.channel,
+                    ", rank = ", communicator_.communicator()->rank(), ", ops queue size = ", communicator_.queues.recvOps.size(),
+                    ", data queue size = ", communicator_.queues.createDataQueue.size());
       }
     }
   }
 
   void disconnectDbg(std::vector<Connection> const &connections, int source) {
-    comm::commInfog(logh::IG::ReceiverDisconnect, "receiver disconnect", comm_, "source = ", source,
-                    ", connections = ", connectionsDbg(connections));
+    communicator_.infog(logh::IG::ReceiverDisconnect, "receiver disconnect", "source = ", source,
+                         ", connections = ", connectionsDbg(connections));
   }
 };
 

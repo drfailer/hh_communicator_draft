@@ -1,6 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
 project(hh_communicator)
-
 set(CMAKE_CXX_STANDARD 20)
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
@@ -16,7 +15,7 @@ find_package(Hedgehog REQUIRED)
 set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} ${Hedgehog_CXX_FLAGS})
 
 if (NOT MSVC)
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Werror -Wuninitialized -pedantic -g")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Werror -Wuninitialized -g")
 	# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Werror -Wuninitialized -Wno-sign-compare -pedantic -O3")
 endif (NOT MSVC)
 
@@ -30,13 +29,16 @@ target_include_directories(hh_communicator
     lib/serializer-cpp/
     lib/hedgehog/
     /home/rvc1/Programming/usr/include
-    /home/rvc1/Programming/projects/clh/
+    /home/rvc1/Programming/projects/clh.git/v2/
+    /home/rvc1/Programming/projects/tracer-c/tracer/
 )
 target_link_directories(hh_communicator
     PRIVATE
-    /home/rvc1/Programming/projects/clh/build/lib/
+    /home/rvc1/Programming/projects/clh.git/v2/build/lib/
+    /home/rvc1/Programming/projects/tracer-c/build/lib/
 )
 target_link_libraries(hh_communicator
     PRIVATE
     clh
+    tracer
 )
