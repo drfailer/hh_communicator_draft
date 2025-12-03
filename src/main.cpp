@@ -1,4 +1,4 @@
-#include "communicator/communicator.hpp"
+#include "communicator/comm_service.hpp"
 #include "communicator/communicator_task.hpp"
 #include "log.hpp"
 #include <hedgehog/hedgehog.h>
@@ -8,16 +8,16 @@
 std::mutex stdout_mutex;
 
 struct TestGraph1 : hh::Graph<1, int, int> {
-  hh::comm::Communicator *communicator_;
+  hh::comm::CommService *communicator_;
 
-  TestGraph1(hh::comm::Communicator *communicator) : hh::Graph<1, int, int>("TestGraph1"), communicator_(communicator) {
-    assert(communicator->nbProcesses() == 3);
+  TestGraph1(hh::comm::CommService *service) : hh::Graph<1, int, int>("TestGraph1"), communicator_(service) {
+    assert(service->nbProcesses() == 3);
     auto in = std::make_shared<hh::LambdaTask<1, int, int>>("input", 1);
-    auto b01 = std::make_shared<hh::CommunicatorTask<int>>(communicator, std::vector<std::uint32_t>({1}), hh::CommunicatorTaskOpt{});
-    auto b02 = std::make_shared<hh::CommunicatorTask<int>>(communicator, std::vector<std::uint32_t>({2}));
+    auto b01 = std::make_shared<hh::CommunicatorTask<int>>(service, std::vector<std::uint32_t>({1}), hh::CommunicatorTaskOpt{});
+    auto b02 = std::make_shared<hh::CommunicatorTask<int>>(service, std::vector<std::uint32_t>({2}));
     auto frgn1 = std::make_shared<hh::LambdaTask<1, int, int>>("foreign task", 1);
     auto frgn2 = std::make_shared<hh::LambdaTask<1, int, int>>("foreign task", 1);
-    auto bn0 = std::make_shared<hh::CommunicatorTask<int>>(communicator, std::vector<std::uint32_t>({0}));
+    auto bn0 = std::make_shared<hh::CommunicatorTask<int>>(service, std::vector<std::uint32_t>({0}));
     auto out = std::make_shared<hh::LambdaTask<1, int, int>>("output", 1);
 
     auto mm = std::make_shared<hh::tool::MemoryPool<int>>();
@@ -28,24 +28,24 @@ struct TestGraph1 : hh::Graph<1, int, int> {
     // b02->setMemoryManager(mm);
     // bn0->setMemoryManager(mm);
 
-    in->setLambda<int>([communicator](std::shared_ptr<int> data, auto self) {
+    in->setLambda<int>([service](std::shared_ptr<int> data, auto self) {
       auto output = std::make_shared<int>(*data + 1);
-      hh::logh::log(stdout, "[", communicator->rank(), "][in]: input = ", *data, ", output = ", *output);
+      hh::logh::log(stdout, "[", service->rank(), "][in]: input = ", *data, ", output = ", *output);
       self.addResult(output);
     });
-    frgn1->setLambda<int>([communicator](std::shared_ptr<int> data, auto self) {
+    frgn1->setLambda<int>([service](std::shared_ptr<int> data, auto self) {
       auto output = std::make_shared<int>(*data + 1);
-      hh::logh::log(stdout, "[", communicator->rank(), "][frng1]: input = ", *data, ", output = ", *output);
+      hh::logh::log(stdout, "[", service->rank(), "][frng1]: input = ", *data, ", output = ", *output);
       self.addResult(output);
     });
-    frgn2->setLambda<int>([communicator](std::shared_ptr<int> data, auto self) {
+    frgn2->setLambda<int>([service](std::shared_ptr<int> data, auto self) {
       auto output = std::make_shared<int>(*data * 2);
-      hh::logh::log(stdout, "[", communicator->rank(), "][frng2]: input = ", *data, ", output = ", *output);
+      hh::logh::log(stdout, "[", service->rank(), "][frng2]: input = ", *data, ", output = ", *output);
       self.addResult(output);
     });
-    out->setLambda<int>([communicator](std::shared_ptr<int> data, auto self) {
+    out->setLambda<int>([service](std::shared_ptr<int> data, auto self) {
       auto output = std::make_shared<int>(*data + 1);
-      hh::logh::log(stdout, "[", communicator->rank(), "][out]: input = ", *data, ", output = ", *output);
+      hh::logh::log(stdout, "[", service->rank(), "][out]: input = ", *data, ", output = ", *output);
       self.addResult(output);
     });
 
@@ -69,21 +69,20 @@ struct TestGraph1 : hh::Graph<1, int, int> {
 };
 
 int main(int argc, char **argv) {
-  hh::comm::Communicator communicator(true);
+  hh::comm::CommService service(true);
 
-  communicator.init(&argc, &argv);
   auto data = std::make_shared<int>(4);
-  TestGraph1 graph(&communicator);
+  TestGraph1 graph(&service);
   std::vector<std::uint32_t> results;
 
-  std::cout << "rank = " << communicator.rank() << std::endl;
+  std::cout << "rank = " << service.rank() << std::endl;
 
   graph.executeGraph(true);
   graph.pushData(data);
-  communicator.barrier();
+  service.barrier();
   graph.finishPushingData();
 
-  if (communicator.rank() == 0) {
+  if (service.rank() == 0) {
     while (auto result = graph.getBlockingResult()) {
       results.push_back(*std::get<std::shared_ptr<int>>(*result));
     }
@@ -91,12 +90,10 @@ int main(int argc, char **argv) {
 
   graph.waitForTermination();
 
-  graph.createDotFile("graph_" + std::to_string(communicator.rank()) + ".dot");
-  communicator.barrier();
-  if (communicator.rank() == 0) {
+  graph.createDotFile("graph_" + std::to_string(service.rank()) + ".dot");
+  service.barrier();
+  if (service.rank() == 0) {
     HH_DBG(results);
   }
-
-  communicator.finalize();
   return 0;
 }

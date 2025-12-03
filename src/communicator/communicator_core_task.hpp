@@ -70,10 +70,10 @@ private:
   using TypesIds = typename CommunicatorTask<Types...>::TypesIds;
 
 public:
-  CommunicatorCoreTask(CommunicatorTask<Types...> *task, comm::Communicator *communicator,
+  CommunicatorCoreTask(CommunicatorTask<Types...> *task, comm::CommService *service,
                        std::vector<std::uint32_t> const &receivers, std::string const &name)
       : CommunicatorCoreTaskBase<Types...>(task, name, 1, false),
-        communicator_(communicator, receivers),
+        communicator_(service, receivers),
         senderDisconnect_(false) {}
 
   ~CommunicatorCoreTask() {}
@@ -85,7 +85,7 @@ public:
     this->preRun();
 
     auto receivers = communicator_.receivers();
-    bool isReceiver = std::find(receivers.begin(), receivers.end(), communicator_.communicator()->rank()) != receivers.end();
+    bool isReceiver = std::find(receivers.begin(), receivers.end(), communicator_.rank()) != receivers.end();
 
     if (isReceiver) {
       communicator_.infog(logh::IG::Core, "core", "start receiver");
@@ -198,7 +198,7 @@ public:
   };
 
   std::vector<Connection> createConnectionVector() {
-    std::vector<Connection> connections(communicator_.communicator()->nbProcesses(), Connection{true, 0, 0});
+    std::vector<Connection> connections(communicator_.nbProcesses(), Connection{true, 0, 0});
     for (auto receiver : communicator_.receivers()) {
       connections[receiver].connected = false;
     }
@@ -231,14 +231,14 @@ public:
       infos += mm_->extraPrintingInformation();
     }
 
-    if (!communicator_.communicator()->collectStats() || communicator_.communicator()->nbProcesses() == 1) {
+    if (!communicator_.service()->collectStats() || communicator_.nbProcesses() == 1) {
       return infos;
     }
 
-    communicator_.communicator()->barrier();
+    communicator_.service()->barrier();
 
-    size_t nbProcesses = communicator_.communicator()->nbProcesses();
-    if (communicator_.communicator()->rank() == 0) {
+    size_t nbProcesses = communicator_.nbProcesses();
+    if (communicator_.rank() == 0) {
       stats = communicator_.gatherStats();
       std::map<comm::StorageId, comm::StorageInfo> storageStats;
       size_t                                       maxSendOpsSize = 0;
@@ -391,7 +391,7 @@ private:
   std::map<std::uint8_t, TransmissionStat>
   computeTransmissionStats(std::vector<comm::CommTaskStats> const &stats) const {
     std::map<std::uint8_t, TransmissionStat> transmissionStats;
-    size_t                                         nbProcesses = communicator_.communicator()->nbProcesses();
+    size_t                                         nbProcesses = communicator_.nbProcesses();
 
     for (auto receiverRank : communicator_.receivers()) {
       for (auto recvStorageStat : stats[receiverRank].storageStats) {
@@ -458,7 +458,7 @@ private:
     if (dbg_idx++ == 1000) {
       dbg_idx = 0;
       logh::warn("sender still running: channel = ", (int)communicator_.channel(),
-                 ", rank = ", communicator_.communicator()->rank(), ", queue size = ", communicator_.queues().sendOps.size(),
+                 ", rank = ", communicator_.rank(), ", queue size = ", communicator_.queues().sendOps.size(),
                  ", hasNotifierConnected = ", this->hasNotifierConnected());
     }
   }
@@ -470,13 +470,13 @@ private:
 
       if (isConnected(connections)) {
         logh::warn(
-            "reciever still running: channel = ", (int)communicator_.channel(), ", rank = ", communicator_.communicator()->rank(),
+            "reciever still running: channel = ", (int)communicator_.channel(), ", rank = ", communicator_.rank(),
             ", data queue size = ", communicator_.queues().createDataQueue.size(),
             ", ops queue size = ", communicator_.queues().recvOps.size(),
             ", connections = ", connectionsDbg(connections), ", hasNotifierConnected = ", this->hasNotifierConnected());
       } else {
         logh::error("non connected receiver still running: channel = ", (int)communicator_.channel(),
-                    ", rank = ", communicator_.communicator()->rank(), ", ops queue size = ", communicator_.queues().recvOps.size(),
+                    ", rank = ", communicator_.rank(), ", ops queue size = ", communicator_.queues().recvOps.size(),
                     ", data queue size = ", communicator_.queues().createDataQueue.size());
       }
     }

@@ -57,7 +57,7 @@ public:
 
   void execute(std::shared_ptr<Input> data) override {
     logh::infog(logh::IG::CommunicatorTaskExecute, "communicator task execute", "[", (int)task_->comm()->channel(),
-                "]: rank = ", task_->comm()->communicator()->rank(), ", isReceiver_ = ", isReceiver_);
+                "]: rank = ", task_->comm()->service()->rank(), ", isReceiver_ = ", isReceiver_);
 
     /*
      * The CommunicatorTask has the following behavior:
@@ -83,7 +83,7 @@ public:
 
   void sendWithDestCB(std::shared_ptr<Input> data) {
     auto dests = destCB_(data);
-    auto rankIt = std::find(dests.begin(), dests.end(), task_->comm()->communicator()->rank());
+    auto rankIt = std::find(dests.begin(), dests.end(), task_->comm()->service()->rank());
     bool isDataProcessedOnThisRank = false;
 
     if (rankIt != dests.end()) {
@@ -102,7 +102,7 @@ public:
     std::uint32_t receiver = receivers_[rankIdx_];
 
     rankIdx_ = (rankIdx_ + 1) % receivers_.size();
-    if (receiver == task_->comm()->communicator()->rank()) {
+    if (receiver == task_->comm()->service()->rank()) {
       addResult(data);
       callPostSend(data);
     } else {
@@ -127,9 +127,9 @@ public:
   void initialize() {
     receivers_ = task_->comm()->receivers();
     isReceiver_
-        = std::find(receivers_.begin(), receivers_.end(), task_->comm()->communicator()->rank()) != receivers_.end();
+        = std::find(receivers_.begin(), receivers_.end(), task_->comm()->service()->rank()) != receivers_.end();
     if (!isReceiver_ && task_->options().sendersAreReceivers && task_->options().scatter) {
-      receivers_.push_back(task_->comm()->communicator()->rank());
+      receivers_.push_back(task_->comm()->service()->rank());
     }
   }
 
@@ -179,9 +179,9 @@ private:
   CommunicatorTaskOpt                 options_;
 
 public:
-  explicit CommunicatorTask(comm::Communicator *communicator, std::vector<std::uint32_t> const &receivers,
+  explicit CommunicatorTask(comm::CommService *service, std::vector<std::uint32_t> const &receivers,
                             CommunicatorTaskOpt opt = {}, std::string const &name = "CommunicatorTask")
-      : behavior::TaskNode(std::make_shared<CoreTaskType>(this, communicator, receivers, name)),
+      : behavior::TaskNode(std::make_shared<CoreTaskType>(this, service, receivers, name)),
         behavior::Copyable<SelfType>(1),
         CommunicatorMultiSend<CommunicatorTask<Types...>, TypesIds, Inputs>(this),
         tool::BehaviorTaskMultiSendersTypeDeducer_t<Outputs>((std::dynamic_pointer_cast<CoreTaskType>(this->core()))),

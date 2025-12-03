@@ -1,11 +1,11 @@
-#ifndef COMMUNICATOR_COMMUNICATOR
-#define COMMUNICATOR_COMMUNICATOR
+#ifndef COMMUNICATOR_COMM_SERVICE
+#define COMMUNICATOR_COMM_SERVICE
 #include "../log.hpp"
-#include <clh/buffer.h>
-#include <clh/clh.h>
 #include "protocol.hpp"
 #include <cassert>
 #include <chrono>
+#include <clh/buffer.h>
+#include <clh/clh.h>
 #include <cstddef>
 #include <cstdlib>
 #include <stdexcept>
@@ -15,23 +15,16 @@ namespace hh {
 
 namespace comm {
 
-class Communicator {
+class CommService {
 public:
-  Communicator(bool collectStats = false)
-      : collectStats_(collectStats) {}
-
-  // TODO: remove
-  CLH_Handle clh_todoRemove() const { return clh_; }
-
-public: // init and finalize ///////////////////////////////////////////////////
-  // TODO: put this in constructor / destructor
-  void init(int *, char ***) {
+  CommService(bool collectStats = false)
+      : collectStats_(collectStats) {
     clh_init(&this->clh_);
     this->rank_ = clh_node_id(this->clh_);
     this->nbProcesses_ = clh_nb_nodes(this->clh_);
   }
 
-  inline void finalize() {
+  ~CommService() {
     clh_finalize(this->clh_);
   }
 
@@ -70,6 +63,31 @@ public: // probe ///////////////////////////////////////////////////////////////
   Request probe(std::uint64_t tag, std::uint64_t tagMask) {
     return clh_probe(this->clh_, tag, tagMask, true);
   }
+
+public: // requests ////////////////////////////////////////////////////////////
+  bool request_completed(Request request) const {
+      return clh_request_completed(this->clh_, request);
+  }
+
+  void request_release(Request request) const {
+      clh_request_release(this->clh_, request);
+  }
+
+  void request_cancel(Request request) const {
+      clh_cancel(this->clh_, request);
+  }
+
+  size_t buffer_len(Request request) const {
+      return clh_request_buffer_len(request);
+  }
+
+  std::uint64_t sender_tag(Request request) const {
+      return clh_request_tag(request);
+  }
+
+  // std::uint32_t sender_rank(Request request) const {
+  //     // TODO
+  // }
 
 public: // synchronization /////////////////////////////////////////////////////
   void barrier() {
