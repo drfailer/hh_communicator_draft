@@ -27,6 +27,7 @@ public:
   virtual size_t buffer_len(Request request) const = 0;
   virtual std::uint64_t sender_tag(Request request) const = 0;
   virtual std::uint32_t sender_rank(Request request) const = 0;
+  virtual bool probe_success(Request request) const = 0;
 
   virtual void barrier() = 0;
 

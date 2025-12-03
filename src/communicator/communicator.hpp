@@ -58,14 +58,7 @@ public:
    * Send a signal to the given destinations.
    */
   void sendSignal(std::vector<std::uint32_t> const &dests, Signal signal) {
-    Header header = {
-        .source = (std::uint32_t)this->service_->rank(),
-        .signal = 1,
-        .typeId = 0,
-        .channel = this->channel_,
-        .packageId = 0,
-        .bufferId = 0,
-    };
+    Header header(this->service_->rank(), 1, 0, this->channel_, 0, 0);
     char          buf[100] = {(char)signal};
     std::uint64_t len = 1;
 
@@ -86,14 +79,7 @@ public:
   template <typename T>
   void sendData(std::vector<std::uint32_t> const &dests, std::shared_ptr<T> data, bool returnMemory = true) {
     auto [storageId, storage] = createSendStorage(dests, data, returnMemory);
-    Header header = {
-        .source = (std::uint32_t)this->service_->rank(),
-        .signal = 0,
-        .typeId = storage.typeId,
-        .channel = this->channel_,
-        .packageId = storageId.packageId,
-        .bufferId = 0,
-    };
+    Header header(this->service_->rank(), 0, storage.typeId, this->channel_, storageId.packageId, 0);
 
     infog(logh::IG::Comm, "comm", "sendData -> ", " typeId = ", (int)get_id<T>(TM()),
           " requestId = ", (int)header.packageId);
@@ -131,9 +117,9 @@ public:
     source = -1;
 
     // TODO: probe for my rank / my channel
-    if (request->data.probe.result) {
-      tag = request->data.probe.sender_tag;
-      header = tagToHeader(tag);
+    if (this->service_->probe_success(request)) {
+      tag = this->service_->sender_tag(request);
+      header.fromTag(tag);
 
       assert(header.source != this->service_->rank());
 
@@ -449,14 +435,7 @@ public:
    */
   void sendStats() const {
     serializer::Bytes buf;
-    Header            header = {
-                   .source = this->service_->rank(),
-                   .signal = 0,
-                   .typeId = 0,
-                   .channel = this->channel_,
-                   .packageId = 0,
-                   .bufferId = 0,
-    };
+    Header            header(this->service_->rank(), 0, 0, this->channel_, 0, 0);
 
     using Serializer = serializer::Serializer<serializer::Bytes>;
     serializer::serialize<Serializer>(buf, 0, this->stats_.maxSendOpsSize, this->stats_.maxRecvOpsSize,
@@ -482,7 +461,7 @@ public:
     stats[0].maxRecvStorageSize = this->stats_.maxRecvStorageSize;
     for (std::uint32_t i = 1; i < this->service_->nbProcesses(); ++i) {
       Request request = this->service_->probe(this->channel_, i);
-      while (!request->data.probe.result) {
+      while (!this->service_->probe_success(request)) {
         this->service_->request_release(request);
         using namespace std::chrono_literals;
         std::this_thread::sleep_for(1ms);
