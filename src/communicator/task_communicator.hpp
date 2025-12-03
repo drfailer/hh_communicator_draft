@@ -16,11 +16,11 @@ namespace comm {
 template <typename TM>
 class TaskCommunicator {
 public:
-  TaskCommunicator(Communicator *communicator, std::vector<int> const &receivers)
+  TaskCommunicator(Communicator *communicator, std::vector<std::uint32_t> const &receivers)
       : communicator_(communicator),
         channel_(communicator->generateId()),
-        packagesCount_(communicator->nbProcesses(), 0),
-        receivers_(receivers_) {}
+        receivers_(receivers),
+        packagesCount_(communicator->nbProcesses(), 0) {}
 
 public:
   std::uint8_t channel() const {
@@ -97,7 +97,7 @@ public:
     this->wh_.mutex.unlock();
 
     for (auto dest : dests) {
-      ++this->packagesCount_[dest];
+      this->packagesCount_[dest] += 1;
       for (size_t i = 0; i < storage.package.data.size(); ++i) {
         header.bufferId = (std::uint8_t)i;
         std::lock_guard<std::mutex> queuesLock(this->queues_.mutex);
@@ -117,7 +117,7 @@ public:
    * signal, then receive the signal, otherwise, add a pending recv data request
    * to the queue.
    */
-  void recvSignal(int &source, Signal &signal, Header &header, Buffer &buf) {
+  void recvSignal(std::uint32_t &source, Signal &signal, Header &header, Buffer &buf) {
     std::uint64_t tag = 0;
     Request       request = probeChannel();
 
@@ -129,12 +129,12 @@ public:
       tag = request->data.probe.sender_tag;
       header = tagToHeader(tag);
 
-      assert(header.source != (std::uint32_t)this->communicator_->rank());
+      assert(header.source != this->communicator_->rank());
 
       if (header.signal == 0) {
         std::lock_guard<std::mutex> queuesLock(this->queues_.mutex);
         this->queues_.createDataQueue.insert(CommPendingRecvData{
-            .source = (int)header.source,
+            .source = header.source,
             .header = header,
             .request = request,
         });
@@ -144,7 +144,8 @@ public:
         this->communicator_->recv(request, buf);
         signal = (Signal)buf.mem[0];
       }
-      source = (int)header.source;
+      source = header.source;
+      assert(source < this->communicator_->nbProcesses());
       infog(logh::IG::Comm, "comm", "recvSignal -> ", " source = ", source, " signal = ", (int)signal);
     }
   }
@@ -280,10 +281,11 @@ public:
     }
     return {storageId, storage};
   }
+
   /*
    * Flush operation queue and remove storage entries from the warehouse.
    */
-  void fllushQueueAndWarehouse(std::vector<CommOperation> &queue, std::map<StorageId, PackageStorage<TM>> &wh) {
+  void flushQueueAndWarehouse(std::vector<CommOperation> &queue, std::map<StorageId, PackageStorage<TM>> &wh) {
     std::vector<CLH_Request *> requests;
 
     for (auto &op : queue) {
@@ -421,9 +423,10 @@ public:
       }
     }
 
-    if (flush) {
-      fllushQueueAndWarehouse(this->queues_.recvOps, this->wh_.recvStorage);
-    }
+    // TODO: test if this works fine
+    // if (flush) {
+    //   flushQueueAndWarehouse(this->queues_.recvOps, this->wh_.recvStorage);
+    // }
   }
 
   Request probeChannel() {
@@ -435,7 +438,9 @@ public:
         .packageId = 0,
         .bufferId = 0,
     };
-    std::uint64_t tag = headerToTag(header), tagMask = HEADER_FIELDS[CHANNEL].mask;
+    std::uint64_t tag = headerToTag(header);
+    assert(tag != 0);
+    std::uint64_t tagMask = HEADER_FIELDS[CHANNEL].mask;
     return this->communicator_->probe(tag, tagMask);
   }
 
@@ -457,7 +462,7 @@ public:
   void sendStats() const {
     serializer::Bytes buf;
     Header            header = {
-                   .source = (std::uint32_t)this->communicator_->rank(),
+                   .source = this->communicator_->rank(),
                    .signal = 0,
                    .typeId = 0,
                    .channel = this->channel_,
