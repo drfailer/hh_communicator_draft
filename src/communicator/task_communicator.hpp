@@ -427,10 +427,9 @@ public:
       }
     }
 
-    // TODO: test if this works fine
-    // if (flush) {
-    //   flushQueueAndWarehouse(this->queues_.recvOps, this->wh_.recvStorage);
-    // }
+    if (flush) {
+      flushQueueAndWarehouse(this->queues_.recvOps, this->wh_.recvStorage);
+    }
   }
 
 public:

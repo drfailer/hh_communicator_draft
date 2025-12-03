@@ -2,6 +2,7 @@
 #define COMMUNICATOR_CLH_SERVICE
 #include "../../log.hpp"
 #include "../protocol.hpp"
+#include "comm_service.hpp"
 #include <cassert>
 #include <chrono>
 #include <clh/buffer.h>
@@ -10,7 +11,6 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <thread>
-#include "comm_service.hpp"
 
 namespace hh {
 
@@ -69,7 +69,7 @@ public: // probe ///////////////////////////////////////////////////////////////
 
   Request probe(std::uint8_t channel, std::uint32_t source) override {
     std::uint64_t tag = (std::uint64_t)channel << HEADER_FIELDS[CHANNEL].offset
-                      | (std::uint64_t)source << HEADER_FIELDS[SOURCE].offset;
+                        | (std::uint64_t)source << HEADER_FIELDS[SOURCE].offset;
     std::uint64_t mask = HEADER_FIELDS[CHANNEL].mask | HEADER_FIELDS[SOURCE].mask;
     return clh_probe(this->clh_, tag, mask, true);
   }
@@ -96,7 +96,7 @@ public: // requests ////////////////////////////////////////////////////////////
   }
 
   std::uint32_t sender_rank(Request request) const override {
-      return (std::uint32_t)((clh_request_tag(request) | HEADER_FIELDS[SOURCE].mask) >> HEADER_FIELDS[SOURCE].offset);
+    return (std::uint32_t)((clh_request_tag(request) | HEADER_FIELDS[SOURCE].mask) >> HEADER_FIELDS[SOURCE].offset);
   }
 
 public: // synchronization /////////////////////////////////////////////////////
