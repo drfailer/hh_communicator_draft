@@ -1,4 +1,4 @@
-CLH_PATH=$(HOME)/Programming/projects/clh.git/app-thread/
+CLH_PATH=$(HOME)/Programming/projects/clh.git/v2/
 TRACER_PATH=$(HOME)/Programming/projects/tracer-c/tracer/
 
 CC=g++
