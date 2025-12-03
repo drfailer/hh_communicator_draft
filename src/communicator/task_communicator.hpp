@@ -1,6 +1,6 @@
 #ifndef COMMUNICATOR_TASK_COMMUNICATOR
 #define COMMUNICATOR_TASK_COMMUNICATOR
-#include "comm_service.hpp"
+#include "service/comm_service.hpp"
 #include "type_map.hpp"
 #include <map>
 #include <serializer/serializer.hpp>
@@ -46,11 +46,11 @@ public:
   }
 
   std::uint32_t rank() const {
-      return this->service_->rank();
+    return this->service_->rank();
   }
 
   std::uint32_t nbProcesses() const {
-      return this->service_->nbProcesses();
+    return this->service_->nbProcesses();
   }
 
 public:
@@ -474,14 +474,6 @@ public:
   std::vector<CommTaskStats> gatherStats() const {
     std::vector<CommTaskStats> stats(this->service_->nbProcesses());
     int                        bufSize;
-    Header                     header = {
-                            .source = 0,
-                            .signal = 0,
-                            .typeId = 0,
-                            .channel = this->channel_,
-                            .packageId = 0,
-                            .bufferId = 0,
-    };
 
     stats[0].storageStats = std::move(this->stats_.storageStats);
     stats[0].maxSendOpsSize = this->stats_.maxSendOpsSize;
@@ -490,13 +482,13 @@ public:
     stats[0].maxSendStorageSize = this->stats_.maxSendStorageSize;
     stats[0].maxRecvStorageSize = this->stats_.maxRecvStorageSize;
     for (std::uint32_t i = 1; i < this->service_->nbProcesses(); ++i) {
-      header.source = i;
-      Request       request = this->service_->probe(this->channel_, i);
+      Request request = this->service_->probe(this->channel_, i);
       while (!request->data.probe.result) {
         this->service_->request_release(request);
         using namespace std::chrono_literals;
         std::this_thread::sleep_for(1ms);
-        request = this->service_->probe(this->channel_, i);;
+        request = this->service_->probe(this->channel_, i);
+        ;
       }
       bufSize = this->service_->buffer_len(request);
 

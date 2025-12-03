@@ -1,7 +1,7 @@
-#ifndef COMMUNICATOR_COMM_SERVICE
-#define COMMUNICATOR_COMM_SERVICE
-#include "../log.hpp"
-#include "protocol.hpp"
+#ifndef COMMUNICATOR_CLH_SERVICE
+#define COMMUNICATOR_CLH_SERVICE
+#include "../../log.hpp"
+#include "../protocol.hpp"
 #include <cassert>
 #include <chrono>
 #include <clh/buffer.h>
@@ -10,26 +10,27 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <thread>
+#include "comm_service.hpp"
 
 namespace hh {
 
 namespace comm {
 
-class CommService {
+class CLHService : public CommService {
 public:
-  CommService(bool collectStats = false)
-      : collectStats_(collectStats) {
+  CLHService(bool collectStats = false)
+      : CommService(collectStats) {
     clh_init(&this->clh_);
     this->rank_ = clh_node_id(this->clh_);
     this->nbProcesses_ = clh_nb_nodes(this->clh_);
   }
 
-  ~CommService() {
+  ~CLHService() {
     clh_finalize(this->clh_);
   }
 
 public: // send ////////////////////////////////////////////////////////////////
-  void send(Header const header, std::uint32_t dest, Buffer const &buffer) {
+  void send(Header const header, std::uint32_t dest, Buffer const &buffer) override {
     std::uint64_t tag = headerToTag(header);
     Request       request = clh_send(this->clh_, dest, tag, buffer);
     assert(request != nullptr);
@@ -37,7 +38,7 @@ public: // send ////////////////////////////////////////////////////////////////
     clh_request_release(this->clh_, request);
   }
 
-  Request sendAsync(Header const header, std::uint32_t dest, Buffer const &buffer) {
+  Request sendAsync(Header const header, std::uint32_t dest, Buffer const &buffer) override {
     std::uint64_t tag = headerToTag(header);
     CLH_Request  *request = clh_send(this->clh_, dest, tag, buffer);
     assert(request != nullptr);
@@ -46,27 +47,27 @@ public: // send ////////////////////////////////////////////////////////////////
 
 public: // recv ////////////////////////////////////////////////////////////////
   // TODO: recv without request???
-  void recv(Request probeRequest, Buffer const &buffer) {
+  void recv(Request probeRequest, Buffer const &buffer) override {
     CLH_Request *request = clh_request_recv(this->clh_, probeRequest, buffer);
     assert(request != nullptr);
     checkCLH(clh_wait(this->clh_, request));
     clh_request_release(this->clh_, request);
   }
 
-  Request recvAsync(Request probeRequest, Buffer const &buffer) {
+  Request recvAsync(Request probeRequest, Buffer const &buffer) override {
     Request request = clh_request_recv(this->clh_, probeRequest, buffer);
     assert(request != nullptr);
     return request;
   }
 
 public: // probe ///////////////////////////////////////////////////////////////
-  Request probe(std::uint8_t channel) {
+  Request probe(std::uint8_t channel) override {
     std::uint64_t tag = (std::uint64_t)channel << HEADER_FIELDS[CHANNEL].offset;
     std::uint64_t mask = HEADER_FIELDS[CHANNEL].mask;
     return clh_probe(this->clh_, tag, mask, true);
   }
 
-  Request probe(std::uint8_t channel, std::uint32_t source) {
+  Request probe(std::uint8_t channel, std::uint32_t source) override {
     std::uint64_t tag = (std::uint64_t)channel << HEADER_FIELDS[CHANNEL].offset
                       | (std::uint64_t)source << HEADER_FIELDS[SOURCE].offset;
     std::uint64_t mask = HEADER_FIELDS[CHANNEL].mask | HEADER_FIELDS[SOURCE].mask;
@@ -74,49 +75,41 @@ public: // probe ///////////////////////////////////////////////////////////////
   }
 
 public: // requests ////////////////////////////////////////////////////////////
-  bool request_completed(Request request) const {
+  bool request_completed(Request request) const override {
     return clh_request_completed(this->clh_, request);
   }
 
-  void request_release(Request request) const {
+  void request_release(Request request) const override {
     clh_request_release(this->clh_, request);
   }
 
-  void request_cancel(Request request) const {
+  void request_cancel(Request request) const override {
     clh_cancel(this->clh_, request);
   }
 
-  size_t buffer_len(Request request) const {
+  size_t buffer_len(Request request) const override {
     return clh_request_buffer_len(request);
   }
 
-  std::uint64_t sender_tag(Request request) const {
+  std::uint64_t sender_tag(Request request) const override {
     return clh_request_tag(request);
   }
 
-  // std::uint32_t sender_rank(Request request) const {
-  //     // TODO
-  // }
+  std::uint32_t sender_rank(Request request) const override {
+      return (std::uint32_t)((clh_request_tag(request) | HEADER_FIELDS[SOURCE].mask) >> HEADER_FIELDS[SOURCE].offset);
+  }
 
 public: // synchronization /////////////////////////////////////////////////////
-  void barrier() {
+  void barrier() override {
     clh_barrier(this->clh_);
   }
 
 public:
-  std::uint32_t rank() const {
+  std::uint32_t rank() const override {
     return rank_;
   }
-  std::uint32_t nbProcesses() const {
+  std::uint32_t nbProcesses() const override {
     return nbProcesses_;
-  }
-  bool collectStats() const {
-    return collectStats_;
-  }
-
-  std::uint8_t generateId() {
-    assert(idGenerator_ < 255);
-    return ++idGenerator_;
   }
 
 private:
@@ -131,8 +124,6 @@ private:
 private:
   std::uint32_t rank_ = -1;
   std::uint32_t nbProcesses_ = -1;
-  std::uint8_t  idGenerator_ = 0;
-  bool          collectStats_ = false;
   CLH_Handle    clh_ = nullptr;
 };
 

@@ -1,4 +1,4 @@
-#include "communicator/comm_service.hpp"
+#include "communicator/service/clh_service.hpp"
 #include "communicator/communicator_task.hpp"
 #include "log.hpp"
 #include <hedgehog/hedgehog.h>
@@ -69,20 +69,20 @@ struct TestGraph1 : hh::Graph<1, int, int> {
 };
 
 int main(int argc, char **argv) {
-  hh::comm::CommService service(true);
+  hh::comm::CommService *service = new hh::comm::CLHService(true);
 
   auto data = std::make_shared<int>(4);
-  TestGraph1 graph(&service);
+  TestGraph1 graph(service);
   std::vector<std::uint32_t> results;
 
-  std::cout << "rank = " << service.rank() << std::endl;
+  std::cout << "rank = " << service->rank() << std::endl;
 
   graph.executeGraph(true);
   graph.pushData(data);
-  service.barrier();
+  service->barrier();
   graph.finishPushingData();
 
-  if (service.rank() == 0) {
+  if (service->rank() == 0) {
     while (auto result = graph.getBlockingResult()) {
       results.push_back(*std::get<std::shared_ptr<int>>(*result));
     }
@@ -90,10 +90,11 @@ int main(int argc, char **argv) {
 
   graph.waitForTermination();
 
-  graph.createDotFile("graph_" + std::to_string(service.rank()) + ".dot");
-  service.barrier();
-  if (service.rank() == 0) {
+  graph.createDotFile("graph_" + std::to_string(service->rank()) + ".dot");
+  service->barrier();
+  if (service->rank() == 0) {
     HH_DBG(results);
   }
+  delete service;
   return 0;
 }

@@ -16,11 +16,11 @@ struct MMGraph : hh::Graph<MMGraphIO> {
     /*
      * C[m,n] = A[m,k]*B[k,n] + C[m,n]
      */
-    MMGraph(hh::comm::Communicator *communicator, size_t M, size_t N, size_t K, size_t tileSize, size_t poolSize,
+    MMGraph(hh::comm::CommService *service, size_t M, size_t N, size_t K, size_t tileSize, size_t poolSize,
             size_t threads)
         : hh::Graph<MMGraphIO>("MMGraph") {
-        size_t NB_PROCESSES = communicator->nbProcesses();
-        size_t RANK = communicator->rank();
+        size_t NB_PROCESSES = service->nbProcesses();
+        size_t RANK = service->rank();
         size_t SPLIT_TASK_THREADS = std::max<size_t>(1, threads / 2);
         size_t PRODUCT_TASK_THREADS = std::max<size_t>(1, threads / NB_PROCESSES);
         size_t SUM_TASK_THREADS = std::max<size_t>(1, threads / (4 * NB_PROCESSES));
@@ -46,7 +46,7 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         auto distributeTask
             = std::make_shared<hh::CommunicatorTask<MatrixTile<MT, MatrixId::A>, MatrixTile<MT, MatrixId::B>,
                                                     MatrixTile<MT, MatrixId::C>>>(
-                communicator, distributeTaskReceivers,
+                service, distributeTaskReceivers,
                 hh::CommunicatorTaskOpt{.sendersAreReceivers = true, .scatter = true});
 
         auto productState = std::make_shared<ProductState>(mm, TM, TN, TK, RANK, NB_PROCESSES);
@@ -58,7 +58,7 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         auto sumTask = std::make_shared<SumTask>(SUM_TASK_THREADS);
 
         auto gatherTask = std::make_shared<hh::CommunicatorTask<MatrixTile<MT, MatrixId::C>>>(
-            communicator, std::vector<std::uint32_t>({0}),
+            service, std::vector<std::uint32_t>({0}),
             hh::CommunicatorTaskOpt{.sendersAreReceivers = false, .scatter = false});
 
         auto copyTileState = std::make_shared<CopyTileStateManager>(std::make_shared<CopyTileState>(mm, TM, TN, RANK));

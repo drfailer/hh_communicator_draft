@@ -1,6 +1,7 @@
 #include "../../../common/ap.h"
 #include "../../../common/timer.h"
 #include "../../../common/utest.h"
+#include "../../../../src/communicator/service/clh_service.hpp"
 #include "graph.hpp"
 #include <cblas.h>
 
@@ -108,25 +109,23 @@ UTest(mm_result, std::shared_ptr<Matrix<MT, MatrixId::A>> A, std::shared_ptr<Mat
 int main(int argc, char **argv) {
     Config config = parseArgs(argc, argv);
 
-    hh::comm::Communicator communicator(true);
-
-    communicator.init(&argc, &argv);
+    hh::comm::CommService *service = new hh::comm::CLHService(true);
 
     // TODO: we need an function in comm tool to interface this
-    GLOBAL_RANK = communicator.rank();
+    GLOBAL_RANK = service->rank();
 
     std::shared_ptr<Matrix<MT, MatrixId::A>> A = nullptr;
     std::shared_ptr<Matrix<MT, MatrixId::B>> B = nullptr;
     std::shared_ptr<Matrix<MT, MatrixId::C>> C = nullptr;
 
-    if (communicator.rank() == 0) {
+    if (service->rank() == 0) {
         A = createMatrix<MatrixId::A>(config.M, config.K);
         B = createMatrix<MatrixId::B>(config.K, config.N);
         C = createMatrix<MatrixId::C>(config.M, config.N);
         std::memset(C->mem, 0, sizeof(MT) * C->rows * C->cols);
     }
 
-    MMGraph graph(&communicator, config.M, config.N, config.K, config.tileSize, config.poolSize, config.threads);
+    MMGraph graph(service, config.M, config.N, config.K, config.tileSize, config.poolSize, config.threads);
 
     // hh::GraphSignalHandler<MMGraphIO>::registerGraph(&graph);
     // hh::GraphSignalHandler<MMGraphIO>::setDebugOptions(hh::DebugOptions::ALL);
@@ -136,25 +135,25 @@ int main(int argc, char **argv) {
     graph.executeGraph(true);
 
     timer_start(graph_execution);
-    if (communicator.rank() == 0) {
+    if (service->rank() == 0) {
         graph.pushData(A);
         graph.pushData(B);
         graph.pushData(C);
     }
-    communicator.barrier();
+    service->barrier();
     graph.finishPushingData();
     graph.waitForTermination();
     logh::info("graph terminated");
     timer_end(graph_execution);
 
     timer_start(create_dot_files);
-    graph.createDotFile("build/graph" + std::to_string(communicator.rank()) + ".dot", hh::ColorScheme::EXECUTION,
+    graph.createDotFile("build/graph" + std::to_string(service->rank()) + ".dot", hh::ColorScheme::EXECUTION,
                         hh::StructureOptions::QUEUE);
-    communicator.barrier();
+    service->barrier();
     timer_end(create_dot_files);
 
-    communicator.barrier();
-    communicator.finalize();
+    service->barrier();
+    delete service;
 
     if (GLOBAL_RANK != 0) {
         return 0;
