@@ -125,7 +125,7 @@ public:
    */
   void recvSignal(std::uint32_t &source, Signal &signal, Header &header, Buffer &buf) {
     std::uint64_t tag = 0;
-    Request       request = probeChannel();
+    Request       request = this->service_->probe(this->channel_);
 
     signal = Signal::None;
     source = -1;
@@ -433,21 +433,6 @@ public:
     // }
   }
 
-  Request probeChannel() {
-    Header header = {
-        .source = 0,
-        .signal = 0,
-        .typeId = 0,
-        .channel = this->channel_,
-        .packageId = 0,
-        .bufferId = 0,
-    };
-    std::uint64_t tag = headerToTag(header);
-    assert(tag != 0);
-    std::uint64_t tagMask = HEADER_FIELDS[CHANNEL].mask;
-    return this->service_->probe(tag, tagMask);
-  }
-
 public:
   template <typename... Ts>
   void infog(logh::IG ig, std::string const &name, Ts &&...args) const {
@@ -506,14 +491,12 @@ public:
     stats[0].maxRecvStorageSize = this->stats_.maxRecvStorageSize;
     for (std::uint32_t i = 1; i < this->service_->nbProcesses(); ++i) {
       header.source = i;
-      std::uint64_t tag = headerToTag(header);
-      std::uint64_t tagMask = HEADER_FIELDS[SOURCE].mask | HEADER_FIELDS[CHANNEL].mask;
-      Request       request = this->service_->probe(tag, tagMask);
+      Request       request = this->service_->probe(this->channel_, i);
       while (!request->data.probe.result) {
         this->service_->request_release(request);
         using namespace std::chrono_literals;
         std::this_thread::sleep_for(1ms);
-        request = this->service_->probe(tag, tagMask);
+        request = this->service_->probe(this->channel_, i);;
       }
       bufSize = this->service_->buffer_len(request);
 

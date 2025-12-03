@@ -60,29 +60,38 @@ public: // recv ////////////////////////////////////////////////////////////////
   }
 
 public: // probe ///////////////////////////////////////////////////////////////
-  Request probe(std::uint64_t tag, std::uint64_t tagMask) {
-    return clh_probe(this->clh_, tag, tagMask, true);
+  Request probe(std::uint8_t channel) {
+    std::uint64_t tag = (std::uint64_t)channel << HEADER_FIELDS[CHANNEL].offset;
+    std::uint64_t mask = HEADER_FIELDS[CHANNEL].mask;
+    return clh_probe(this->clh_, tag, mask, true);
+  }
+
+  Request probe(std::uint8_t channel, std::uint32_t source) {
+    std::uint64_t tag = (std::uint64_t)channel << HEADER_FIELDS[CHANNEL].offset
+                      | (std::uint64_t)source << HEADER_FIELDS[SOURCE].offset;
+    std::uint64_t mask = HEADER_FIELDS[CHANNEL].mask | HEADER_FIELDS[SOURCE].mask;
+    return clh_probe(this->clh_, tag, mask, true);
   }
 
 public: // requests ////////////////////////////////////////////////////////////
   bool request_completed(Request request) const {
-      return clh_request_completed(this->clh_, request);
+    return clh_request_completed(this->clh_, request);
   }
 
   void request_release(Request request) const {
-      clh_request_release(this->clh_, request);
+    clh_request_release(this->clh_, request);
   }
 
   void request_cancel(Request request) const {
-      clh_cancel(this->clh_, request);
+    clh_cancel(this->clh_, request);
   }
 
   size_t buffer_len(Request request) const {
-      return clh_request_buffer_len(request);
+    return clh_request_buffer_len(request);
   }
 
   std::uint64_t sender_tag(Request request) const {
-      return clh_request_tag(request);
+    return clh_request_tag(request);
   }
 
   // std::uint32_t sender_rank(Request request) const {
