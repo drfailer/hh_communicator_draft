@@ -1,7 +1,7 @@
 #ifndef COMMUNICATOR_COMMUNICATOR_TASK
 #define COMMUNICATOR_COMMUNICATOR_TASK
 #include "communicator_core_task.hpp"
-#include "task_communicator.hpp"
+#include "communicator.hpp"
 #include <functional>
 #include <hedgehog/hedgehog.h>
 
@@ -126,8 +126,7 @@ public:
 
   void initialize() {
     receivers_ = task_->comm()->receivers();
-    isReceiver_
-        = std::find(receivers_.begin(), receivers_.end(), task_->comm()->service()->rank()) != receivers_.end();
+    isReceiver_ = std::find(receivers_.begin(), receivers_.end(), task_->comm()->service()->rank()) != receivers_.end();
     if (!isReceiver_ && task_->options().sendersAreReceivers && task_->options().scatter) {
       receivers_.push_back(task_->comm()->service()->rank());
     }
@@ -198,7 +197,7 @@ public:
     CommunicatorMultiSend<CommunicatorTask<Types...>, TypesIds, Inputs>::initialize();
   }
 
-  [[nodiscard]] comm::TaskCommunicator<TypesIds> *comm() const {
+  [[nodiscard]] comm::Communicator<TypesIds> *comm() const {
     return coreTask_->comm();
   }
 

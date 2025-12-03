@@ -3,7 +3,7 @@
 #include "../log.hpp"
 #include "communicator_memory_manager.hpp"
 #include "generic_core_task.hpp"
-#include "task_communicator.hpp"
+#include "communicator.hpp"
 #include <algorithm>
 #include <condition_variable>
 #include <numeric>
@@ -391,14 +391,14 @@ private:
   std::map<std::uint8_t, TransmissionStat>
   computeTransmissionStats(std::vector<comm::CommTaskStats> const &stats) const {
     std::map<std::uint8_t, TransmissionStat> transmissionStats;
-    size_t                                         nbProcesses = communicator_.nbProcesses();
+    size_t                                   nbProcesses = communicator_.nbProcesses();
 
     for (auto receiverRank : communicator_.receivers()) {
       for (auto recvStorageStat : stats[receiverRank].storageStats) {
-        comm::StorageId     storageId = recvStorageStat.first;
-        comm::StorageInfo   recvInfos = recvStorageStat.second;
-        std::uint32_t source = storageId.source;
-        std::uint8_t  typeId = recvInfos.typeId;
+        comm::StorageId   storageId = recvStorageStat.first;
+        comm::StorageInfo recvInfos = recvStorageStat.second;
+        std::uint32_t     source = storageId.source;
+        std::uint8_t      typeId = recvInfos.typeId;
 
         if (stats[source].storageStats.contains(storageId)) {
           auto sendInfos = stats[source].storageStats.at(storageId);
@@ -431,14 +431,14 @@ public:
     this->mm_ = mm;
   }
 
-  comm::TaskCommunicator<TypesIds> *comm() {
+  comm::Communicator<TypesIds> *comm() {
     return &communicator_;
   }
 
 private:
   std::thread                                 deamon_;
   std::shared_ptr<tool::MemoryPool<Types...>> mm_;
-  comm::TaskCommunicator<TypesIds>            communicator_;
+  comm::Communicator<TypesIds>                communicator_;
   bool                                        senderDisconnect_;
 
 private:
@@ -457,8 +457,8 @@ private:
     static size_t dbg_idx = 0;
     if (dbg_idx++ == 1000) {
       dbg_idx = 0;
-      logh::warn("sender still running: channel = ", (int)communicator_.channel(),
-                 ", rank = ", communicator_.rank(), ", queue size = ", communicator_.queues().sendOps.size(),
+      logh::warn("sender still running: channel = ", (int)communicator_.channel(), ", rank = ", communicator_.rank(),
+                 ", queue size = ", communicator_.queues().sendOps.size(),
                  ", hasNotifierConnected = ", this->hasNotifierConnected());
     }
   }
@@ -484,7 +484,7 @@ private:
 
   void disconnectDbg(std::vector<Connection> const &connections, int source) {
     communicator_.infog(logh::IG::ReceiverDisconnect, "receiver disconnect", "source = ", source,
-                         ", connections = ", connectionsDbg(connections));
+                        ", connections = ", connectionsDbg(connections));
   }
 };
 

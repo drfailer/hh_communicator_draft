@@ -1,5 +1,5 @@
-#ifndef COMMUNICATOR_TASK_COMMUNICATOR
-#define COMMUNICATOR_TASK_COMMUNICATOR
+#ifndef COMMUNICATOR_COMMUNICATOR
+#define COMMUNICATOR_COMMUNICATOR
 #include "service/comm_service.hpp"
 #include "type_map.hpp"
 #include <map>
@@ -12,9 +12,9 @@ namespace hh {
 namespace comm {
 
 template <typename TM>
-class TaskCommunicator {
+class Communicator {
 public:
-  TaskCommunicator(CommService *service, std::vector<std::uint32_t> const &receivers)
+  Communicator(CommService *service, std::vector<std::uint32_t> const &receivers)
       : service_(service),
         channel_(service->generateId()),
         receivers_(receivers),
