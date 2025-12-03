@@ -13,43 +13,40 @@ struct TestGraph1 : hh::Graph<1, int, int> {
   TestGraph1(hh::comm::Communicator *communicator) : hh::Graph<1, int, int>("TestGraph1"), communicator_(communicator) {
     assert(communicator->nbProcesses() == 3);
     auto in = std::make_shared<hh::LambdaTask<1, int, int>>("input", 1);
-    auto b01 = std::make_shared<hh::CommunicatorTask<int>>(communicator, std::vector<int>({1}), hh::CommunicatorTaskOpt{});
-    auto b02 = std::make_shared<hh::CommunicatorTask<int>>(communicator, std::vector<int>({2}));
+    auto b01 = std::make_shared<hh::CommunicatorTask<int>>(communicator, std::vector<std::uint32_t>({1}), hh::CommunicatorTaskOpt{});
+    auto b02 = std::make_shared<hh::CommunicatorTask<int>>(communicator, std::vector<std::uint32_t>({2}));
     auto frgn1 = std::make_shared<hh::LambdaTask<1, int, int>>("foreign task", 1);
     auto frgn2 = std::make_shared<hh::LambdaTask<1, int, int>>("foreign task", 1);
-    auto bn0 = std::make_shared<hh::CommunicatorTask<int>>(communicator, std::vector<int>({0}));
+    auto bn0 = std::make_shared<hh::CommunicatorTask<int>>(communicator, std::vector<std::uint32_t>({0}));
     auto out = std::make_shared<hh::LambdaTask<1, int, int>>("output", 1);
 
     auto mm = std::make_shared<hh::tool::MemoryPool<int>>();
     mm->template fill<int>(5);
 
-    b01->setMemoryManager(mm);
-    b02->setMemoryManager(mm);
-    bn0->setMemoryManager(mm);
+    // FIXME: the data returns to the memory pool too early
+    // b01->setMemoryManager(mm);
+    // b02->setMemoryManager(mm);
+    // bn0->setMemoryManager(mm);
 
     in->setLambda<int>([communicator](std::shared_ptr<int> data, auto self) {
-      hh::logh::log(stdout, "[TASK] ", "in -> ", communicator->rank());
-      *data += 1;
-      HH_DBG(*data);
-      self.addResult(data);
+      auto output = std::make_shared<int>(*data + 1);
+      hh::logh::log(stdout, "[", communicator->rank(), "][in]: input = ", *data, ", output = ", *output);
+      self.addResult(output);
     });
     frgn1->setLambda<int>([communicator](std::shared_ptr<int> data, auto self) {
-      hh::logh::log(stdout, "[TASK] ", "frng1 -> ", communicator->rank());
-      *data += 1;
-      HH_DBG(*data);
-      self.addResult(data);
+      auto output = std::make_shared<int>(*data + 1);
+      hh::logh::log(stdout, "[", communicator->rank(), "][frng1]: input = ", *data, ", output = ", *output);
+      self.addResult(output);
     });
     frgn2->setLambda<int>([communicator](std::shared_ptr<int> data, auto self) {
-      hh::logh::log(stdout, "[TASK] ", "frng2 -> ", communicator->rank());
-      *data *= 2;
-      HH_DBG(*data);
-      self.addResult(data);
+      auto output = std::make_shared<int>(*data * 2);
+      hh::logh::log(stdout, "[", communicator->rank(), "][frng2]: input = ", *data, ", output = ", *output);
+      self.addResult(output);
     });
     out->setLambda<int>([communicator](std::shared_ptr<int> data, auto self) {
-      hh::logh::log(stdout, "[TASK] ", "out -> ", communicator->rank());
-      *data += 1;
-      HH_DBG(*data);
-      self.addResult(data);
+      auto output = std::make_shared<int>(*data + 1);
+      hh::logh::log(stdout, "[", communicator->rank(), "][out]: input = ", *data, ", output = ", *output);
+      self.addResult(output);
     });
 
     this->inputs(in);
@@ -72,12 +69,12 @@ struct TestGraph1 : hh::Graph<1, int, int> {
 };
 
 int main(int argc, char **argv) {
-  hh::comm::Communicator communicator(false);
+  hh::comm::Communicator communicator(true);
 
   communicator.init(&argc, &argv);
   auto data = std::make_shared<int>(4);
   TestGraph1 graph(&communicator);
-  std::vector<int> results;
+  std::vector<std::uint32_t> results;
 
   std::cout << "rank = " << communicator.rank() << std::endl;
 
