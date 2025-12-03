@@ -71,7 +71,7 @@ private:
 
 public:
   CommunicatorCoreTask(CommunicatorTask<Types...> *task, comm::Communicator *communicator,
-                       std::vector<int> const &receivers, std::string const &name)
+                       std::vector<std::uint32_t> const &receivers, std::string const &name)
       : CommunicatorCoreTaskBase<Types...>(task, name, 1, false),
         communicator_(communicator, receivers),
         senderDisconnect_(false) {}
@@ -113,7 +113,6 @@ private:
     using namespace std::chrono_literals;
     std::chrono::time_point<std::chrono::system_clock> start, finish;
     std::condition_variable                            sleepCondition;
-    std::vector<int>                                   receivers;
     bool                                               canTerminate = false;
 
     communicator_.infog(logh::IG::CoreTaskLoop, "core task loop", "start task loop, canTerminate = ", canTerminate);
@@ -145,6 +144,7 @@ private:
   void sendDeamon() {
     using namespace std::chrono_literals;
     while (!senderDisconnect_) {
+      sendDeamonLoopDbg();
       communicator_.processSendOpsQueue(ReturnMemory<Types...>(mm_));
       std::this_thread::sleep_for(4ms);
     }
@@ -158,7 +158,7 @@ private:
   void recvDeamon() {
     using namespace std::chrono_literals;
     std::vector<Connection> connections = createConnectionVector();
-    int                     source = -1;
+    std::uint32_t           source = 0;
     comm::Signal            signal = comm::Signal::None;
     comm::Header            header = {0, 0, 0, 0, 0, 0};
     char                    bufMem[100] = {0};
@@ -172,7 +172,7 @@ private:
            || !communicator_.queues().createDataQueue.empty()) {
       communicator_.recvSignal(source, signal, header, buf);
 
-      // recvDeamonLoopDbg(connections);
+      recvDeamonLoopDbg(connections);
       switch (signal) {
       case comm::Signal::None:
         break;
@@ -471,13 +471,13 @@ private:
       if (isConnected(connections)) {
         logh::warn(
             "reciever still running: channel = ", (int)communicator_.channel(), ", rank = ", communicator_.communicator()->rank(),
-            ", data queue size = ", communicator_.queues.createDataQueue.size(),
-            ", ops queue size = ", communicator_.queues.recvOps.size(),
+            ", data queue size = ", communicator_.queues().createDataQueue.size(),
+            ", ops queue size = ", communicator_.queues().recvOps.size(),
             ", connections = ", connectionsDbg(connections), ", hasNotifierConnected = ", this->hasNotifierConnected());
       } else {
-        logh::error("non connected receiver still running: channel = ", (int)communicator_.channel,
-                    ", rank = ", communicator_.communicator()->rank(), ", ops queue size = ", communicator_.queues.recvOps.size(),
-                    ", data queue size = ", communicator_.queues.createDataQueue.size());
+        logh::error("non connected receiver still running: channel = ", (int)communicator_.channel(),
+                    ", rank = ", communicator_.communicator()->rank(), ", ops queue size = ", communicator_.queues().recvOps.size(),
+                    ", data queue size = ", communicator_.queues().createDataQueue.size());
       }
     }
   }

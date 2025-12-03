@@ -24,6 +24,7 @@ public:
   CLH_Handle clh_todoRemove() const { return clh_; }
 
 public: // init and finalize ///////////////////////////////////////////////////
+  // TODO: put this in constructor / destructor
   void init(int *, char ***) {
     clh_init(&this->clh_);
     this->rank_ = clh_node_id(this->clh_);
@@ -38,6 +39,7 @@ public: // send ////////////////////////////////////////////////////////////////
   void send(Header const header, std::uint32_t dest, Buffer const &buffer) {
     std::uint64_t tag = headerToTag(header);
     Request       request = clh_send(this->clh_, dest, tag, buffer);
+    assert(request != nullptr);
     checkCLH(clh_wait(this->clh_, request));
     clh_request_release(this->clh_, request);
   }
@@ -45,6 +47,7 @@ public: // send ////////////////////////////////////////////////////////////////
   Request sendAsync(Header const header, std::uint32_t dest, Buffer const &buffer) {
     std::uint64_t tag = headerToTag(header);
     CLH_Request  *request = clh_send(this->clh_, dest, tag, buffer);
+    assert(request != nullptr);
     return request;
   }
 
@@ -52,12 +55,14 @@ public: // recv ////////////////////////////////////////////////////////////////
   // TODO: recv without request???
   void recv(Request probeRequest, Buffer const &buffer) {
     CLH_Request *request = clh_request_recv(this->clh_, probeRequest, buffer);
+    assert(request != nullptr);
     checkCLH(clh_wait(this->clh_, request));
     clh_request_release(this->clh_, request);
   }
 
   Request recvAsync(Request probeRequest, Buffer const &buffer) {
     Request request = clh_request_recv(this->clh_, probeRequest, buffer);
+    assert(request != nullptr);
     return request;
   }
 
@@ -83,6 +88,7 @@ public:
   }
 
   std::uint8_t generateId() {
+    assert(idGenerator_ < 255);
     return ++idGenerator_;
   }
 

@@ -5,6 +5,7 @@
 #include <cstring>
 #include "hedgehog/src/tools/meta_functions.h"
 #include "type_map.hpp"
+#include <clh/clh.h>
 #include <variant>
 #include <map>
 #include <set>
@@ -214,7 +215,7 @@ struct CommOperation {
 };
 
 struct CommPendingRecvData {
-  int          source;
+  std::uint32_t source;
   Header       header;
   CLH_Request *request;
 };
@@ -252,12 +253,12 @@ struct StorageInfo {
 
 // TODO: we may have to define a limit on the size of storageStats
 struct CommTaskStats {
-  std::map<StorageId, StorageInfo> storageStats;
-  size_t                           maxSendOpsSize;
-  size_t                           maxRecvOpsSize;
-  size_t                           maxCreateDataQueueSize;
-  size_t                           maxSendStorageSize;
-  size_t                           maxRecvStorageSize;
+  std::map<StorageId, StorageInfo> storageStats = {};
+  size_t                           maxSendOpsSize = 0;
+  size_t                           maxRecvOpsSize = 0;
+  size_t                           maxCreateDataQueueSize = 0;
+  size_t                           maxSendStorageSize = 0;
+  size_t                           maxRecvStorageSize = 0;
   std::mutex                       mutex;
 };
 

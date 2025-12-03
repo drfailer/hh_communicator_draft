@@ -179,7 +179,7 @@ private:
   CommunicatorTaskOpt                 options_;
 
 public:
-  explicit CommunicatorTask(comm::Communicator *communicator, std::vector<int> const &receivers,
+  explicit CommunicatorTask(comm::Communicator *communicator, std::vector<std::uint32_t> const &receivers,
                             CommunicatorTaskOpt opt = {}, std::string const &name = "CommunicatorTask")
       : behavior::TaskNode(std::make_shared<CoreTaskType>(this, communicator, receivers, name)),
         behavior::Copyable<SelfType>(1),
