@@ -108,24 +108,25 @@ UTest(mm_result, std::shared_ptr<Matrix<MT, MatrixId::A>> A, std::shared_ptr<Mat
 int main(int argc, char **argv) {
     Config config = parseArgs(argc, argv);
 
-    hh::comm::CommHandle *commHandle = hh::comm::commCreate(true);
-    hh::comm::commInit(commHandle, &argc, &argv);
+    hh::comm::Communicator communicator(true);
+
+    communicator.init(&argc, &argv);
 
     // TODO: we need an function in comm tool to interface this
-    GLOBAL_RANK = clh_node_id(commHandle->clh);
+    GLOBAL_RANK = communicator.rank();
 
     std::shared_ptr<Matrix<MT, MatrixId::A>> A = nullptr;
     std::shared_ptr<Matrix<MT, MatrixId::B>> B = nullptr;
     std::shared_ptr<Matrix<MT, MatrixId::C>> C = nullptr;
 
-    if (commHandle->rank == 0) {
+    if (communicator.rank() == 0) {
         A = createMatrix<MatrixId::A>(config.M, config.K);
         B = createMatrix<MatrixId::B>(config.K, config.N);
         C = createMatrix<MatrixId::C>(config.M, config.N);
         std::memset(C->mem, 0, sizeof(MT) * C->rows * C->cols);
     }
 
-    MMGraph graph(commHandle, config.M, config.N, config.K, config.tileSize, config.poolSize, config.threads);
+    MMGraph graph(&communicator, config.M, config.N, config.K, config.tileSize, config.poolSize, config.threads);
 
     // hh::GraphSignalHandler<MMGraphIO>::registerGraph(&graph);
     // hh::GraphSignalHandler<MMGraphIO>::setDebugOptions(hh::DebugOptions::ALL);
@@ -135,26 +136,25 @@ int main(int argc, char **argv) {
     graph.executeGraph(true);
 
     timer_start(graph_execution);
-    if (commHandle->rank == 0) {
+    if (communicator.rank() == 0) {
         graph.pushData(A);
         graph.pushData(B);
         graph.pushData(C);
     }
-    hh::comm::commBarrier(commHandle);
+    communicator.barrier();
     graph.finishPushingData();
     graph.waitForTermination();
     logh::info("graph terminated");
     timer_end(graph_execution);
 
     timer_start(create_dot_files);
-    graph.createDotFile("build/graph" + std::to_string(commHandle->rank) + ".dot", hh::ColorScheme::EXECUTION,
+    graph.createDotFile("build/graph" + std::to_string(communicator.rank()) + ".dot", hh::ColorScheme::EXECUTION,
                         hh::StructureOptions::QUEUE);
-    hh::comm::commBarrier(commHandle);
+    communicator.barrier();
     timer_end(create_dot_files);
 
-    hh::comm::commBarrier(commHandle);
-    hh::comm::commFinalize(commHandle);
-    hh::comm::commDestroy(commHandle);
+    communicator.barrier();
+    communicator.finalize();
 
     if (GLOBAL_RANK != 0) {
         return 0;
