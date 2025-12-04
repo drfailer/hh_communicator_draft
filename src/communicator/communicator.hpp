@@ -20,6 +20,27 @@ public:
         receivers_(receivers),
         packagesCount_(service->nbProcesses(), 0) {}
 
+private:
+  struct CommOperation {
+    std::uint16_t packageId;
+    std::uint8_t  bufferId;
+    Request       request;
+    StorageId     storageId;
+  };
+
+  struct CreateDataOperation {
+    std::uint32_t source;
+    Header        header;
+    Request       request;
+
+    bool operator<(CreateDataOperation const &other) const {
+        if (this->source == other.source) {
+            return this->header.toTag() < other.header.toTag();
+        }
+        return this->source < other.source;
+    }
+  };
+
 public:
   std::uint8_t channel() const {
     return channel_;
@@ -31,10 +52,6 @@ public:
 
   CommService *service() const {
     return service_;
-  }
-
-  CommQueues const &queues() const {
-    return queues_;
   }
 
   CommTaskStats const &stats() const {
@@ -53,12 +70,28 @@ public:
     return this->service_->nbProcesses();
   }
 
+  bool hasPendingOperations() const {
+      return !this->sendOps_.empty() || !this->recvOps_.empty() || !this->createDataOps_.empty();
+  }
+
+  size_t nbSendOps() const {
+      return this->sendOps_.size();
+  }
+
+  size_t nbRecvOps() const {
+      return this->recvOps_.size();
+  }
+
+  size_t nbCreateDataOps() const {
+      return this->createDataOps_.size();
+  }
+
 public:
   /*
    * Send a signal to the given destinations.
    */
   void sendSignal(std::vector<std::uint32_t> const &dests, Signal signal) {
-    Header header(this->service_->rank(), 1, 0, this->channel_, 0, 0);
+    Header        header(this->service_->rank(), 1, 0, this->channel_, 0, 0);
     char          buf[100] = {(char)signal};
     std::uint64_t len = 1;
 
@@ -92,9 +125,9 @@ public:
       this->packagesCount_[dest] += 1;
       for (size_t i = 0; i < storage.package.data.size(); ++i) {
         header.bufferId = (std::uint8_t)i;
-        std::lock_guard<std::mutex> queuesLock(this->queues_.mutex);
+        std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
         Request                     request = this->service_->sendAsync(header, dest, storage.package.data[i]);
-        this->queues_.sendOps.push_back(CommOperation{
+        this->sendOps_.push_back(CommOperation{
             .packageId = storageId.packageId,
             .bufferId = header.bufferId,
             .request = request,
@@ -124,8 +157,8 @@ public:
       assert(header.source != this->service_->rank());
 
       if (header.signal == 0) {
-        std::lock_guard<std::mutex> queuesLock(this->queues_.mutex);
-        this->queues_.createDataQueue.insert(CommPendingRecvData{
+        std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
+        this->createDataOps_.insert(CreateDataOperation{
             .source = header.source,
             .header = header,
             .request = request,
@@ -149,7 +182,7 @@ public:
    * requests will remain in the queue util memory is available.
    */
   template <typename CreateDataCB>
-  bool recvData(CommPendingRecvData const &prd, CreateDataCB createData) {
+  bool recvData(CreateDataOperation const &prd, CreateDataCB createData) {
     auto packageId = prd.header.packageId;
     auto bufferId = prd.header.bufferId;
     auto typeId = prd.header.typeId;
@@ -170,7 +203,7 @@ public:
     }
     auto &storage = this->wh_.recvStorage.at(storageId);
     auto *request = this->service_->recvAsync(prd.request, storage.package.data[bufferId]);
-    this->queues_.recvOps.push_back(CommOperation{
+    this->recvOps_.push_back(CommOperation{
         .packageId = packageId,
         .bufferId = bufferId,
         .request = request,
@@ -206,16 +239,16 @@ public:
    */
   template <typename ReturnDataCB>
   void processSendOpsQueue(ReturnDataCB returnMemory, bool flush = false) {
-    std::lock_guard<std::mutex> queuesLock(this->queues_.mutex);
+    std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
     if (this->service_->collectStats()) {
       std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
-      this->stats_.maxSendOpsSize = std::max(this->stats_.maxSendOpsSize, this->queues_.sendOps.size());
+      this->stats_.maxSendOpsSize = std::max(this->stats_.maxSendOpsSize, this->sendOps_.size());
       this->stats_.maxSendStorageSize = std::max(this->stats_.maxSendStorageSize, this->wh_.sendStorage.size());
     }
 
     do {
-      for (auto it = this->queues_.sendOps.begin(); it != this->queues_.sendOps.end();) {
+      for (auto it = this->sendOps_.begin(); it != this->sendOps_.end();) {
         if (this->service_->request_completed(it->request)) {
           std::lock_guard<std::mutex> whLock(this->wh_.mutex);
           assert(this->wh_.sendStorage.contains(it->storageId));
@@ -227,12 +260,12 @@ public:
             this->wh_.sendStorage.erase(it->storageId);
           }
           this->service_->request_release(it->request);
-          it = this->queues_.sendOps.erase(it);
+          it = this->sendOps_.erase(it);
         } else {
           it++;
         }
       }
-    } while (flush && !this->queues_.sendOps.empty());
+    } while (flush && !this->sendOps_.empty());
   }
 
   template <typename T>
@@ -340,17 +373,17 @@ public:
    */
   template <typename CreateDataCB>
   void processRecvDataQueue(CreateDataCB createData) {
-    std::lock_guard<std::mutex> queuesLock(this->queues_.mutex);
+    std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
     if (this->service_->collectStats()) {
       std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
       this->stats_.maxCreateDataQueueSize
-          = std::max(this->stats_.maxCreateDataQueueSize, this->queues_.createDataQueue.size());
+          = std::max(this->stats_.maxCreateDataQueueSize, this->createDataOps_.size());
     }
 
-    for (auto it = this->queues_.createDataQueue.begin(); it != this->queues_.createDataQueue.end();) {
+    for (auto it = this->createDataOps_.begin(); it != this->createDataOps_.end();) {
       if (recvData(*it, createData)) {
-        it = this->queues_.createDataQueue.erase(it);
+        it = this->createDataOps_.erase(it);
       } else {
         it++;
       }
@@ -387,15 +420,15 @@ public:
    */
   template <typename ProcessCB>
   void processRecvOpsQueue(ProcessCB processData, [[maybe_unused]] bool flush = false) {
-    std::lock_guard<std::mutex> queuesLock(this->queues_.mutex);
+    std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
     if (this->service_->collectStats()) {
       std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
-      this->stats_.maxRecvOpsSize = std::max(this->stats_.maxRecvOpsSize, this->queues_.recvOps.size());
+      this->stats_.maxRecvOpsSize = std::max(this->stats_.maxRecvOpsSize, this->recvOps_.size());
       this->stats_.maxRecvStorageSize = std::max(this->stats_.maxRecvStorageSize, this->wh_.recvStorage.size());
     }
 
-    for (auto it = this->queues_.recvOps.begin(); it != this->queues_.recvOps.end();) {
+    for (auto it = this->recvOps_.begin(); it != this->recvOps_.end();) {
       if (this->service_->request_completed(it->request)) {
         std::lock_guard<std::mutex> whLock(this->wh_.mutex);
         assert(this->wh_.recvStorage.contains(it->storageId));
@@ -407,14 +440,14 @@ public:
           this->wh_.recvStorage.erase(it->storageId);
         }
         this->service_->request_release(it->request);
-        it = this->queues_.recvOps.erase(it);
+        it = this->recvOps_.erase(it);
       } else {
         it++;
       }
     }
 
     if (flush) {
-      flushQueueAndWarehouse(this->queues_.recvOps, this->wh_.recvStorage);
+      flushQueueAndWarehouse(this->recvOps_, this->wh_.recvStorage);
     }
   }
 
@@ -487,10 +520,19 @@ private:
   CommService               *service_ = nullptr;
   std::uint8_t               channel_ = 0;
   std::vector<std::uint32_t> receivers_ = {};
-  CommQueues                 queues_;
-  PackageWarehouse<TM>       wh_;
-  CommTaskStats              stats_;
-  std::vector<size_t>        packagesCount_ = {};
+
+  // queues
+  std::vector<CommOperation>    sendOps_;
+  std::vector<CommOperation>    recvOps_;
+  std::set<CreateDataOperation> createDataOps_;
+  std::mutex queuesMutex_; // the communicator is shared accross instances of a task
+
+  // packages
+  PackageWarehouse<TM> wh_;
+
+  // stats
+  CommTaskStats       stats_;
+  std::vector<size_t> packagesCount_ = {};
 };
 
 } // end namespace comm

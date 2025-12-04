@@ -1,9 +1,9 @@
 #ifndef COMMUNICATOR_COMMUNICATOR_CORE_TASK
 #define COMMUNICATOR_COMMUNICATOR_CORE_TASK
 #include "../log.hpp"
+#include "communicator.hpp"
 #include "communicator_memory_manager.hpp"
 #include "generic_core_task.hpp"
-#include "communicator.hpp"
 #include <algorithm>
 #include <condition_variable>
 #include <numeric>
@@ -168,8 +168,7 @@ private:
     //       timer when isConnected is false. After the timer, the thread leaves
     //       the loops and flushes the queue, however, this should be reported
     //       as an error in the dot file.
-    while (isConnected(connections) || !communicator_.queues().recvOps.empty()
-           || !communicator_.queues().createDataQueue.empty()) {
+    while (isConnected(connections) || communicator_.hasPendingOperations()) {
       communicator_.recvSignal(source, signal, header, buf);
 
       recvDeamonLoopDbg(connections);
@@ -458,7 +457,7 @@ private:
     if (dbg_idx++ == 1000) {
       dbg_idx = 0;
       logh::warn("sender still running: channel = ", (int)communicator_.channel(), ", rank = ", communicator_.rank(),
-                 ", queue size = ", communicator_.queues().sendOps.size(),
+                 ", queue size = ", communicator_.nbSendOps(),
                  ", hasNotifierConnected = ", this->hasNotifierConnected());
     }
   }
@@ -469,15 +468,14 @@ private:
       dbg_idx = 0;
 
       if (isConnected(connections)) {
-        logh::warn(
-            "reciever still running: channel = ", (int)communicator_.channel(), ", rank = ", communicator_.rank(),
-            ", data queue size = ", communicator_.queues().createDataQueue.size(),
-            ", ops queue size = ", communicator_.queues().recvOps.size(),
-            ", connections = ", connectionsDbg(connections), ", hasNotifierConnected = ", this->hasNotifierConnected());
+        logh::warn("reciever still running: channel = ", (int)communicator_.channel(),
+                   ", rank = ", communicator_.rank(), ", data queue size = ", communicator_.nbCreateDataOps(),
+                   ", ops queue size = ", communicator_.nbRecvOps(), ", connections = ", connectionsDbg(connections),
+                   ", hasNotifierConnected = ", this->hasNotifierConnected());
       } else {
         logh::error("non connected receiver still running: channel = ", (int)communicator_.channel(),
-                    ", rank = ", communicator_.rank(), ", ops queue size = ", communicator_.queues().recvOps.size(),
-                    ", data queue size = ", communicator_.queues().createDataQueue.size());
+                    ", rank = ", communicator_.rank(), ", ops queue size = ", communicator_.nbRecvOps(),
+                    ", data queue size = ", communicator_.nbCreateDataOps());
       }
     }
   }

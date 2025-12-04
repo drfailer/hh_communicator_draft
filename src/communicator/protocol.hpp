@@ -219,35 +219,6 @@ struct PackageWarehouse {
   std::mutex                              mutex;
 };
 
-// Queues //////////////////////////////////////////////////////////////////////
-
-struct CommOperation {
-  std::uint16_t packageId;
-  std::uint8_t  bufferId;
-  Request  request;
-  StorageId     storageId;
-};
-
-struct CommPendingRecvData {
-  std::uint32_t source;
-  Header        header;
-  Request  request;
-};
-
-inline bool          operator<(CommPendingRecvData const &lhs, CommPendingRecvData const &rhs) {
-           if (lhs.source == rhs.source) {
-             return lhs.header.toTag() < rhs.header.toTag();
-  }
-           return lhs.source < rhs.source;
-}
-
-struct CommQueues {
-  std::vector<CommOperation>    sendOps; // send operations (Request)
-  std::vector<CommOperation>    recvOps; // recv operations (Request)
-  std::set<CommPendingRecvData> createDataQueue; // wait for memory manager
-  std::mutex                    mutex;
-};
-
 // Stats container /////////////////////////////////////////////////////////////
 
 using time_t = std::chrono::time_point<std::chrono::system_clock>;
