@@ -1,6 +1,7 @@
 #ifndef COMMUNICATOR_COMM_SERVICE
 #define COMMUNICATOR_COMM_SERVICE
 #include "../protocol.hpp"
+#include <cassert>
 
 namespace hh {
 

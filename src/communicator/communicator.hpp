@@ -6,6 +6,10 @@
 #include <serializer/serializer.hpp>
 #include <set>
 #include <vector>
+#include <cassert>
+#include <utility>
+#include "stats.hpp"
+#include "package.hpp"
 
 namespace hh {
 
@@ -34,10 +38,10 @@ private:
     Request       request;
 
     bool operator<(CreateDataOperation const &other) const {
-        if (this->source == other.source) {
-            return this->header.toTag() < other.header.toTag();
-        }
-        return this->source < other.source;
+      if (this->source == other.source) {
+        return this->header.toTag() < other.header.toTag();
+      }
+      return this->source < other.source;
     }
   };
 
@@ -71,19 +75,19 @@ public:
   }
 
   bool hasPendingOperations() const {
-      return !this->sendOps_.empty() || !this->recvOps_.empty() || !this->createDataOps_.empty();
+    return !this->sendOps_.empty() || !this->recvOps_.empty() || !this->createDataOps_.empty();
   }
 
   size_t nbSendOps() const {
-      return this->sendOps_.size();
+    return this->sendOps_.size();
   }
 
   size_t nbRecvOps() const {
-      return this->recvOps_.size();
+    return this->recvOps_.size();
   }
 
   size_t nbCreateDataOps() const {
-      return this->createDataOps_.size();
+    return this->createDataOps_.size();
   }
 
 public:
@@ -377,8 +381,7 @@ public:
 
     if (this->service_->collectStats()) {
       std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
-      this->stats_.maxCreateDataQueueSize
-          = std::max(this->stats_.maxCreateDataQueueSize, this->createDataOps_.size());
+      this->stats_.maxCreateDataQueueSize = std::max(this->stats_.maxCreateDataQueueSize, this->createDataOps_.size());
     }
 
     for (auto it = this->createDataOps_.begin(); it != this->createDataOps_.end();) {
@@ -525,7 +528,7 @@ private:
   std::vector<CommOperation>    sendOps_;
   std::vector<CommOperation>    recvOps_;
   std::set<CreateDataOperation> createDataOps_;
-  std::mutex queuesMutex_; // the communicator is shared accross instances of a task
+  std::mutex                    queuesMutex_; // the communicator is shared accross instances of a task
 
   // packages
   PackageWarehouse<TM> wh_;

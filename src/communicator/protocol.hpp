@@ -2,13 +2,8 @@
 #define COMMUNICATOR_PROTOCOL
 #include "hedgehog/src/tools/meta_functions.h"
 #include "type_map.hpp"
-#include <clh/clh.h>
-#include <cstring>
-#include <map>
 #include <memory>
-#include <set>
 #include <variant>
-#include <vector>
 
 namespace hh {
 
@@ -110,141 +105,6 @@ struct Header {
   };
 };
 static_assert(sizeof(Header) <= sizeof(std::uint64_t));
-
-// Package /////////////////////////////////////////////////////////////////////
-
-struct Package {
-  std::vector<Buffer> data;
-
-  size_t size() const {
-    size_t result = 0;
-    for (auto buffer : this->data) {
-      result += buffer.len;
-    }
-    return result;
-  }
-};
-
-template <typename T>
-Package pack(std::shared_ptr<T> data) {
-  Package package;
-
-  if constexpr (requires { data->pack(); }) {
-    package = data->pack();
-  } else if constexpr (std::is_trivially_copyable_v<T>) {
-    Buffer buf = Buffer{.mem = new char[sizeof(T)], .len = sizeof(T)};
-    std::memcpy(buf.mem, data.get(), sizeof(T));
-    package.data.push_back(buf);
-  } else {
-    throw std::invalid_argument("type " + tool::typeToStr<T>()
-                                + " does not implement `pack()` and is not trivially copyable.");
-  }
-  return package;
-}
-
-/*
- * If the data type is packable, it should implement a `package` method that
- * returns the package memory. Otherwise, allocate a buffer on the heap.
- * TODO: rename packageMem
- */
-template <typename T>
-Package packageMem(std::shared_ptr<T> data) {
-  if constexpr (requires { data->package(); }) {
-    return data->package();
-  } else if constexpr (std::is_trivially_copyable_v<T>) {
-    return Package{.data = std::vector<Buffer>({Buffer{new char[sizeof(T)], sizeof(T)}})};
-  } else {
-    throw std::invalid_argument("type " + tool::typeToStr<T>()
-                                + " does not implement `package()` and is not trivially copyable.");
-  }
-}
-
-/*
- * If the data type is unpackable, call the `unpack` method, otherwise, default
- * to serializer.
- */
-template <typename T>
-void unpack(Package &&package, std::shared_ptr<T> data) {
-  if constexpr (requires { data->unpack(std::move(package)); }) {
-    data->unpack(std::move(package));
-  } else if constexpr (std::is_trivially_copyable_v<T>) {
-    std::memcpy(data.get(), package.data[0].mem, sizeof(T));
-    delete[] package.data[0].mem;
-  } else {
-    throw std::invalid_argument("type " + tool::typeToStr<T>()
-                                + " does not implement `unpack(Package)` and is not trivially copyable.");
-  }
-}
-
-/*
- * Generate a package id on 14 bits using a counter. Each rank will have its
- * own counter that will loop when after the 16384 package is sent.
- */
-inline std::uint16_t generatePackageId() {
-  static std::uint16_t curPackageId = 0;
-  std::uint16_t        result = curPackageId;
-  curPackageId = (curPackageId + 1) % 16384; // update the id and make sure it stays on 14 bits
-  return result;
-}
-
-// TODO: should not be here???
-// Warehouse ///////////////////////////////////////////////////////////////////
-
-struct StorageId {
-  std::uint32_t source;
-  std::uint16_t packageId;
-};
-
-inline bool operator<(StorageId const &lhs, StorageId const &rhs) {
-  if (lhs.source == rhs.source) {
-    return lhs.packageId < rhs.packageId;
-  }
-  return lhs.source < rhs.source;
-}
-
-template <typename TM>
-struct PackageStorage {
-  Package            package;
-  std::uint64_t      bufferCount;
-  std::uint64_t      ttlBufferCount;
-  std::uint8_t       typeId;
-  variant_type_t<TM> data;
-  bool               returnMemory;
-};
-
-template <typename TM>
-struct PackageWarehouse {
-  std::map<StorageId, PackageStorage<TM>> sendStorage;
-  std::map<StorageId, PackageStorage<TM>> recvStorage;
-  std::mutex                              mutex;
-};
-
-// Stats container /////////////////////////////////////////////////////////////
-
-using time_t = std::chrono::time_point<std::chrono::system_clock>;
-using delay_t = std::chrono::duration<long int, std::ratio<1, 1000000000>>;
-
-struct StorageInfo {
-  time_t       sendtp;
-  time_t       recvtp;
-  delay_t      packingTime;
-  delay_t      unpackingTime;
-  size_t       packingCount;
-  size_t       unpackingCount;
-  std::uint8_t typeId;
-  size_t       dataSize;
-};
-
-// TODO: we may have to define a limit on the size of storageStats
-struct CommTaskStats {
-  std::map<StorageId, StorageInfo> storageStats = {};
-  size_t                           maxSendOpsSize = 0;
-  size_t                           maxRecvOpsSize = 0;
-  size_t                           maxCreateDataQueueSize = 0;
-  size_t                           maxSendStorageSize = 0;
-  size_t                           maxRecvStorageSize = 0;
-  std::mutex                       mutex;
-};
 
 } // end namespace comm
 
