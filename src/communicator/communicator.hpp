@@ -26,20 +26,20 @@ public:
 
 private:
   struct CommOperation {
-    std::uint16_t packageId;
-    std::uint8_t  bufferId;
+    std::uint64_t packageId;
+    std::uint64_t bufferId;
     Request       request;
     StorageId     storageId;
   };
 
   struct CreateDataOperation {
-    std::uint32_t source;
+    std::uint64_t source;
     Header        header;
     Request       request;
 
     bool operator<(CreateDataOperation const &other) const {
       if (this->source == other.source) {
-        return this->header.toTag() < other.header.toTag();
+        return this->header < other.header;
       }
       return this->source < other.source;
     }
@@ -146,18 +146,14 @@ public:
    * signal, then receive the signal, otherwise, add a pending recv data request
    * to the queue.
    */
-  void recvSignal(std::uint32_t &source, Signal &signal, Header &header, Buffer &buf) {
-    std::uint64_t tag = 0;
-    Request       request = this->service_->probe(this->channel_);
+  void recvSignal(std::uint64_t &source, Signal &signal, Header &header, Buffer &buf) {
+    Request request = this->service_->probe(this->channel_);
 
     signal = Signal::None;
     source = -1;
 
-    // TODO: probe for my rank / my channel
     if (this->service_->probeSuccess(request)) {
-      tag = this->service_->senderTag(request);
-      header.fromTag(tag);
-
+      header = this->service_->requestHeader(request);
       assert(header.source != this->service_->rank());
 
       if (header.signal == 0) {
@@ -191,7 +187,7 @@ public:
     auto bufferId = prd.header.bufferId;
     auto typeId = prd.header.typeId;
     auto storageId = StorageId{
-        .source = (std::uint32_t)prd.source,
+        .source = prd.source,
         .packageId = packageId,
     };
 

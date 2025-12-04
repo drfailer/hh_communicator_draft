@@ -26,8 +26,7 @@ public:
   virtual void requestRelease(Request) const {}
   virtual void requestCancel(Request request) const = 0;
   virtual size_t bufferSize(Request request) const = 0;
-  virtual std::uint64_t senderTag(Request request) const = 0;
-  virtual std::uint32_t senderRank(Request request) const = 0;
+  virtual Header requestHeader(Request request) const = 0;
   virtual bool probeSuccess(Request request) const = 0;
 
   virtual void barrier() = 0;

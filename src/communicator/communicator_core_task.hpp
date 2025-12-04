@@ -158,7 +158,7 @@ private:
   void recvDeamon() {
     using namespace std::chrono_literals;
     std::vector<Connection> connections = createConnectionVector();
-    std::uint32_t           source = 0;
+    std::uint64_t           source = 0;
     comm::Signal            signal = comm::Signal::None;
     comm::Header            header = {0, 0, 0, 0, 0, 0};
     char                    bufMem[100] = {0};

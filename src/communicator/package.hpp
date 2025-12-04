@@ -90,8 +90,8 @@ inline std::uint16_t generatePackageId() {
 // Package Wharehouse //////////////////////////////////////////////////////////
 
 struct StorageId {
-  std::uint32_t source;
-  std::uint16_t packageId;
+  std::uint64_t source;
+  std::uint64_t packageId;
 
   bool operator<(StorageId const &other) const {
     if (this->source == other.source) {

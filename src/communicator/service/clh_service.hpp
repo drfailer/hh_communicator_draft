@@ -29,9 +29,49 @@ public:
     clh_finalize(this->clh_);
   }
 
+private:
+// struct Header {
+//   std::uint32_t source : 32;
+//   std::uint8_t  signal : 2; // 0 -> data | 1 -> signal
+//   std::uint8_t  typeId : 6; // 64 types (number of types managed by one task)
+//   std::uint8_t  channel : 8; // 256 channels (number of CommTasks)
+//   std::uint16_t packageId : 14; // 16384 packages
+//   std::uint8_t  bufferId : 2; // 4 buffers per package
+// }
+  static constexpr Header::FieldInfo HEADER_FIELDS[]{
+      {.offset = 32, .mask = 0b1111111111111111111111111111111100000000000000000000000000000000},
+      {.offset = 30, .mask = 0b0000000000000000000000000000000011000000000000000000000000000000},
+      {.offset = 24, .mask = 0b0000000000000000000000000000000000111111000000000000000000000000},
+      {.offset = 16, .mask = 0b0000000000000000000000000000000000000000111111110000000000000000},
+      {.offset = 2, .mask = 0b0000000000000000000000000000000000000000000000001111111111111100},
+      {.offset = 0, .mask = 0b0000000000000000000000000000000000000000000000000000000000000011},
+  };
+
+  static std::uint64_t headerToTag(Header const &header) {
+    std::uint64_t tag = 0;
+    tag |= header.source << HEADER_FIELDS[Header::SOURCE].offset;
+    tag |= header.signal << HEADER_FIELDS[Header::SIGNAL].offset;
+    tag |= header.typeId << HEADER_FIELDS[Header::TYPE_ID].offset;
+    tag |= header.channel << HEADER_FIELDS[Header::CHANNEL].offset;
+    tag |= header.packageId << HEADER_FIELDS[Header::PACKAGE_ID].offset;
+    tag |= header.bufferId << HEADER_FIELDS[Header::BUFFER_ID].offset;
+    return tag;
+  }
+
+  static Header tagToHeader(std::uint64_t tag) {
+    Header header;
+    header.source = (tag & HEADER_FIELDS[Header::SOURCE].mask) >> HEADER_FIELDS[Header::SOURCE].offset;
+    header.signal = (tag & HEADER_FIELDS[Header::SIGNAL].mask) >> HEADER_FIELDS[Header::SIGNAL].offset;
+    header.typeId = (tag & HEADER_FIELDS[Header::TYPE_ID].mask) >> HEADER_FIELDS[Header::TYPE_ID].offset;
+    header.channel = (tag & HEADER_FIELDS[Header::CHANNEL].mask) >> HEADER_FIELDS[Header::CHANNEL].offset;
+    header.packageId = (tag & HEADER_FIELDS[Header::PACKAGE_ID].mask) >> HEADER_FIELDS[Header::PACKAGE_ID].offset;
+    header.bufferId = (tag & HEADER_FIELDS[Header::BUFFER_ID].mask) >> HEADER_FIELDS[Header::BUFFER_ID].offset;
+    return header;
+  }
+
 public: // send ////////////////////////////////////////////////////////////////
   void send(Header const header, std::uint32_t dest, Buffer const &buffer) override {
-    std::uint64_t tag = header.toTag();
+    std::uint64_t tag = headerToTag(header);
     Request       request = (Request)clh_send(this->clh_, dest, tag, CLH_Buffer{buffer.mem, buffer.len});
     assert(request != nullptr);
     checkCLH(clh_wait(this->clh_, (CLH_Request*)request));
@@ -39,7 +79,7 @@ public: // send ////////////////////////////////////////////////////////////////
   }
 
   Request sendAsync(Header const header, std::uint32_t dest, Buffer const &buffer) override {
-    std::uint64_t tag = header.toTag();
+    std::uint64_t tag = headerToTag(header);
     Request       request = (Request)clh_send(this->clh_, dest, tag, CLH_Buffer{buffer.mem, buffer.len});
     assert(request != nullptr);
     return request;
@@ -63,15 +103,15 @@ public: // recv ////////////////////////////////////////////////////////////////
 
 public: // probe ///////////////////////////////////////////////////////////////
   Request probe(std::uint8_t channel) override {
-    std::uint64_t tag = (std::uint64_t)channel << Header::FIELDS[Header::CHANNEL].offset;
-    std::uint64_t mask = Header::FIELDS[Header::CHANNEL].mask;
+    std::uint64_t tag = (std::uint64_t)channel << HEADER_FIELDS[Header::CHANNEL].offset;
+    std::uint64_t mask = HEADER_FIELDS[Header::CHANNEL].mask;
     return (Request)clh_probe(this->clh_, tag, mask, true);
   }
 
   Request probe(std::uint8_t channel, std::uint32_t source) override {
-    std::uint64_t tag = (std::uint64_t)channel << Header::FIELDS[Header::CHANNEL].offset
-                        | (std::uint64_t)source << Header::FIELDS[Header::SOURCE].offset;
-    std::uint64_t mask = Header::FIELDS[Header::CHANNEL].mask | Header::FIELDS[Header::SOURCE].mask;
+    std::uint64_t tag = (std::uint64_t)channel << HEADER_FIELDS[Header::CHANNEL].offset
+                        | (std::uint64_t)source << HEADER_FIELDS[Header::SOURCE].offset;
+    std::uint64_t mask = HEADER_FIELDS[Header::CHANNEL].mask | HEADER_FIELDS[Header::SOURCE].mask;
     return (Request)clh_probe(this->clh_, tag, mask, true);
   }
 
@@ -92,13 +132,8 @@ public: // requests ////////////////////////////////////////////////////////////
     return clh_request_buffer_len((CLH_Request *)request);
   }
 
-  std::uint64_t senderTag(Request request) const override {
-    return clh_request_tag((CLH_Request *)request);
-  }
-
-  std::uint32_t senderRank(Request request) const override {
-    return (std::uint32_t)((clh_request_tag((CLH_Request *)request) | Header::FIELDS[Header::SOURCE].mask)
-                           >> Header::FIELDS[Header::SOURCE].offset);
+  Header requestHeader(Request request) const override {
+      return tagToHeader(clh_request_tag((CLH_Request *)request));
   }
 
   bool probeSuccess(Request request) const override {
