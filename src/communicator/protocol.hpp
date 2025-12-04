@@ -26,28 +26,28 @@ enum class Signal : std::uint8_t {
 // Header //////////////////////////////////////////////////////////////////////
 
 struct Header {
+  std::uint64_t channel;
   std::uint64_t source;
   std::uint64_t signal;
   std::uint64_t typeId;
-  std::uint64_t channel;
   std::uint64_t packageId;
   std::uint64_t bufferId;
 
   Header() = default;
   Header(std::uint64_t source, std::uint64_t signal, std::uint64_t typeId, std::uint64_t channel,
          std::uint16_t packageId, std::uint64_t bufferId)
-      : source(source),
+      : channel(channel),
+        source(source),
         signal(signal),
         typeId(typeId),
-        channel(channel),
         packageId(packageId),
         bufferId(bufferId) {}
 
   enum Fields {
-    SOURCE = 0,
-    SIGNAL = 1,
-    TYPE_ID = 2,
-    CHANNEL = 3,
+    CHANNEL = 0,
+    SOURCE = 1,
+    SIGNAL = 2,
+    TYPE_ID = 3,
     PACKAGE_ID = 4,
     BUFFER_ID = 5,
   };
