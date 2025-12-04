@@ -3,25 +3,10 @@
 #include "hedgehog/src/tools/meta_functions.h"
 #include "type_map.hpp"
 #include <memory>
-#include <variant>
 
 namespace hh {
 
 namespace comm {
-
-template <typename... Types>
-using TypeTable = type_map::TypeMap<unsigned char, Types...>;
-
-template <typename TM>
-struct variant_type;
-
-template <typename... Types>
-struct variant_type<TypeTable<Types...>> {
-  using type = std::variant<std::shared_ptr<Types>...>;
-};
-
-template <typename TM>
-using variant_type_t = typename variant_type<TM>::type;
 
 using Request = void*;
 

@@ -67,7 +67,7 @@ using CommunicatorCoreTaskBase = GenericCoreTask<CommunicatorTask<Types...>, siz
 template <typename... Types>
 class CommunicatorCoreTask : public CommunicatorCoreTaskBase<Types...> {
 private:
-  using TypesIds = typename CommunicatorTask<Types...>::TypesIds;
+  using TM = typename CommunicatorTask<Types...>::TM;
 
 public:
   CommunicatorCoreTask(CommunicatorTask<Types...> *task, comm::CommService *service,
@@ -268,13 +268,12 @@ public:
       strAppend(infos, "maxSendStorageSize = " + std::to_string(maxSendStorageSize));
       strAppend(infos, "maxRecvStorageSize = " + std::to_string(maxRecvStorageSize));
 
-      for (std::uint8_t typeId = 0; typeId < TypesIds().size; ++typeId) {
+      for (std::uint8_t typeId = 0; typeId < TM::size; ++typeId) {
         if (!transmissionStats.contains(typeId)) {
           continue;
         }
-        type_map::apply(TypesIds(), typeId, [&]<typename T>() {
-          infos.append("========== " + hh::tool::typeToStr<T>() + " ==========\n");
-        });
+        TM::apply(typeId,
+                  [&]<typename T>() { infos.append("========== " + hh::tool::typeToStr<T>() + " ==========\n"); });
         auto transmissionDelays = transmissionStats.at(typeId).transmissionDelays;
         auto packingDelay = transmissionStats.at(typeId).packingDelay;
         auto unpackingDelay = transmissionStats.at(typeId).unpackingDelay;
@@ -430,14 +429,14 @@ public:
     this->mm_ = mm;
   }
 
-  comm::Communicator<TypesIds> *comm() {
+  comm::Communicator<TM> *comm() {
     return &communicator_;
   }
 
 private:
   std::thread                                 deamon_;
   std::shared_ptr<tool::MemoryPool<Types...>> mm_;
-  comm::Communicator<TypesIds>                communicator_;
+  comm::Communicator<TM>                      communicator_;
   bool                                        senderDisconnect_;
 
 private:

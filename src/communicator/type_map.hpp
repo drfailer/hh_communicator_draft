@@ -3,56 +3,73 @@
 #define TESTING
 #include <stdexcept>
 #include <type_traits>
+#include <variant>
 
-namespace type_map {
+namespace hh {
 
-template <typename IdType, typename... Types>
-struct TypeMap {
-  using id_type = IdType;
-  static constexpr size_t size = sizeof...(Types);
-};
+namespace comm {
 
 template <typename T>
 using clean_t = typename std::remove_const_t<std::remove_reference_t<T>>;
 
-template <typename Target, typename IdType, typename T, typename... Ts>
-constexpr IdType get_id(TypeMap<IdType, T, Ts...>) {
-  if constexpr (std::is_same_v<Target, T>) {
+using TypeMapIdType = unsigned char;
+
+template <typename T, typename... Ts>
+struct TypeMap {
+  using id_t = TypeMapIdType;
+  static constexpr size_t size = 1 + sizeof...(Ts);
+
+  template <typename Target>
+  static constexpr TypeMapIdType idOf() {
+    if constexpr (std::is_same_v<Target, T>) {
+      return 0;
+    } else if constexpr (sizeof...(Ts) > 0) {
+      return 1 + TypeMap<Ts...>::template idOf<Target>();
+    }
     return 0;
-  } else if constexpr (sizeof...(Ts) > 0) {
-    return 1 + get_id<Target, IdType, Ts...>(TypeMap<IdType, Ts...>());
   }
-  return 0;
-}
+
+  static constexpr bool isIdValid(id_t id) {
+    return id < size;
+  }
+
+  template <typename Function>
+  static constexpr void apply(id_t id, Function function) {
+    if (id == 0) {
+      function.template operator()<T>();
+    } else {
+      if constexpr (sizeof...(Ts) > 0) {
+        TypeMap<Ts...>::apply((id_t)(id - 1), function);
+      } else {
+        throw std::logic_error("error: id not found");
+      }
+    }
+  }
+};
 
 #ifdef TESTING
-static_assert(get_id<int>(TypeMap<int, int, long, float, double>()) == 0);
-static_assert(get_id<long>(TypeMap<int, int, long, float, double>()) == 1);
-static_assert(get_id<float>(TypeMap<int, int, long, float, double>()) == 2);
-static_assert(get_id<double>(TypeMap<int, int, long, float, double>()) == 3);
+static_assert(TypeMap<int, long, float, double>::template idOf<int>() == 0);
+static_assert(TypeMap<int, long, float, double>::template idOf<long>() == 1);
+static_assert(TypeMap<int, long, float, double>::template idOf<float>() == 2);
+static_assert(TypeMap<int, long, float, double>::template idOf<double>() == 3);
 #endif
 
 template <typename Target, typename TM>
-constexpr bool contains_v = get_id<Target, TM> < TM::size;
+constexpr bool contains_v = TM::template getId<Target>() < TM::size;
 
-template <typename IdType, typename... Types>
-constexpr bool id_valid(size_t id, TypeMap<IdType, Types...>) {
-  return id < TypeMap<Types...>::size;
-}
+template <typename TM>
+struct variant_type;
 
-template <typename Function, typename IdType, typename T, typename... Ts>
-constexpr void apply(TypeMap<IdType, T, Ts...>, IdType id, Function function) {
-  if (id == 0) {
-    function.template operator()<T>();
-  } else {
-    if constexpr (sizeof...(Ts)) {
-      apply(TypeMap<IdType, Ts...>(), IdType(id - 1), function);
-    } else {
-      throw std::logic_error("error: id not found");
-    }
-  }
-}
+template <typename... Types>
+struct variant_type<TypeMap<Types...>> {
+  using type = std::variant<std::shared_ptr<Types>...>;
+};
 
-} // end namespace type_map
+template <typename TM>
+using variant_type_t = typename variant_type<TM>::type;
+
+} // end namespace comm
+
+} // end namespace hh
 
 #endif

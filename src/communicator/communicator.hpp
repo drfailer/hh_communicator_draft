@@ -118,7 +118,7 @@ public:
     auto [storageId, storage] = createSendStorage(dests, data, returnMemory);
     Header header(this->service_->rank(), 0, storage.typeId, this->channel_, storageId.packageId, 0);
 
-    infog(logh::IG::Comm, "comm", "sendData -> ", " typeId = ", (int)get_id<T>(TM()),
+    infog(logh::IG::Comm, "comm", "sendData -> ", " typeId = ", (int)TM::template idOf<T>(),
           " requestId = ", (int)header.packageId);
 
     this->wh_.mutex.lock();
@@ -222,7 +222,7 @@ public:
    */
   template <typename ReturnDataCB>
   void postSend(StorageId, PackageStorage<TM> storage, ReturnDataCB cb) {
-    type_map::apply(TM(), storage.typeId, [&]<typename T>() {
+    TM::apply(storage.typeId, [&]<typename T>() {
       std::shared_ptr<T> data = std::get<std::shared_ptr<T>>(storage.data);
       if constexpr (requires { data->postSend(); }) {
         data->postSend();
@@ -288,7 +288,7 @@ public:
         .package = package,
         .bufferCount = 0,
         .ttlBufferCount = package.data.size() * dests.size(),
-        .typeId = type_map::get_id<T>(TM()),
+        .typeId = TM::template idOf<T>(),
         .data = data,
         .returnMemory = returnMemory,
     };
@@ -325,7 +325,7 @@ public:
 
     for (auto it : wh) {
       auto storage = it.second;
-      type_map::apply(TM(), storage.typeId, [&]<typename T>() {
+      TM::apply(storage.typeId, [&]<typename T>() {
         if constexpr (!requires(T * data) { data->pack(); }) {
           delete[] storage.package.data[0].mem;
         }
@@ -342,7 +342,7 @@ public:
   bool createRecvStorage(StorageId storageId, std::uint8_t typeId, CreateDataCB createData) {
     bool status = true;
 
-    type_map::apply(TM(), typeId, [&]<typename T>() {
+    TM::apply(typeId, [&]<typename T>() {
       auto data = createData.template operator()<T>();
 
       if (data == nullptr) {
@@ -400,7 +400,7 @@ public:
   void postRecv(StorageId storageId, PackageStorage<TM> storage, ProcessCB processData) {
     infog(logh::IG::Comm, "comm", "processRecvDataQueue -> unpacking data");
     time_t tunpackingStart, tunpackingEnd;
-    type_map::apply(TM(), storage.typeId, [&]<typename T>() {
+    TM::apply(storage.typeId, [&]<typename T>() {
       auto data = std::get<std::shared_ptr<T>>(storage.data);
       tunpackingStart = std::chrono::system_clock::now();
       unpack(std::move(storage.package), data);
