@@ -146,11 +146,10 @@ public:
    * signal, then receive the signal, otherwise, add a pending recv data request
    * to the queue.
    */
-  void recvSignal(std::uint64_t &source, Signal &signal, Header &header, Buffer &buf) {
+  void recvSignal(Signal &signal, Header &header, Buffer &buf) {
     Request request = this->service_->probe(this->channel_);
 
     signal = Signal::None;
-    source = -1;
 
     if (this->service_->probeSuccess(request)) {
       header = this->service_->requestHeader(request);
@@ -165,13 +164,11 @@ public:
         });
         signal = Signal::Data;
       } else {
-        // TODO: do we want async here?
         this->service_->recv(request, buf);
         signal = (Signal)buf.mem[0];
       }
-      source = header.source;
-      assert(source < this->service_->nbProcesses());
-      infog(logh::IG::Comm, "comm", "recvSignal -> ", " source = ", source, " signal = ", (int)signal);
+      assert(header.source < this->service_->nbProcesses());
+      infog(logh::IG::Comm, "comm", "recvSignal -> ", " source = ", header.source, " signal = ", (int)signal);
     }
   }
 

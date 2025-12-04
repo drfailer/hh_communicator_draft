@@ -158,7 +158,6 @@ private:
   void recvDeamon() {
     using namespace std::chrono_literals;
     std::vector<Connection> connections = createConnectionVector();
-    std::uint64_t           source = 0;
     comm::Signal            signal = comm::Signal::None;
     comm::Header            header = {0, 0, 0, 0, 0, 0};
     char                    bufMem[100] = {0};
@@ -169,17 +168,17 @@ private:
     //       the loops and flushes the queue, however, this should be reported
     //       as an error in the dot file.
     while (isConnected(connections) || communicator_.hasPendingOperations()) {
-      communicator_.recvSignal(source, signal, header, buf);
+      communicator_.recvSignal(signal, header, buf);
 
       recvDeamonLoopDbg(connections);
       switch (signal) {
       case comm::Signal::None:
         break;
       case comm::Signal::Disconnect:
-        disconnect(connections, source, buf);
+        disconnect(connections, header.source, buf);
         break;
       case comm::Signal::Data:
-        ++connections[source].recvCount;
+        ++connections[header.source].recvCount;
         break;
       }
       communicator_.processRecvDataQueue(GetMemory<Types...>(mm_));
