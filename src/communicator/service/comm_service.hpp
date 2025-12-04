@@ -22,13 +22,13 @@ public:
   virtual Request probe(std::uint8_t channel) = 0;
   virtual Request probe(std::uint8_t channel, std::uint32_t source) = 0;
 
-  virtual bool request_completed(Request request) const = 0;
-  virtual void request_release(Request) const {}
-  virtual void request_cancel(Request request) const = 0;
-  virtual size_t buffer_len(Request request) const = 0;
-  virtual std::uint64_t sender_tag(Request request) const = 0;
-  virtual std::uint32_t sender_rank(Request request) const = 0;
-  virtual bool probe_success(Request request) const = 0;
+  virtual bool requestCompleted(Request request) const = 0;
+  virtual void requestRelease(Request) const {}
+  virtual void requestCancel(Request request) const = 0;
+  virtual size_t bufferSize(Request request) const = 0;
+  virtual std::uint64_t senderTag(Request request) const = 0;
+  virtual std::uint32_t senderRank(Request request) const = 0;
+  virtual bool probeSuccess(Request request) const = 0;
 
   virtual void barrier() = 0;
 

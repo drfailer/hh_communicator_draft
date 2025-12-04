@@ -154,8 +154,8 @@ public:
     source = -1;
 
     // TODO: probe for my rank / my channel
-    if (this->service_->probe_success(request)) {
-      tag = this->service_->sender_tag(request);
+    if (this->service_->probeSuccess(request)) {
+      tag = this->service_->senderTag(request);
       header.fromTag(tag);
 
       assert(header.source != this->service_->rank());
@@ -253,7 +253,7 @@ public:
 
     do {
       for (auto it = this->sendOps_.begin(); it != this->sendOps_.end();) {
-        if (this->service_->request_completed(it->request)) {
+        if (this->service_->requestCompleted(it->request)) {
           std::lock_guard<std::mutex> whLock(this->wh_.mutex);
           assert(this->wh_.sendStorage.contains(it->storageId));
           PackageStorage<TM> &storage = this->wh_.sendStorage.at(it->storageId);
@@ -263,7 +263,7 @@ public:
             postSend(it->storageId, storage, returnMemory);
             this->wh_.sendStorage.erase(it->storageId);
           }
-          this->service_->request_release(it->request);
+          this->service_->requestRelease(it->request);
           it = this->sendOps_.erase(it);
         } else {
           it++;
@@ -318,7 +318,7 @@ public:
 
     for (auto &op : queue) {
       logh::error("request canceled");
-      this->service_->request_cancel(op.request);
+      this->service_->requestCancel(op.request);
       requests.push_back(op.request);
     }
     queue.clear();
@@ -432,7 +432,7 @@ public:
     }
 
     for (auto it = this->recvOps_.begin(); it != this->recvOps_.end();) {
-      if (this->service_->request_completed(it->request)) {
+      if (this->service_->requestCompleted(it->request)) {
         std::lock_guard<std::mutex> whLock(this->wh_.mutex);
         assert(this->wh_.recvStorage.contains(it->storageId));
         auto &storage = this->wh_.recvStorage.at(it->storageId);
@@ -442,7 +442,7 @@ public:
           postRecv(it->storageId, storage, processData);
           this->wh_.recvStorage.erase(it->storageId);
         }
-        this->service_->request_release(it->request);
+        this->service_->requestRelease(it->request);
         it = this->recvOps_.erase(it);
       } else {
         it++;
@@ -497,14 +497,14 @@ public:
     stats[0].maxRecvStorageSize = this->stats_.maxRecvStorageSize;
     for (std::uint32_t i = 1; i < this->service_->nbProcesses(); ++i) {
       Request request = this->service_->probe(this->channel_, i);
-      while (!this->service_->probe_success(request)) {
-        this->service_->request_release(request);
+      while (!this->service_->probeSuccess(request)) {
+        this->service_->requestRelease(request);
         using namespace std::chrono_literals;
         std::this_thread::sleep_for(1ms);
         request = this->service_->probe(this->channel_, i);
         ;
       }
-      bufSize = this->service_->buffer_len(request);
+      bufSize = this->service_->bufferSize(request);
 
       serializer::Bytes buf(bufSize, bufSize);
       this->service_->recv(request, Buffer{std::bit_cast<char *>(buf.data()), buf.size()});

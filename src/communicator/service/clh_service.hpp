@@ -76,32 +76,32 @@ public: // probe ///////////////////////////////////////////////////////////////
   }
 
 public: // requests ////////////////////////////////////////////////////////////
-  bool request_completed(Request request) const override {
+  bool requestCompleted(Request request) const override {
     return clh_request_completed(this->clh_, (CLH_Request *)request);
   }
 
-  void request_release(Request request) const override {
+  void requestRelease(Request request) const override {
     clh_request_release(this->clh_, (CLH_Request *)request);
   }
 
-  void request_cancel(Request request) const override {
+  void requestCancel(Request request) const override {
     clh_cancel(this->clh_, (CLH_Request *)request);
   }
 
-  size_t buffer_len(Request request) const override {
+  size_t bufferSize(Request request) const override {
     return clh_request_buffer_len((CLH_Request *)request);
   }
 
-  std::uint64_t sender_tag(Request request) const override {
+  std::uint64_t senderTag(Request request) const override {
     return clh_request_tag((CLH_Request *)request);
   }
 
-  std::uint32_t sender_rank(Request request) const override {
+  std::uint32_t senderRank(Request request) const override {
     return (std::uint32_t)((clh_request_tag((CLH_Request *)request) | Header::FIELDS[Header::SOURCE].mask)
                            >> Header::FIELDS[Header::SOURCE].offset);
   }
 
-  bool probe_success(Request request) const override {
+  bool probeSuccess(Request request) const override {
       auto clhRequest = (CLH_Request*)request;
       return clhRequest->data.probe.result;
   }
