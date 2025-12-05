@@ -2,6 +2,7 @@
 #define COMMUNICATOR_COMM_SERVICE
 #include "../protocol.hpp"
 #include <cassert>
+#include <thread>
 
 namespace hh {
 
@@ -43,9 +44,14 @@ public:
     return ++idGenerator_;
   }
 
+  std::mutex &mutex() {
+      return mutex_;
+  }
+
 private:
   std::uint8_t  idGenerator_ = 0;
   bool          collectStats_ = false;
+  std::mutex    mutex_;
 };
 
 } // end namespace comm

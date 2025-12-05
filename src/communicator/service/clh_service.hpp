@@ -127,7 +127,7 @@ public: // requests ////////////////////////////////////////////////////////////
   }
 
   void requestCancel(Request request) override {
-    CLH_Request *r = requestPool_.getData(request);
+    CLH_Request *r = requestPool_.getDataAndRelease(request);
     assert(r != nullptr);
     clh_cancel(this->clh_, r);
   }

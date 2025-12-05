@@ -1,15 +1,15 @@
 #ifndef COMMUNICATOR_COMMUNICATOR
 #define COMMUNICATOR_COMMUNICATOR
+#include "package.hpp"
 #include "service/comm_service.hpp"
+#include "stats.hpp"
 #include "type_map.hpp"
+#include <cassert>
 #include <map>
 #include <serializer/serializer.hpp>
 #include <set>
-#include <vector>
-#include <cassert>
 #include <utility>
-#include "stats.hpp"
-#include "package.hpp"
+#include <vector>
 
 namespace hh {
 
@@ -170,7 +170,7 @@ public:
       assert(header.source < this->service_->nbProcesses());
       infog(logh::IG::Comm, "comm", "recvSignal -> ", " source = ", header.source, " signal = ", (int)signal);
     } else {
-        this->service_->requestRelease(request);
+      this->service_->requestRelease(request);
     }
   }
 
@@ -201,7 +201,7 @@ public:
       }
     }
     auto &storage = this->wh_.recvStorage.at(storageId);
-    auto request = this->service_->recvAsync(prd.request, storage.package.data[bufferId]);
+    auto  request = this->service_->recvAsync(prd.request, storage.package.data[bufferId]);
     this->recvOps_.push_back(CommOperation{
         .packageId = packageId,
         .bufferId = bufferId,
@@ -307,6 +307,7 @@ public:
 
   /*
    * Flush operation queue and remove storage entries from the warehouse.
+   * TODO: rewrite this function
    */
   void flushQueueAndWarehouse(std::vector<CommOperation> &queue, std::map<StorageId, PackageStorage<TM>> &wh) {
     std::vector<Request> requests;
@@ -317,6 +318,16 @@ public:
       requests.push_back(op.request);
     }
     queue.clear();
+
+    // TODO: this should be done for mpi
+    // int done = false;
+    // do {
+    //   std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
+    //   using namespace std::chrono_literals;
+    //   std::this_thread::sleep_for(4ms);
+    //   checkMPI(MPI_Testall(requests.size(), requests.data(), &done, MPI_STATUSES_IGNORE));
+    // } while (!done);
+    // queue.clear();
 
     for (auto it : wh) {
       auto storage = it.second;
