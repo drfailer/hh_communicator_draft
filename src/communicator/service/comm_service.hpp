@@ -22,12 +22,12 @@ public:
   virtual Request probe(std::uint8_t channel) = 0;
   virtual Request probe(std::uint8_t channel, std::uint32_t source) = 0;
 
-  virtual bool requestCompleted(Request request) const = 0;
-  virtual void requestRelease(Request) const {}
-  virtual void requestCancel(Request request) const = 0;
-  virtual size_t bufferSize(Request request) const = 0;
-  virtual Header requestHeader(Request request) const = 0;
-  virtual bool probeSuccess(Request request) const = 0;
+  virtual bool requestCompleted(Request request) = 0;
+  virtual void requestRelease(Request) {}
+  virtual void requestCancel(Request request) = 0;
+  virtual size_t bufferSize(Request request) = 0;
+  virtual Header requestHeader(Request request) = 0;
+  virtual bool probeSuccess(Request request) = 0;
 
   virtual void barrier() = 0;
 

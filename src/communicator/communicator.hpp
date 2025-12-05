@@ -169,6 +169,8 @@ public:
       }
       assert(header.source < this->service_->nbProcesses());
       infog(logh::IG::Comm, "comm", "recvSignal -> ", " source = ", header.source, " signal = ", (int)signal);
+    } else {
+        this->service_->requestRelease(request);
     }
   }
 
@@ -199,7 +201,7 @@ public:
       }
     }
     auto &storage = this->wh_.recvStorage.at(storageId);
-    auto *request = this->service_->recvAsync(prd.request, storage.package.data[bufferId]);
+    auto request = this->service_->recvAsync(prd.request, storage.package.data[bufferId]);
     this->recvOps_.push_back(CommOperation{
         .packageId = packageId,
         .bufferId = bufferId,

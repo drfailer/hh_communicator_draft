@@ -8,8 +8,6 @@ namespace hh {
 
 namespace comm {
 
-using Request = void *;
-
 struct Buffer {
   char  *mem;
   size_t len;
