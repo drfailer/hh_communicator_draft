@@ -20,7 +20,7 @@ class Communicator {
 public:
   Communicator(CommService *service, std::vector<std::uint32_t> const &receivers)
       : service_(service),
-        channel_(service->generateId()),
+        channel_(service->newChannel()),
         receivers_(receivers),
         packagesCount_(service->nbProcesses(), 0) {}
 

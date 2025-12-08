@@ -65,7 +65,7 @@ private:
 public: // send ////////////////////////////////////////////////////////////////
   void send(Header const header, std::uint32_t dest, Buffer const &buffer) override {
     std::uint32_t tag = headerToTag(header);
-    CLH_Request *request = clh_send(this->clh_, header.channel, dest, tag, CLH_Buffer{buffer.mem, buffer.len});
+    CLH_Request  *request = clh_send(this->clh_, header.channel, dest, tag, CLH_Buffer{buffer.mem, buffer.len});
 
     assert(request != nullptr);
     checkCLH(clh_wait(this->clh_, request));
@@ -74,7 +74,7 @@ public: // send ////////////////////////////////////////////////////////////////
 
   Request sendAsync(Header const header, std::uint32_t dest, Buffer const &buffer) override {
     std::uint32_t tag = headerToTag(header);
-    CLH_Request *r = clh_send(this->clh_, header.channel, dest, tag, CLH_Buffer{buffer.mem, buffer.len});
+    CLH_Request  *r = clh_send(this->clh_, header.channel, dest, tag, CLH_Buffer{buffer.mem, buffer.len});
     assert(r != nullptr);
     return requestPool_.allocate(r);
   }
@@ -140,7 +140,7 @@ public: // requests ////////////////////////////////////////////////////////////
 
   Header requestHeader(Request request) override {
     CLH_Request *r = requestPool_.getData(request);
-    Header header;
+    Header       header;
 
     assert(r != nullptr);
     header = tagToHeader(clh_request_tag(r));
@@ -167,6 +167,12 @@ public:
     return nbProcesses_;
   }
 
+public:
+  std::uint64_t newChannel() override {
+    assert(channelGenerator_ < 255);
+    return ++channelGenerator_;
+  }
+
 private:
   bool checkCLH(CLH_Status code) {
     if (code == CLH_STATUS_SUCCESS) {
@@ -177,10 +183,11 @@ private:
   }
 
 private:
-  std::uint32_t              rank_ = -1;
-  std::uint32_t              nbProcesses_ = -1;
+  std::uint32_t              rank_ = 0;
+  std::uint32_t              nbProcesses_ = 0;
   CLH_Handle                 clh_ = nullptr;
   RequestPool<CLH_Request *> requestPool_ = {};
+  std::uint64_t              channelGenerator_;
 };
 
 } // end namespace comm

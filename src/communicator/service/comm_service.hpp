@@ -39,17 +39,13 @@ public:
     return collectStats_;
   }
 
-  std::uint8_t generateId() {
-    assert(idGenerator_ < 255);
-    return ++idGenerator_;
-  }
+  virtual std::uint64_t newChannel() = 0;
 
   std::mutex &mutex() {
       return mutex_;
   }
 
 private:
-  std::uint8_t  idGenerator_ = 0;
   bool          collectStats_ = false;
   std::mutex    mutex_;
 };
