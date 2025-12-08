@@ -76,17 +76,6 @@ void unpack(Package &&package, std::shared_ptr<T> data) {
   }
 }
 
-/*
- * Generate a package id on 14 bits using a counter. Each rank will have its
- * own counter that will loop when after the 16384 package is sent.
- */
-inline std::uint16_t generatePackageId() {
-  static std::uint16_t curPackageId = 0;
-  std::uint16_t        result = curPackageId;
-  curPackageId = (curPackageId + 1) % 16384; // update the id and make sure it stays on 14 bits
-  return result;
-}
-
 // Package Wharehouse //////////////////////////////////////////////////////////
 
 struct StorageId {

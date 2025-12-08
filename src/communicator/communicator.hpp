@@ -271,7 +271,7 @@ public:
   template <typename T>
   std::pair<StorageId, PackageStorage<TM>> createSendStorage(std::vector<std::uint32_t> const &dests,
                                                              std::shared_ptr<T> data, bool returnMemory) {
-    std::uint16_t packageId = generatePackageId();
+    std::uint16_t packageId = this->service_->newPackageId();
 
     // measure data packing time
     time_t  tpackingStart = std::chrono::system_clock::now();

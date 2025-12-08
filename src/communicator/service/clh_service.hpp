@@ -173,6 +173,12 @@ public:
     return ++channelGenerator_;
   }
 
+  std::uint64_t newPackageId() override {
+    std::uint64_t result = curPackageId_;
+    curPackageId_ = (curPackageId_ + 1) % 16384; // update the id and make sure it stays on 14 bits
+    return result;
+  }
+
 private:
   bool checkCLH(CLH_Status code) {
     if (code == CLH_STATUS_SUCCESS) {
@@ -187,7 +193,8 @@ private:
   std::uint32_t              nbProcesses_ = 0;
   CLH_Handle                 clh_ = nullptr;
   RequestPool<CLH_Request *> requestPool_ = {};
-  std::uint64_t              channelGenerator_;
+  std::uint64_t              channelGenerator_ = 0;
+  std::uint64_t              curPackageId_ = 0;
 };
 
 } // end namespace comm
