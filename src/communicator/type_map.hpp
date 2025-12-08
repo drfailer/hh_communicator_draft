@@ -41,7 +41,9 @@ struct TypeMap {
       if constexpr (sizeof...(Ts) > 0) {
         TypeMap<Ts...>::apply((id_t)(id - 1), function);
       } else {
-        throw std::logic_error("error: id not found");
+        std::ostringstream oss;
+        oss << "error: tried to apply a function on an invalid type map id.";
+        throw std::logic_error(oss.str());
       }
     }
   }
@@ -52,6 +54,7 @@ static_assert(TypeMap<int, long, float, double>::template idOf<int>() == 0);
 static_assert(TypeMap<int, long, float, double>::template idOf<long>() == 1);
 static_assert(TypeMap<int, long, float, double>::template idOf<float>() == 2);
 static_assert(TypeMap<int, long, float, double>::template idOf<double>() == 3);
+static_assert(TypeMap<int, long, float, double>::size == 4);
 #endif
 
 template <typename Target, typename TM>

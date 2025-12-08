@@ -271,6 +271,7 @@ public:
         if (!transmissionStats.contains(typeId)) {
           continue;
         }
+        assert(typeId < TM::size);
         TM::apply(typeId,
                   [&]<typename T>() { infos.append("========== " + hh::tool::typeToStr<T>() + " ==========\n"); });
         auto transmissionDelays = transmissionStats.at(typeId).transmissionDelays;

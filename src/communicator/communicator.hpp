@@ -217,6 +217,7 @@ public:
    */
   template <typename ReturnDataCB>
   void postSend(StorageId, PackageStorage<TM> storage, ReturnDataCB cb) {
+    assert(storage.typeId < TM::size);
     TM::apply(storage.typeId, [&]<typename T>() {
       std::shared_ptr<T> data = std::get<std::shared_ptr<T>>(storage.data);
       if constexpr (requires { data->postSend(); }) {
@@ -331,6 +332,7 @@ public:
 
     for (auto it : wh) {
       auto storage = it.second;
+      assert(storage.typeId < TM::size);
       TM::apply(storage.typeId, [&]<typename T>() {
         if constexpr (!requires(T * data) { data->pack(); }) {
           delete[] storage.package.data[0].mem;
@@ -348,6 +350,7 @@ public:
   bool createRecvStorage(StorageId storageId, std::uint8_t typeId, CreateDataCB createData) {
     bool status = true;
 
+    assert(typeId < TM::size);
     TM::apply(typeId, [&]<typename T>() {
       auto data = createData.template operator()<T>();
 
@@ -406,6 +409,7 @@ public:
   void postRecv(StorageId storageId, PackageStorage<TM> storage, ProcessCB processData) {
     infog(logh::IG::Comm, "comm", "processRecvDataQueue -> unpacking data");
     time_t tunpackingStart, tunpackingEnd;
+    assert(storage.typeId < TM::size);
     TM::apply(storage.typeId, [&]<typename T>() {
       auto data = std::get<std::shared_ptr<T>>(storage.data);
       tunpackingStart = std::chrono::system_clock::now();
