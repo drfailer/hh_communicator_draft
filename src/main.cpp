@@ -1,4 +1,5 @@
 #include "communicator/service/clh_service.hpp"
+#include "communicator/service/mpi_service.hpp"
 #include "communicator/communicator_task.hpp"
 #include "log.hpp"
 #include <hedgehog/hedgehog.h>
@@ -69,7 +70,8 @@ struct TestGraph1 : hh::Graph<1, int, int> {
 };
 
 int main(int argc, char **argv) {
-  hh::comm::CommService *service = new hh::comm::CLHService(true);
+  // hh::comm::CommService *service = new hh::comm::CLHService(true);
+  hh::comm::CommService *service = new hh::comm::MPIService(&argc, &argv, true);
 
   auto data = std::make_shared<int>(4);
   TestGraph1 graph(service);
