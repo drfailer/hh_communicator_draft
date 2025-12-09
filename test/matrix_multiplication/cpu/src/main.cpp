@@ -2,6 +2,7 @@
 #include "../../../common/timer.h"
 #include "../../../common/utest.h"
 #include "../../../../src/communicator/service/clh_service.hpp"
+#include "../../../../src/communicator/service/mpi_service.hpp"
 #include "graph.hpp"
 #include <cblas.h>
 
@@ -107,9 +108,9 @@ UTest(mm_result, std::shared_ptr<Matrix<MT, MatrixId::A>> A, std::shared_ptr<Mat
 }
 
 int main(int argc, char **argv) {
+    // hh::comm::CommService *service = new hh::comm::CLHService(true);
+    hh::comm::CommService *service = new hh::comm::MPIService(&argc, &argv, true);
     Config config = parseArgs(argc, argv);
-
-    hh::comm::CommService *service = new hh::comm::CLHService(true);
 
     // TODO: we need an function in comm tool to interface this
     GLOBAL_RANK = service->rank();
