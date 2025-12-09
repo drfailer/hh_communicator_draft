@@ -170,12 +170,14 @@ public:
 public:
   std::uint64_t newChannel() override {
     assert(channelGenerator_ < 255);
+    packageCounters_.push_back(0);
     return ++channelGenerator_;
   }
 
-  std::uint64_t newPackageId() override {
-    std::uint64_t result = curPackageId_;
-    curPackageId_ = (curPackageId_ + 1) % 16384; // update the id and make sure it stays on 14 bits
+  std::uint64_t newPackageId(std::uint64_t channel) override {
+    std::uint64_t result = packageCounters_[channel];
+    // update the id and make sure it stays on 14 bits
+    packageCounters_[channel] = (packageCounters_[channel] + 1) % 16384;
     return result;
   }
 
@@ -194,7 +196,7 @@ private:
   CLH_Handle                 clh_ = nullptr;
   RequestPool<CLH_Request *> requestPool_ = {};
   std::uint64_t              channelGenerator_ = 0;
-  std::uint64_t              curPackageId_ = 0;
+  std::vector<std::uint64_t> packageCounters_ = {};
 };
 
 } // end namespace comm

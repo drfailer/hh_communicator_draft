@@ -40,6 +40,7 @@ public:
   }
 
   virtual std::uint64_t newChannel() = 0;
+  virtual std::uint64_t newPackageId(std::uint64_t channel) = 0;
 
   std::mutex &mutex() {
       return mutex_;

@@ -41,23 +41,30 @@ private:
       {.offset = 0, .mask = 0b0000000000000000000000000000000000000000000000000000000000000011}, // buffer id
   };
 
-  static std::uint32_t headerToTag(Header const &header) {
-    std::uint64_t tag = 0;
+  static int headerToTag(Header const &header) {
+    int tag = 0;
     tag |= header.signal << HEADER_FIELDS[Header::SIGNAL].offset;
     tag |= header.typeId << HEADER_FIELDS[Header::TYPE_ID].offset;
     tag |= header.packageId << HEADER_FIELDS[Header::PACKAGE_ID].offset;
     tag |= header.bufferId << HEADER_FIELDS[Header::BUFFER_ID].offset;
     assert((tag & HEADER_FIELDS[0].mask) == 0);
-    return (std::uint32_t)tag;
+    return tag;
   }
 
-  static Header tagToHeader(std::uint64_t tag) {
+  static Header tagToHeader(int tag) {
+    assert(tag >= 0);
     assert((tag & HEADER_FIELDS[0].mask) == 0);
     Header header;
     header.signal = (tag & HEADER_FIELDS[Header::SIGNAL].mask) >> HEADER_FIELDS[Header::SIGNAL].offset;
     header.typeId = (tag & HEADER_FIELDS[Header::TYPE_ID].mask) >> HEADER_FIELDS[Header::TYPE_ID].offset;
     header.packageId = (tag & HEADER_FIELDS[Header::PACKAGE_ID].mask) >> HEADER_FIELDS[Header::PACKAGE_ID].offset;
     header.bufferId = (tag & HEADER_FIELDS[Header::BUFFER_ID].mask) >> HEADER_FIELDS[Header::BUFFER_ID].offset;
+    assert((header.signal & ~(HEADER_FIELDS[Header::SIGNAL].mask >> HEADER_FIELDS[Header::SIGNAL].offset)) == 0);
+    assert((header.typeId & ~(HEADER_FIELDS[Header::TYPE_ID].mask >> HEADER_FIELDS[Header::TYPE_ID].offset)) == 0);
+    assert((header.packageId & ~(HEADER_FIELDS[Header::PACKAGE_ID].mask >> HEADER_FIELDS[Header::PACKAGE_ID].offset))
+           == 0);
+    assert((header.bufferId & ~(HEADER_FIELDS[Header::BUFFER_ID].mask >> HEADER_FIELDS[Header::BUFFER_ID].offset))
+           == 0);
     return header;
   }
 
@@ -73,6 +80,13 @@ public: // send ////////////////////////////////////////////////////////////////
   void send(Header const header, std::uint32_t dest, Buffer const &buffer) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     int                         tag = headerToTag(header);
+
+    Header testHeader = tagToHeader(tag);
+    assert(header.signal == testHeader.signal);
+    assert(header.typeId == testHeader.typeId);
+    assert(header.packageId == testHeader.packageId);
+    assert(header.bufferId == testHeader.bufferId);
+
     checkMPI(MPI_Send(buffer.mem, buffer.len, MPI_BYTE, dest, tag, this->comms_[header.channel]));
   }
 
@@ -85,6 +99,13 @@ public: // send ////////////////////////////////////////////////////////////////
                          .flag = 0,
     };
     int tag = headerToTag(header);
+
+    Header testHeader = tagToHeader(tag);
+    assert(header.signal == testHeader.signal);
+    assert(header.typeId == testHeader.typeId);
+    assert(header.packageId == testHeader.packageId);
+    assert(header.bufferId == testHeader.bufferId);
+
     checkMPI(MPI_Isend(buffer.mem, buffer.len, MPI_BYTE, dest, tag, r.comm, &r.request));
     return requestPool_.allocate(r);
   }
@@ -99,7 +120,7 @@ public: // recv ////////////////////////////////////////////////////////////////
 
   Request recvAsync(Request probeRequest, Buffer const &buffer) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
-    MPIRequest                 r = requestPool_.getData(probeRequest);
+    MPIRequest                  r = requestPool_.getData(probeRequest);
     checkMPI(MPI_Irecv(buffer.mem, buffer.len, MPI_BYTE, r.status.MPI_SOURCE, r.status.MPI_TAG, r.comm, &r.request));
     return probeRequest;
   }
@@ -141,7 +162,7 @@ public: // requests ////////////////////////////////////////////////////////////
   }
 
   void requestRelease(Request request) override {
-    MPIRequest r = requestPool_.getDataAndRelease(request);
+    [[maybe_unused]] MPIRequest r = requestPool_.getDataAndRelease(request);
     // MPI_Request_free(&r.request) // ???
   }
 
@@ -191,11 +212,19 @@ public:
 
 public:
   std::uint64_t newChannel() override {
-      std::lock_guard<std::mutex> mpiLock(this->mutex());
-      std::uint64_t channel = this->comms_.size();
-      this->comms_.push_back(MPI_Comm{});
-      checkMPI(MPI_Comm_split(MPI_COMM_WORLD, channel, this->rank_, &this->comms_.back()));
-      return channel;
+    std::lock_guard<std::mutex> mpiLock(mutex());
+    std::uint64_t               channel = comms_.size();
+    packageCounters_.push_back(0);
+    comms_.push_back(MPI_Comm{});
+    checkMPI(MPI_Comm_split(MPI_COMM_WORLD, channel, rank_, &comms_.back()));
+    return channel;
+  }
+
+  std::uint64_t newPackageId(std::uint64_t channel) override {
+    std::uint64_t result = packageCounters_[channel];
+    // update the id and make sure it stays on 9 bits
+    packageCounters_[channel] = (packageCounters_[channel] + 1) % 512;
+    return result;
   }
 
 private:
@@ -210,10 +239,11 @@ private:
   }
 
 private:
-  int                     rank_ = -1;
-  int                     nbProcesses_ = -1;
-  RequestPool<MPIRequest> requestPool_ = {};
-  std::vector<MPI_Comm>   comms_ = {};
+  int                        rank_ = -1;
+  int                        nbProcesses_ = -1;
+  RequestPool<MPIRequest>    requestPool_ = {};
+  std::vector<MPI_Comm>      comms_ = {};
+  std::vector<std::uint64_t> packageCounters_ = {};
 };
 
 } // end namespace comm
