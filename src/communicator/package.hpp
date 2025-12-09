@@ -99,6 +99,7 @@ struct PackageWarehouse {
     std::uint8_t       typeId;
     variant_type_t<TM> data;
     bool               returnMemory;
+    bool               dbgBufferReceived[4]; // TODO: remove
   };
 
   std::map<StorageId, Storage> sendStorage;

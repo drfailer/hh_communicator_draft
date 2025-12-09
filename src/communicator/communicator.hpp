@@ -202,6 +202,8 @@ public:
     }
     auto &storage = this->wh_.recvStorage.at(storageId);
     auto  request = this->service_->recvAsync(prd.request, storage.package.data[bufferId]);
+    assert(storage.dbgBufferReceived[bufferId] == false);
+    storage.dbgBufferReceived[bufferId] = true;
     this->recvOps_.push_back(CommOperation{
         .packageId = packageId,
         .bufferId = bufferId,
@@ -255,7 +257,7 @@ public:
           PackageStorage<TM> &storage = this->wh_.sendStorage.at(it->storageId);
           ++storage.bufferCount;
 
-          if (storage.bufferCount >= storage.ttlBufferCount) {
+          if (storage.bufferCount == storage.ttlBufferCount) {
             postSend(it->storageId, storage, returnMemory);
             this->wh_.sendStorage.erase(it->storageId);
           }
@@ -271,7 +273,7 @@ public:
   template <typename T>
   std::pair<StorageId, PackageStorage<TM>> createSendStorage(std::vector<std::uint32_t> const &dests,
                                                              std::shared_ptr<T> data, bool returnMemory) {
-    std::uint16_t packageId = this->service_->newPackageId();
+    std::uint16_t packageId = this->service_->newPackageId(this->channel_);
 
     // measure data packing time
     time_t  tpackingStart = std::chrono::system_clock::now();
@@ -287,6 +289,7 @@ public:
         .typeId = TM::template idOf<T>(),
         .data = data,
         .returnMemory = returnMemory,
+        .dbgBufferReceived = {false, false, false, false},
     };
     StorageId storageId = {
         .source = (std::uint32_t)this->service_->rank(),
@@ -366,6 +369,7 @@ public:
           .typeId = typeId,
           .data = data,
           .returnMemory = true,
+          .dbgBufferReceived = {false, false, false, false},
       };
       this->wh_.recvStorage.insert({storageId, storage});
     });
@@ -448,7 +452,7 @@ public:
         auto &storage = this->wh_.recvStorage.at(it->storageId);
         ++storage.bufferCount;
 
-        if (storage.bufferCount >= storage.ttlBufferCount) {
+        if (storage.bufferCount == storage.ttlBufferCount) {
           postRecv(it->storageId, storage, processData);
           this->wh_.recvStorage.erase(it->storageId);
         }
