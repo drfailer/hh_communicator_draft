@@ -46,8 +46,8 @@ public:
     Request                     request;
 
     if (freeIndexes_.size() == 0) {
+      freeIndexes_.push_back(requests_.size());
       requests_.emplace_back(T{});
-      freeIndexes_.push_back(requests_.size() - 1);
     }
     request = freeIndexes_.back();
     freeIndexes_.pop_back();

@@ -107,6 +107,7 @@ public: // send ////////////////////////////////////////////////////////////////
     assert(header.bufferId == testHeader.bufferId);
 
     checkMPI(MPI_Isend(buffer.mem, buffer.len, MPI_BYTE, dest, tag, r.comm, &r.request));
+    assert(r.request != NULL);
     return requestPool_.allocate(r);
   }
 
@@ -120,8 +121,9 @@ public: // recv ////////////////////////////////////////////////////////////////
 
   Request recvAsync(Request probeRequest, Buffer const &buffer) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
-    MPIRequest                  r = requestPool_.getData(probeRequest);
+    MPIRequest                  &r = requestPool_.dataRef(probeRequest);
     checkMPI(MPI_Irecv(buffer.mem, buffer.len, MPI_BYTE, r.status.MPI_SOURCE, r.status.MPI_TAG, r.comm, &r.request));
+    assert(r.request != NULL);
     return probeRequest;
   }
 
@@ -153,10 +155,9 @@ public: // probe ///////////////////////////////////////////////////////////////
 public: // requests ////////////////////////////////////////////////////////////
   bool requestCompleted(Request request) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
-    MPIRequest                  r = requestPool_.getData(request);
-    if (r.flag != 0) {
-      return true;
-    }
+    MPIRequest                  &r = requestPool_.dataRef(request);
+    r.flag = 0;
+    assert(r.request != NULL);
     checkMPI(MPI_Test(&r.request, &r.flag, &r.status));
     return r.flag != 0;
   }
