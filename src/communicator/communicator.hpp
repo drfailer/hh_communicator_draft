@@ -185,10 +185,7 @@ public:
     auto packageId = prd.header.packageId;
     auto bufferId = prd.header.bufferId;
     auto typeId = prd.header.typeId;
-    auto storageId = StorageId{
-        .source = prd.source,
-        .packageId = packageId,
-    };
+    auto storageId = StorageId(prd.source, packageId, 0);
 
     infog(logh::IG::Comm, "comm", "recvData -> ", " source = ", prd.source, " typeId = ", (int)typeId,
           " requestId = ", (int)packageId, " bufferId = ", (int)bufferId);
@@ -291,10 +288,7 @@ public:
         .returnMemory = returnMemory,
         .dbgBufferReceived = {false, false, false, false},
     };
-    StorageId storageId = {
-        .source = (std::uint32_t)this->service_->rank(),
-        .packageId = packageId,
-    };
+    StorageId storageId((std::uint64_t)this->service_->rank(), packageId);
 
     if (this->service_->collectStats()) {
       std::lock_guard<std::mutex> statsLock(this->stats_.mutex);

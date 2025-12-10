@@ -81,13 +81,30 @@ void unpack(Package &&package, std::shared_ptr<T> data) {
 struct StorageId {
   std::uint64_t source;
   std::uint64_t packageId;
+  std::uint64_t cid;
+
+  StorageId() = default;
+
+  StorageId(std::uint64_t source, std::uint64_t packageId, std::uint64_t cid)
+      : source(source),
+        packageId(packageId),
+        cid(cid) {}
+
+  StorageId(std::uint64_t source, std::uint64_t packageId)
+      : StorageId(source, packageId, counter_++) {}
 
   bool operator<(StorageId const &other) const {
     if (this->source == other.source) {
+      if (this->packageId == other.packageId) {
+        return this->cid < other.cid;
+      }
       return this->packageId < other.packageId;
     }
     return this->source < other.source;
   }
+
+private:
+  static inline std::uint64_t counter_ = 0;
 };
 
 template <typename TM>
