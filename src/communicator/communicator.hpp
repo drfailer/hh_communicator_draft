@@ -116,7 +116,7 @@ public:
   template <typename T>
   void sendData(std::vector<std::uint32_t> const &dests, std::shared_ptr<T> data, bool returnMemory = true) {
     auto [storageId, storage] = createSendStorage(dests, data, returnMemory);
-    Header header(this->service_->rank(), 0, storage.typeId, this->channel_, storageId.packageId, 0);
+    Header header(this->service_->rank(), 0, storageId.typeId, this->channel_, storageId.packageId, 0);
 
     infog(logh::IG::Comm, "comm", "sendData -> ", " typeId = ", (int)TM::template idOf<T>(),
           " requestId = ", (int)header.packageId);
@@ -185,14 +185,14 @@ public:
     auto packageId = prd.header.packageId;
     auto bufferId = prd.header.bufferId;
     auto typeId = prd.header.typeId;
-    auto storageId = StorageId(prd.source, packageId, 0);
+    StorageId storageId(prd.source, packageId, typeId, 0);
 
     infog(logh::IG::Comm, "comm", "recvData -> ", " source = ", prd.source, " typeId = ", (int)typeId,
           " requestId = ", (int)packageId, " bufferId = ", (int)bufferId);
 
     std::lock_guard<std::mutex> whLock(this->wh_.mutex);
     if (!this->wh_.recvStorage.contains(storageId)) {
-      if (!createRecvStorage(storageId, typeId, createData)) {
+      if (!createRecvStorage(storageId, createData)) {
         infog(logh::IG::Comm, "comm", "createRecvStorage returned false");
         return false;
       }
@@ -215,9 +215,9 @@ public:
    * Manages the data after send.
    */
   template <typename ReturnDataCB>
-  void postSend(StorageId, PackageStorage<TM> storage, ReturnDataCB cb) {
-    assert(storage.typeId < TM::size);
-    TM::apply(storage.typeId, [&]<typename T>() {
+  void postSend(StorageId storageId, PackageStorage<TM> storage, ReturnDataCB cb) {
+    assert(storageId.typeId < TM::size);
+    TM::apply(storageId.typeId, [&]<typename T>() {
       std::shared_ptr<T> data = std::get<std::shared_ptr<T>>(storage.data);
       if constexpr (requires { data->postSend(); }) {
         data->postSend();
@@ -283,17 +283,16 @@ public:
         .package = package,
         .bufferCount = 0,
         .ttlBufferCount = package.data.size() * dests.size(),
-        .typeId = TM::template idOf<T>(),
         .data = data,
         .returnMemory = returnMemory,
         .dbgBufferReceived = {false, false, false, false},
     };
-    StorageId storageId((std::uint64_t)this->service_->rank(), packageId);
+    StorageId storageId((std::uint64_t)this->service_->rank(), packageId, TM::template idOf<T>());
 
     if (this->service_->collectStats()) {
       std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
       this->stats_.storageStats.insert({storageId, StorageInfo{}});
-      this->stats_.storageStats.at(storageId).typeId = storage.typeId;
+      this->stats_.storageStats.at(storageId).typeId = storageId.typeId;
       this->stats_.storageStats.at(storageId).packingCount += 1;
       this->stats_.storageStats.at(storageId).packingTime
           += std::chrono::duration_cast<std::chrono::nanoseconds>(tpackingEnd - tpackingStart);
@@ -328,9 +327,10 @@ public:
     // queue.clear();
 
     for (auto it : wh) {
+      auto storageId = it.first;
       auto storage = it.second;
-      assert(storage.typeId < TM::size);
-      TM::apply(storage.typeId, [&]<typename T>() {
+      assert(storageId.typeId < TM::size);
+      TM::apply(storageId.typeId, [&]<typename T>() {
         if constexpr (!requires(T * data) { data->pack(); }) {
           delete[] storage.package.data[0].mem;
         }
@@ -344,11 +344,11 @@ public:
    * storage entry in the warehouse.
    */
   template <typename CreateDataCB>
-  bool createRecvStorage(StorageId storageId, std::uint8_t typeId, CreateDataCB createData) {
+  bool createRecvStorage(StorageId storageId, CreateDataCB createData) {
     bool status = true;
 
-    assert(typeId < TM::size);
-    TM::apply(typeId, [&]<typename T>() {
+    assert(storageId.typeId < TM::size);
+    TM::apply(storageId.typeId, [&]<typename T>() {
       auto data = createData.template operator()<T>();
 
       if (data == nullptr) {
@@ -360,7 +360,6 @@ public:
           .package = package,
           .bufferCount = 0,
           .ttlBufferCount = package.data.size(),
-          .typeId = typeId,
           .data = data,
           .returnMemory = true,
           .dbgBufferReceived = {false, false, false, false},
@@ -371,7 +370,7 @@ public:
     if (this->service_->collectStats()) {
       std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
       this->stats_.storageStats.insert({storageId, {}});
-      this->stats_.storageStats.at(storageId).typeId = typeId;
+      this->stats_.storageStats.at(storageId).typeId = storageId.typeId;
     }
     return status;
   }
@@ -407,8 +406,8 @@ public:
   void postRecv(StorageId storageId, PackageStorage<TM> storage, ProcessCB processData) {
     infog(logh::IG::Comm, "comm", "processRecvDataQueue -> unpacking data");
     time_t tunpackingStart, tunpackingEnd;
-    assert(storage.typeId < TM::size);
-    TM::apply(storage.typeId, [&]<typename T>() {
+    assert(storageId.typeId < TM::size);
+    TM::apply(storageId.typeId, [&]<typename T>() {
       auto data = std::get<std::shared_ptr<T>>(storage.data);
       tunpackingStart = std::chrono::system_clock::now();
       unpack(std::move(storage.package), data);

@@ -80,25 +80,30 @@ void unpack(Package &&package, std::shared_ptr<T> data) {
 
 struct StorageId {
   std::uint64_t source;
+  std::uint64_t typeId;
   std::uint64_t packageId;
   std::uint64_t cid;
 
   StorageId() = default;
 
-  StorageId(std::uint64_t source, std::uint64_t packageId, std::uint64_t cid)
+  StorageId(std::uint64_t source, std::uint64_t packageId, std::uint64_t typeId, std::uint64_t cid)
       : source(source),
+        typeId(typeId),
         packageId(packageId),
         cid(cid) {}
 
-  StorageId(std::uint64_t source, std::uint64_t packageId)
-      : StorageId(source, packageId, counter_++) {}
+  StorageId(std::uint64_t source, std::uint64_t packageId, std::uint64_t typeId)
+      : StorageId(source, packageId, typeId, counter_++) {}
 
   bool operator<(StorageId const &other) const {
     if (this->source == other.source) {
-      if (this->packageId == other.packageId) {
-        return this->cid < other.cid;
+      if (this->typeId == other.typeId) {
+        if (this->packageId == other.packageId) {
+          return this->cid < other.cid;
+        }
+        return this->packageId < other.packageId;
       }
-      return this->packageId < other.packageId;
+      return this->typeId < other.typeId;
     }
     return this->source < other.source;
   }
@@ -113,7 +118,6 @@ struct PackageWarehouse {
     Package            package;
     std::uint64_t      bufferCount;
     std::uint64_t      ttlBufferCount;
-    std::uint8_t       typeId;
     variant_type_t<TM> data;
     bool               returnMemory;
     bool               dbgBufferReceived[4]; // TODO: remove
