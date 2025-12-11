@@ -1,4 +1,4 @@
-CLH_PATH=$(HOME)/Programming/projects/clh.git/v2/
+CLH_PATH=$(HOME)/Programming/projects/clh.git/master/
 TRACER_PATH=$(HOME)/Programming/projects/tracer-c/tracer/
 
 CC=g++
@@ -10,7 +10,7 @@ CXXFLAGS=\
 		 -I$(HOME)/Programming/usr/include/ \
 		 -I$(CLH_PATH) -I$(TRACER_PATH) \
 		 -I/usr/lib/x86_64-linux-gnu/openmpi/include/ \
-		 $(shell pkg-config /usr/lib/x86_64-linux-gnu/openmpi/lib/pkgconfig/ompi-c.pc --cflags) -DOMPI_SKIP_MPICXX \
+  		 $(shell pkg-config /usr/lib/x86_64-linux-gnu/openmpi/lib/pkgconfig/ompi-c.pc --cflags) -DOMPI_SKIP_MPICXX \
 		 -Wall -Wextra -Wuninitialized \
 		 -MMD \
 		 -fdiagnostics-color=auto

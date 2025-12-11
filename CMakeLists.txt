@@ -31,7 +31,7 @@ target_include_directories(hh_communicator
     lib/serializer-cpp/
     lib/hedgehog/
     /home/rvc1/Programming/usr/include
-    /home/rvc1/Programming/projects/clh.git/v2/
+    /home/rvc1/Programming/projects/clh.git/master/
     /home/rvc1/Programming/projects/tracer-c/tracer/
     ${MPI_INCLUDE_PATH}
 )
