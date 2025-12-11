@@ -37,7 +37,7 @@ target_include_directories(hh_communicator
 )
 target_link_directories(hh_communicator
     PRIVATE
-    /home/rvc1/Programming/projects/clh.git/v2/build/lib/
+    /home/rvc1/Programming/projects/clh.git/master/build/lib/
     /home/rvc1/Programming/projects/tracer-c/build/lib/
 )
 target_link_libraries(hh_communicator
