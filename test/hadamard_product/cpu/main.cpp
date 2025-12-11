@@ -364,7 +364,7 @@ int main(int argc, char **argv) {
     Config config = parseArgs(argc, argv);
 
     using MatrixType = size_t;
-    hh::comm::commInit(argc, argv);
+    hh::comm::commInit(&argc, &argv);
     hh::comm::CommHandle *commHandle = hh::comm::commCreate(true);
     auto                  A = createMatrix<MatrixType>(config.M, config.N);
     auto                  B = createMatrix<MatrixType>(config.M, config.N);

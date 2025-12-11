@@ -1,6 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(mpi_bridge)
-
+project(hh_communicator)
 set(CMAKE_CXX_STANDARD 20)
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
@@ -17,23 +16,33 @@ find_package(MPI REQUIRED)
 set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} ${Hedgehog_CXX_FLAGS})
 
 if (NOT MSVC)
-	# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Werror -Wuninitialized -pedantic -g")
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Werror -Wuninitialized -pedantic -O3")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Werror -Wuninitialized -g")
+	# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Werror -Wuninitialized -Wno-sign-compare -pedantic -O3")
 endif (NOT MSVC)
 
 # files
 set(source_files src/main.cpp)
 
 # executable
-add_executable(mpi_bridge ${source_files})
+add_executable(hh_communicator ${source_files})
 add_definitions(-DOMPI_SKIP_MPICXX)
-target_include_directories(mpi_bridge
+target_include_directories(hh_communicator
     PUBLIC
     lib/serializer-cpp/
     lib/hedgehog/
+    /home/rvc1/Programming/usr/include
+    /home/rvc1/Programming/projects/clh.git/master/
+    /home/rvc1/Programming/projects/tracer-c/tracer/
     ${MPI_INCLUDE_PATH}
 )
-target_link_libraries(mpi_bridge
+target_link_directories(hh_communicator
     PRIVATE
+    /home/rvc1/Programming/projects/clh.git/v2/build/lib/
+    /home/rvc1/Programming/projects/tracer-c/build/lib/
+)
+target_link_libraries(hh_communicator
+    PRIVATE
+    clh
+    tracer
     ${MPI_C_LIBRARIES}
 )
