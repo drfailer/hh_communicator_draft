@@ -92,20 +92,33 @@ public:
 
 public:
   /*
+   * broadcast disconnection signal
+   */
+  void notifyDisconnection() {
+    Header        header(this->rank(), 1, 0, this->channel_, 0, 0);
+    char          buf[100] = {(char)Signal::Disconnect};
+    std::uint64_t len = 1;
+
+    for (size_t dest = 0; dest < this->nbProcesses(); ++dest) {
+      if (dest != this->rank()) {
+        size_t size = sizeof(this->packagesCount_[dest]);
+        std::memcpy(&buf[1], &this->packagesCount_[dest], size);
+        len = 1 + size;
+        this->service_->send(header, dest, Buffer{buf, len});
+      }
+    }
+  }
+
+  /*
    * Send a signal to the given destinations.
    */
   void sendSignal(std::vector<std::uint32_t> const &dests, Signal signal) {
-    Header        header(this->service_->rank(), 1, 0, this->channel_, 0, 0);
+    Header        header(this->rank(), 1, 0, this->channel_, 0, 0);
     char          buf[100] = {(char)signal};
     std::uint64_t len = 1;
 
     infog(logh::IG::Comm, "comm", "signal = ", (int)signal);
     for (auto dest : dests) {
-      if (signal == Signal::Disconnect) {
-        size_t size = sizeof(this->packagesCount_[dest]);
-        std::memcpy(&buf[1], &this->packagesCount_[dest], size);
-        len = 1 + size;
-      }
       this->service_->send(header, dest, Buffer{buf, len});
     }
   }
@@ -116,7 +129,7 @@ public:
   template <typename T>
   void sendData(std::vector<std::uint32_t> const &dests, std::shared_ptr<T> data, bool returnMemory = true) {
     auto [storageId, storage] = createSendStorage(dests, data, returnMemory);
-    Header header(this->service_->rank(), 0, storageId.typeId, this->channel_, storageId.packageId, 0);
+    Header header(this->rank(), 0, storageId.typeId, this->channel_, storageId.packageId, 0);
 
     infog(logh::IG::Comm, "comm", "sendData -> ", " typeId = ", (int)TM::template idOf<T>(),
           " requestId = ", (int)header.packageId);
@@ -153,7 +166,7 @@ public:
 
     if (this->service_->probeSuccess(request)) {
       header = this->service_->requestHeader(request);
-      assert(header.source != this->service_->rank());
+      assert(header.source != this->rank());
 
       if (header.signal == 0) {
         std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
@@ -167,7 +180,7 @@ public:
         this->service_->recv(request, buf);
         signal = (Signal)buf.mem[0];
       }
-      assert(header.source < this->service_->nbProcesses());
+      assert(header.source < this->nbProcesses());
       infog(logh::IG::Comm, "comm", "recvSignal -> ", " source = ", header.source, " signal = ", (int)signal);
     } else {
       this->service_->requestRelease(request);
@@ -182,9 +195,9 @@ public:
    */
   template <typename CreateDataCB>
   bool recvData(CreateDataOperation const &prd, CreateDataCB createData) {
-    auto packageId = prd.header.packageId;
-    auto bufferId = prd.header.bufferId;
-    auto typeId = prd.header.typeId;
+    auto      packageId = prd.header.packageId;
+    auto      bufferId = prd.header.bufferId;
+    auto      typeId = prd.header.typeId;
     StorageId storageId(prd.source, packageId, typeId, 0);
 
     infog(logh::IG::Comm, "comm", "recvData -> ", " source = ", prd.source, " typeId = ", (int)typeId,
@@ -287,7 +300,7 @@ public:
         .returnMemory = returnMemory,
         .dbgBufferReceived = {false, false, false, false},
     };
-    StorageId storageId((std::uint64_t)this->service_->rank(), packageId, TM::template idOf<T>());
+    StorageId storageId((std::uint64_t)this->rank(), packageId, TM::template idOf<T>());
 
     if (this->service_->collectStats()) {
       std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
@@ -465,10 +478,9 @@ public:
   template <typename... Ts>
   void infog(logh::IG ig, std::string const &name, Ts &&...args) const {
     if constexpr (sizeof...(Ts)) {
-      logh::infog(ig, name, "[", (int)this->channel_, "]: rank = ", this->service_->rank(), ", ",
-                  std::forward<Ts>(args)...);
+      logh::infog(ig, name, "[", (int)this->channel_, "]: rank = ", this->rank(), ", ", std::forward<Ts>(args)...);
     } else {
-      logh::infog(ig, name, "[", (int)this->channel_, "]: rank = ", this->service_->rank());
+      logh::infog(ig, name, "[", (int)this->channel_, "]: rank = ", this->rank());
     }
   }
 
@@ -478,7 +490,7 @@ public:
    */
   void sendStats() const {
     serializer::Bytes buf;
-    Header            header(this->service_->rank(), 0, 0, this->channel_, 0, 0);
+    Header            header(this->rank(), 0, 0, this->channel_, 0, 0);
 
     using Serializer = serializer::Serializer<serializer::Bytes>;
     serializer::serialize<Serializer>(buf, 0, this->stats_.maxSendOpsSize, this->stats_.maxRecvOpsSize,
@@ -493,7 +505,7 @@ public:
    * Gather statistics on the master rank.
    */
   std::vector<CommTaskStats> gatherStats() const {
-    std::vector<CommTaskStats> stats(this->service_->nbProcesses());
+    std::vector<CommTaskStats> stats(this->nbProcesses());
     int                        bufSize;
 
     stats[0].storageStats = std::move(this->stats_.storageStats);
@@ -502,7 +514,7 @@ public:
     stats[0].maxCreateDataQueueSize = this->stats_.maxCreateDataQueueSize;
     stats[0].maxSendStorageSize = this->stats_.maxSendStorageSize;
     stats[0].maxRecvStorageSize = this->stats_.maxRecvStorageSize;
-    for (std::uint32_t i = 1; i < this->service_->nbProcesses(); ++i) {
+    for (std::uint32_t i = 1; i < this->nbProcesses(); ++i) {
       Request request = this->service_->probe(this->channel_, i);
       while (!this->service_->probeSuccess(request)) {
         this->service_->requestRelease(request);

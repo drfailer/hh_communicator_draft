@@ -79,116 +79,6 @@ public:
   ~CommunicatorCoreTask() {}
 
 public:
-  void run() override {
-    this->isActive(true);
-    this->nvtxProfiler()->initialize(this->threadId(), this->graphId());
-    this->preRun();
-
-    auto receivers = communicator_.receivers();
-    bool isReceiver = std::find(receivers.begin(), receivers.end(), communicator_.rank()) != receivers.end();
-
-    if (isReceiver) {
-      communicator_.infog(logh::IG::Core, "core", "start receiver");
-      this->deamon_ = std::thread(&CommunicatorCoreTask<Types...>::recvDeamon, this);
-    } else {
-      communicator_.infog(logh::IG::Core, "core", "start sender");
-      this->deamon_ = std::thread(&CommunicatorCoreTask<Types...>::sendDeamon, this);
-    }
-
-    taskLoop();
-
-    if (this->deamon_.joinable()) {
-      communicator_.infog(logh::IG::Core, "core", "join ", isReceiver ? "receiver" : "sender");
-      this->deamon_.join();
-    }
-
-    this->postRun();
-    this->wakeUp();
-
-    communicator_.infog(logh::IG::CoreTerminate, "core terminate");
-  }
-
-private:
-  void taskLoop() {
-    using namespace std::chrono_literals;
-    std::chrono::time_point<std::chrono::system_clock> start, finish;
-    std::condition_variable                            sleepCondition;
-    bool                                               canTerminate = false;
-
-    communicator_.infog(logh::IG::CoreTaskLoop, "core task loop", "start task loop, canTerminate = ", canTerminate);
-
-    // Actual computation loop
-    senderDisconnect_ = false;
-    while (!this->canTerminate()) {
-      // Wait for a data to arrive or termination
-      this->nvtxProfiler()->startRangeWaiting();
-      start = std::chrono::system_clock::now();
-      canTerminate = this->sleep();
-      finish = std::chrono::system_clock::now();
-      this->nvtxProfiler()->endRangeWaiting();
-      this->incrementWaitDuration(std::chrono::duration_cast<std::chrono::nanoseconds>(finish - start));
-
-      communicator_.infog(logh::IG::CoreTaskLoop, "core task loop", "run task loop, canTerminate = ", canTerminate);
-
-      // If loop can terminate break the loop early
-      if (canTerminate) {
-        break;
-      }
-
-      // Operate the connectedReceivers to get a data and send it to execute
-      this->operateReceivers();
-    }
-    senderDisconnect_ = true;
-  }
-
-  void sendDeamon() {
-    using namespace std::chrono_literals;
-    while (!senderDisconnect_) {
-      sendDeamonLoopDbg();
-      communicator_.processSendOpsQueue(ReturnMemory<Types...>(mm_));
-      std::this_thread::sleep_for(4ms);
-    }
-    communicator_.processSendOpsQueue(ReturnMemory<Types...>(mm_), true);
-    communicator_.sendSignal(communicator_.receivers(), comm::Signal::Disconnect);
-    communicator_.infog(logh::IG::SenderDisconnect, "sender disconnect");
-    communicator_.processSendOpsQueue(ReturnMemory<Types...>(mm_), true);
-    communicator_.infog(logh::IG::SenderEnd, "sender end");
-  }
-
-  void recvDeamon() {
-    using namespace std::chrono_literals;
-    std::vector<Connection> connections = createConnectionVector();
-    comm::Signal            signal = comm::Signal::None;
-    comm::Header            header = {0, 0, 0, 0, 0, 0};
-    char                    bufMem[100] = {0};
-    comm::Buffer            buf{bufMem, 100};
-
-    // TODO: empty the queue or flush? I think the best here would be to start a
-    //       timer when isConnected is false. After the timer, the thread leaves
-    //       the loops and flushes the queue, however, this should be reported
-    //       as an error in the dot file.
-    while (isConnected(connections) || communicator_.hasPendingOperations()) {
-      communicator_.recvSignal(signal, header, buf);
-
-      recvDeamonLoopDbg(connections);
-      switch (signal) {
-      case comm::Signal::None:
-        break;
-      case comm::Signal::Disconnect:
-        disconnect(connections, header.source, buf);
-        break;
-      case comm::Signal::Data:
-        ++connections[header.source].recvCount;
-        break;
-      }
-      communicator_.processRecvDataQueue(GetMemory<Types...>(mm_));
-      communicator_.processRecvOpsQueue(ProcessData(this->task()));
-      std::this_thread::sleep_for(4ms);
-    }
-    communicator_.infog(logh::IG::ReceiverEnd, "receiver end");
-  }
-
-public:
   struct Connection {
     bool   connected;
     size_t sendCount;
@@ -197,9 +87,7 @@ public:
 
   std::vector<Connection> createConnectionVector() {
     std::vector<Connection> connections(communicator_.nbProcesses(), Connection{true, 0, 0});
-    for (auto receiver : communicator_.receivers()) {
-      connections[receiver].connected = false;
-    }
+    connections[communicator_.rank()].connected = false;
     return connections;
   }
 
@@ -216,8 +104,130 @@ public:
     assert(connections[source].connected == true);
     connections[source].connected = false;
     std::memcpy(&connections[source].sendCount, &buf.mem[1], sizeof(size_t));
-    std::vector<bool> dbgConnections(connections.size(), false);
-    disconnectDbg(connections, source);
+  }
+
+public:
+  void run() override {
+    this->isActive(true);
+    this->nvtxProfiler()->initialize(this->threadId(), this->graphId());
+    this->preRun();
+
+    auto receivers = communicator_.receivers();
+    bool isReceiver = std::find(receivers.begin(), receivers.end(), communicator_.rank()) != receivers.end();
+
+    this->senderDisconnect_ = false;
+    this->deamon_ = std::thread(&CommunicatorCoreTask<Types...>::networkDeamon, this);
+
+    taskLoop();
+
+    if (this->deamon_.joinable()) {
+      this->deamon_.join();
+    }
+
+    this->postRun();
+    this->wakeUp();
+  }
+
+private:
+  void taskLoop() {
+    using namespace std::chrono_literals;
+    std::chrono::time_point<std::chrono::system_clock> start, finish;
+    std::condition_variable                            sleepCondition;
+    bool                                               canTerminate = false;
+
+    // Actual computation loop
+    while (!this->canTerminate()) {
+      // Wait for a data to arrive or termination
+      this->nvtxProfiler()->startRangeWaiting();
+      start = std::chrono::system_clock::now();
+      canTerminate = this->sleep();
+      finish = std::chrono::system_clock::now();
+      this->nvtxProfiler()->endRangeWaiting();
+      this->incrementWaitDuration(std::chrono::duration_cast<std::chrono::nanoseconds>(finish - start));
+
+      // If loop can terminate break the loop early
+      if (canTerminate) {
+        break;
+      }
+
+      // Operate the connectedReceivers to get a data and send it to execute
+      this->operateReceivers();
+    }
+    senderDisconnect_ = true;
+  }
+
+  enum class PortState {
+    Opened,
+    Closing,
+    Closed,
+  };
+
+  void networkDeamon() {
+    using namespace std::chrono_literals;
+    auto                    inputPortState = PortState::Opened;
+    auto                    outputPortState = PortState::Opened;
+    std::vector<Connection> connections = createConnectionVector();
+
+    size_t dbg = 0;
+
+    while (inputPortState != PortState::Closed || outputPortState != PortState::Closed) {
+      processInputPort(inputPortState);
+      processOutputPort(outputPortState, connections);
+      std::this_thread::sleep_for(4ms);
+    }
+  }
+
+  void processInputPort(PortState &state) {
+    switch (state) {
+    case PortState::Opened:
+      communicator_.processSendOpsQueue(ReturnMemory<Types...>(mm_));
+      if (senderDisconnect_) {
+        state = PortState::Closing;
+      }
+      break;
+    case PortState::Closing:
+      communicator_.processSendOpsQueue(ReturnMemory<Types...>(mm_), true);
+      communicator_.notifyDisconnection();
+      communicator_.processSendOpsQueue(ReturnMemory<Types...>(mm_), true);
+      state = PortState::Closed;
+      break;
+    case PortState::Closed:
+      break;
+    }
+  }
+
+  void processOutputPort(PortState &state, std::vector<Connection> &connections) {
+    comm::Signal signal = comm::Signal::None;
+    comm::Header header = {0, 0, 0, 0, 0, 0};
+    char         bufMem[100] = {0};
+    comm::Buffer buf{bufMem, 100};
+    switch (state) {
+    case PortState::Opened:
+      communicator_.recvSignal(signal, header, buf);
+
+      switch (signal) {
+      case comm::Signal::None:
+        break;
+      case comm::Signal::Disconnect:
+        disconnect(connections, header.source, buf);
+        break;
+      case comm::Signal::Data:
+        ++connections[header.source].recvCount;
+        break;
+      }
+      communicator_.processRecvDataQueue(GetMemory<Types...>(mm_));
+      communicator_.processRecvOpsQueue(ProcessData(this->task()));
+
+      if (!isConnected(connections) && !communicator_.hasPendingOperations()) {
+        state = PortState::Closing;
+      }
+      break;
+    case PortState::Closing:
+      state = PortState::Closed;
+      break;
+    case PortState::Closed:
+      break;
+    }
   }
 
 public:
@@ -438,51 +448,6 @@ private:
   std::shared_ptr<tool::MemoryPool<Types...>> mm_;
   comm::Communicator<TM>                      communicator_;
   bool                                        senderDisconnect_;
-
-private:
-  std::vector<bool> connectionsDbg(std::vector<Connection> const &connections) const {
-    std::vector<bool> dbgConnections(connections.size(), false);
-    for (size_t i = 0; i < connections.size(); ++i) {
-      auto connection = connections[i];
-      if (connection.connected || connection.recvCount < connection.sendCount) {
-        dbgConnections[i] = true;
-      }
-    }
-    return dbgConnections;
-  }
-
-  void sendDeamonLoopDbg() {
-    static size_t dbg_idx = 0;
-    if (dbg_idx++ == 1000) {
-      dbg_idx = 0;
-      logh::warn("sender still running: channel = ", (int)communicator_.channel(), ", rank = ", communicator_.rank(),
-                 ", queue size = ", communicator_.nbSendOps(),
-                 ", hasNotifierConnected = ", this->hasNotifierConnected());
-    }
-  }
-
-  void recvDeamonLoopDbg(std::vector<Connection> const &connections) {
-    static size_t dbg_idx = 0;
-    if (dbg_idx++ == 4000) {
-      dbg_idx = 0;
-
-      if (isConnected(connections)) {
-        logh::warn("reciever still running: channel = ", (int)communicator_.channel(),
-                   ", rank = ", communicator_.rank(), ", data queue size = ", communicator_.nbCreateDataOps(),
-                   ", ops queue size = ", communicator_.nbRecvOps(), ", connections = ", connectionsDbg(connections),
-                   ", hasNotifierConnected = ", this->hasNotifierConnected());
-      } else {
-        logh::error("non connected receiver still running: channel = ", (int)communicator_.channel(),
-                    ", rank = ", communicator_.rank(), ", ops queue size = ", communicator_.nbRecvOps(),
-                    ", data queue size = ", communicator_.nbCreateDataOps());
-      }
-    }
-  }
-
-  void disconnectDbg(std::vector<Connection> const &connections, int source) {
-    communicator_.infog(logh::IG::ReceiverDisconnect, "receiver disconnect", "source = ", source,
-                        ", connections = ", connectionsDbg(connections));
-  }
 };
 
 } // end namespace core
