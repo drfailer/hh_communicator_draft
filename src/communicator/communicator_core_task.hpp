@@ -70,10 +70,9 @@ private:
   using TM = typename CommunicatorTask<Types...>::TM;
 
 public:
-  CommunicatorCoreTask(CommunicatorTask<Types...> *task, comm::CommService *service,
-                       std::vector<std::uint32_t> const &receivers, std::string const &name)
+  CommunicatorCoreTask(CommunicatorTask<Types...> *task, comm::CommService *service, std::string const &name)
       : CommunicatorCoreTaskBase<Types...>(task, name, 1, false),
-        communicator_(service, receivers),
+        communicator_(service),
         senderDisconnect_(false) {}
 
   ~CommunicatorCoreTask() {}
@@ -111,9 +110,6 @@ public:
     this->isActive(true);
     this->nvtxProfiler()->initialize(this->threadId(), this->graphId());
     this->preRun();
-
-    auto receivers = communicator_.receivers();
-    bool isReceiver = std::find(receivers.begin(), receivers.end(), communicator_.rank()) != receivers.end();
 
     this->senderDisconnect_ = false;
     this->deamon_ = std::thread(&CommunicatorCoreTask<Types...>::networkDeamon, this);
@@ -167,8 +163,6 @@ private:
     auto                    inputPortState = PortState::Opened;
     auto                    outputPortState = PortState::Opened;
     std::vector<Connection> connections = createConnectionVector();
-
-    size_t dbg = 0;
 
     while (inputPortState != PortState::Closed || outputPortState != PortState::Closed) {
       processInputPort(inputPortState);
@@ -257,13 +251,6 @@ public:
       auto                                         transmissionStats = computeTransmissionStats(stats);
 
       infos.append("nbProcesses = " + std::to_string(nbProcesses) + "\\l");
-      std::string receiversStr = "[" + std::to_string(communicator_.receivers()[0]);
-      for (size_t i = 1; i < communicator_.receivers().size(); ++i) {
-        receiversStr += ", " + std::to_string(communicator_.receivers()[i]);
-      }
-      receiversStr += "]";
-      strAppend(infos, "receivers = " + receiversStr);
-
       for (auto const &stat : stats) {
         maxSendOpsSize = std::max(maxSendOpsSize, stat.maxSendOpsSize);
         maxRecvOpsSize = std::max(maxRecvOpsSize, stat.maxRecvOpsSize);
@@ -294,7 +281,7 @@ public:
         infos.append("transmission: {\\l");
         for (size_t sender = 0; sender < nbProcesses; ++sender) {
           for (size_t receiver = 0; receiver < nbProcesses; ++receiver) {
-            if (transmissionDelays[sender * nbProcesses + receiver].empty()) {
+            if (sender == receiver || transmissionDelays[sender * nbProcesses + receiver].empty()) {
               continue;
             }
             strAppend(infos, "    [", sender, " -> ", receiver,
@@ -401,8 +388,8 @@ private:
     std::map<std::uint8_t, TransmissionStat> transmissionStats;
     size_t                                   nbProcesses = communicator_.nbProcesses();
 
-    for (auto receiverRank : communicator_.receivers()) {
-      for (auto recvStorageStat : stats[receiverRank].storageStats) {
+    for (size_t rank = 0; rank < communicator_.nbProcesses(); ++rank) {
+      for (auto recvStorageStat : stats[rank].storageStats) {
         comm::StorageId   storageId = recvStorageStat.first;
         comm::StorageInfo recvInfos = recvStorageStat.second;
         std::uint32_t     source = storageId.source;
@@ -422,7 +409,7 @@ private:
             });
           }
           auto delay_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(recvInfos.recvtp - sendInfos.sendtp);
-          transmissionStats.at(typeId).transmissionDelays[source * nbProcesses + receiverRank].push_back(delay_ns);
+          transmissionStats.at(typeId).transmissionDelays[source * nbProcesses + rank].push_back(delay_ns);
           transmissionStats.at(typeId).packingDelay.push_back(sendInfos.packingTime);
           transmissionStats.at(typeId).unpackingDelay.push_back(recvInfos.unpackingTime);
           double dataSizeMB = sendInfos.dataSize / (1024. * 1024.);

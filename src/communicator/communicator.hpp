@@ -18,10 +18,9 @@ namespace comm {
 template <typename TM>
 class Communicator {
 public:
-  Communicator(CommService *service, std::vector<std::uint32_t> const &receivers)
+  Communicator(CommService *service)
       : service_(service),
         channel_(service->newChannel()),
-        receivers_(receivers),
         packagesCount_(service->nbProcesses(), 0) {}
 
 private:
@@ -48,10 +47,6 @@ private:
 public:
   std::uint8_t channel() const {
     return channel_;
-  }
-
-  std::vector<std::uint32_t> const &receivers() const {
-    return receivers_;
   }
 
   CommService *service() const {
@@ -521,7 +516,6 @@ public:
         using namespace std::chrono_literals;
         std::this_thread::sleep_for(1ms);
         request = this->service_->probe(this->channel_, i);
-        ;
       }
       bufSize = this->service_->bufferSize(request);
 
@@ -541,7 +535,6 @@ public:
 private:
   CommService               *service_ = nullptr;
   std::uint8_t               channel_ = 0;
-  std::vector<std::uint32_t> receivers_ = {};
 
   // queues
   std::vector<CommOperation>    sendOps_;

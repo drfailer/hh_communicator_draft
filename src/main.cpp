@@ -14,20 +14,24 @@ struct TestGraph1 : hh::Graph<1, int, int> {
   TestGraph1(hh::comm::CommService *service) : hh::Graph<1, int, int>("TestGraph1"), communicator_(service) {
     assert(service->nbProcesses() == 3);
     auto in = std::make_shared<hh::LambdaTask<1, int, int>>("input", 1);
-    auto b01 = std::make_shared<hh::CommunicatorTask<int>>(service, std::vector<std::uint32_t>({1}), hh::CommunicatorTaskOpt{});
-    auto b02 = std::make_shared<hh::CommunicatorTask<int>>(service, std::vector<std::uint32_t>({2}));
+    auto b01 = std::make_shared<hh::CommunicatorTask<int>>(service);
+    auto b02 = std::make_shared<hh::CommunicatorTask<int>>(service);
     auto frgn1 = std::make_shared<hh::LambdaTask<1, int, int>>("foreign task", 1);
     auto frgn2 = std::make_shared<hh::LambdaTask<1, int, int>>("foreign task", 1);
-    auto bn0 = std::make_shared<hh::CommunicatorTask<int>>(service, std::vector<std::uint32_t>({0}));
+    auto bn0 = std::make_shared<hh::CommunicatorTask<int>>(service);
     auto out = std::make_shared<hh::LambdaTask<1, int, int>>("output", 1);
 
     auto mm = std::make_shared<hh::tool::MemoryPool<int>>();
     mm->template fill<int>(5);
 
+    b01->template strategy<int>([](auto){ return std::vector<std::uint32_t>({1}); });
+    b02->template strategy<int>([](auto){ return std::vector<std::uint32_t>({2}); });
+    bn0->template strategy<int>([](auto){ return std::vector<std::uint32_t>({0}); });
+
     // FIXME: the data returns to the memory pool too early
-    // b01->setMemoryManager(mm);
-    // b02->setMemoryManager(mm);
-    // bn0->setMemoryManager(mm);
+    b01->setMemoryManager(mm);
+    b02->setMemoryManager(mm);
+    bn0->setMemoryManager(mm);
 
     in->setLambda<int>([service](std::shared_ptr<int> data, auto self) {
       auto output = std::make_shared<int>(*data + 1);
