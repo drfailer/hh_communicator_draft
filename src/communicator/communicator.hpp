@@ -301,29 +301,28 @@ public:
 
   /*
    * Flush operation queue and remove storage entries from the warehouse.
-   * TODO: rewrite this function
    */
-  void flushQueueAndWarehouse(std::vector<CommOperation> &queue, std::map<StorageId, PackageStorage<TM>> &wh) {
-    std::vector<Request> requests;
-
-    for (auto &op : queue) {
-      logh::error("request canceled");
-      this->service_->requestCancel(op.request);
-      requests.push_back(op.request);
+  void flushRecvQueueAndWarehouse() {
+    if (!this->recvOps_.empty()) {
+      logh::error("Cancelling ", this->recvOps_.size(), " recv operations.");
     }
-    queue.clear();
+    for (auto &op : this->recvOps_) {
+      this->service_->requestCancel(op.request);
+    }
+    this->recvOps_.clear();
 
-    // TODO: this should be done for mpi
-    // int done = false;
-    // do {
-    //   std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
-    //   using namespace std::chrono_literals;
-    //   std::this_thread::sleep_for(4ms);
-    //   checkMPI(MPI_Testall(requests.size(), requests.data(), &done, MPI_STATUSES_IGNORE));
-    // } while (!done);
-    // queue.clear();
+    if (!this->createDataOps_.empty()) {
+      logh::error("Cancelling ", this->createDataOps_.size(), " create data operations.");
+    }
+    for (auto &op : this->createDataOps_) {
+      this->service_->requestRelease(op.request);
+    }
+    this->createDataOps_.clear();
 
-    for (auto it : wh) {
+    if (!this->wh_.recvStorage.empty()) {
+        logh::error("Removing ", this->wh_.recvStorage.size(), " from storage.");
+    }
+    for (auto it : this->wh_.recvStorage) {
       auto storageId = it.first;
       auto storage = it.second;
       assert(storageId.typeId < TM::size);
@@ -333,7 +332,7 @@ public:
         }
       });
     }
-    wh.clear();
+    this->wh_.recvStorage.clear();
   }
 
   /*
@@ -437,7 +436,7 @@ public:
     }
 
     if (flush) {
-      flushQueueAndWarehouse(this->recvOps_, this->wh_.recvStorage);
+      flushRecvQueueAndWarehouse();
     }
   }
 
