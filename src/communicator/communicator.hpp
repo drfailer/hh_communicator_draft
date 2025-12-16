@@ -236,7 +236,7 @@ public:
         delete[] storage.package.data[0].mem;
       }
       if (storage.returnMemory) {
-        cb.template operator()<T>(data);
+        cb.template operator()<T>(std::move(data));
       }
     });
   }
