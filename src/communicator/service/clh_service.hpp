@@ -76,7 +76,7 @@ public: // send ////////////////////////////////////////////////////////////////
     std::uint32_t tag = headerToTag(header);
     CLH_Request  *r = clh_send(this->clh_, header.channel, dest, tag, CLH_Buffer{buffer.mem, buffer.len});
     assert(r != nullptr);
-    return requestPool_.allocate(r, __FILE__, __LINE__);
+    return requestPool_.allocate(r);
   }
 
 public: // recv ////////////////////////////////////////////////////////////////
@@ -104,13 +104,13 @@ public: // probe ///////////////////////////////////////////////////////////////
   Request probe(std::uint8_t channel) override {
     CLH_Request *r = clh_probe(this->clh_, channel, 0, 0, true);
     assert(r != nullptr);
-    return requestPool_.allocate(r, __FILE__, __LINE__);
+    return requestPool_.allocate(r);
   }
 
   Request probe(std::uint8_t channel, std::uint32_t source) override {
     CLH_Request *r = clh_probe_source(this->clh_, channel, source, 0, 0, true);
     assert(r != nullptr);
-    return requestPool_.allocate(r, __FILE__, __LINE__);
+    return requestPool_.allocate(r);
   }
 
 public: // requests ////////////////////////////////////////////////////////////

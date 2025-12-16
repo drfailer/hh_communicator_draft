@@ -4,6 +4,7 @@
 #include <thread>
 #include <type_traits>
 #include <vector>
+#include <source_location>
 
 /*
  * In order to be able to use multiple services that each have their own
@@ -26,8 +27,7 @@ requires std::is_default_constructible_v<T>
 class RequestPool {
 public:
   struct DebugInfo {
-    std::string filename;
-    size_t      line;
+    std::source_location loc;
     bool        free;
   };
 
@@ -35,7 +35,7 @@ public:
   RequestPool(size_t defaultCapacity = 0)
       : requests_(defaultCapacity, T{}),
         freeIndexes_(defaultCapacity, 0),
-        debugInfos_(defaultCapacity, DebugInfo{"", 0, true}) {
+        debugInfos_(defaultCapacity, DebugInfo{{}, true}) {
     for (size_t i = 0; i < requests_.size(); ++i) {
       freeIndexes_[i] = i;
     }
@@ -48,33 +48,33 @@ public:
       logh::warn(nbNonFree, "/", ttl, " requests where not released.");
       for (auto info : debugInfos_) {
         if (!info.free) {
-          logh::warn("request allocated at (", info.filename, ":", info.line, ") was not released.");
+          logh::warn("request allocated at (", info.loc.file_name(), ":", info.loc.line(), ") was not released.");
         }
       }
     }
   }
 
-  Request allocate(T value, std::string const &filename, size_t line) {
+  Request allocate(T value = T{}, std::source_location loc = std::source_location::current()) {
     std::lock_guard<std::mutex> lock(mutex_);
     Request                     request;
 
     if (freeIndexes_.size() == 0) {
       freeIndexes_.push_back(requests_.size());
       requests_.emplace_back(T{});
-      debugInfos_.emplace_back("", 0, true);
+      debugInfos_.emplace_back(loc, true);
     }
     request = freeIndexes_.back();
     freeIndexes_.pop_back();
     requests_[request] = value;
-    debugInfos_[request] = DebugInfo{filename, line, false};
+    debugInfos_[request] = DebugInfo{loc, false};
     return request;
   }
 
   void release(Request request) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (debugInfos_[request].free) {
-      logh::error("request allocated at (", debugInfos_[request].filename, ":", debugInfos_[request].line,
-                  ") was released multiple times.");
+      logh::error("request allocated at (", debugInfos_[request].loc.file_name(),
+                  ":", debugInfos_[request].loc.line(), ") was released multiple times.");
     }
     debugInfos_[request].free = true;
     freeIndexes_.push_back(request);
