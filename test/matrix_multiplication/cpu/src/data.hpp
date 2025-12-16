@@ -1,7 +1,7 @@
 #ifndef DATA
 #define DATA
-#include "../../../../src/communicator/communicator_memory_manager.hpp"
-#include "../../../../src/communicator/package.hpp"
+#include <communicator/communicator_memory_manager.hpp>
+#include <communicator/package.hpp>
 #include "log.hpp"
 #include <cstddef>
 #include <serializer/serializer.hpp>

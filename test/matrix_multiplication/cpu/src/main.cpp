@@ -1,8 +1,8 @@
 #include "../../../common/ap.h"
 #include "../../../common/timer.h"
 #include "../../../common/utest.h"
-#include "../../../../src/communicator/service/clh_service.hpp"
-#include "../../../../src/communicator/service/mpi_service.hpp"
+#include <communicator/service/clh_service.hpp>
+#include <communicator/service/mpi_service.hpp>
 #include "graph.hpp"
 #include <cblas.h>
 
