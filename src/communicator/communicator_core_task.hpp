@@ -34,7 +34,7 @@ struct GetMemory {
             "error: fail to create data in communicator task, provide a memory manager to solve this issue.");
       }
     }
-    return mm->template getMemory<T>(false);
+    return mm->template getMemory<T>(tool::MemoryPoolAllocMode::Fail);
   }
 };
 
