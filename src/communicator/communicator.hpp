@@ -6,7 +6,6 @@
 #include "type_map.hpp"
 #include <cassert>
 #include <map>
-#include <serializer/serializer.hpp>
 #include <set>
 #include <utility>
 #include <vector>
@@ -21,6 +20,7 @@ public:
   Communicator(CommService *service)
       : service_(service),
         channel_(service->newChannel()),
+        stats_(service->collectStats()),
         packagesCount_(service->nbProcesses(), 0) {}
 
 private:
@@ -248,11 +248,7 @@ public:
   void processSendOpsQueue(ReturnDataCB returnMemory, bool flush = false) {
     std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
-    if (this->service_->collectStats()) {
-      std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
-      this->stats_.maxSendOpsSize = std::max(this->stats_.maxSendOpsSize, this->sendOps_.size());
-      this->stats_.maxSendStorageSize = std::max(this->stats_.maxSendStorageSize, this->wh_.sendStorage.size());
-    }
+    this->stats_.processSendOpsQueue(this->sendOps_.size(), this->wh_.sendStorage.size());
 
     do {
       for (auto it = this->sendOps_.begin(); it != this->sendOps_.end();) {
@@ -297,16 +293,9 @@ public:
     };
     StorageId storageId((std::uint64_t)this->rank(), packageId, TM::template idOf<T>());
 
-    if (this->service_->collectStats()) {
-      std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
-      this->stats_.storageStats.insert({storageId, StorageInfo{}});
-      this->stats_.storageStats.at(storageId).typeId = storageId.typeId;
-      this->stats_.storageStats.at(storageId).packingCount += 1;
-      this->stats_.storageStats.at(storageId).packingTime
-          += std::chrono::duration_cast<std::chrono::nanoseconds>(tpackingEnd - tpackingStart);
-      this->stats_.storageStats.at(storageId).sendtp = std::chrono::system_clock::now();
-      this->stats_.storageStats.at(storageId).dataSize = package.size();
-    }
+    this->stats_.createSendStorage(dests, storageId,
+                                   std::chrono::duration_cast<std::chrono::nanoseconds>(tpackingEnd - tpackingStart),
+                                   package.size());
     return {storageId, storage};
   }
 
@@ -374,12 +363,6 @@ public:
       };
       this->wh_.recvStorage.insert({storageId, storage});
     });
-
-    if (this->service_->collectStats()) {
-      std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
-      this->stats_.storageStats.insert({storageId, {}});
-      this->stats_.storageStats.at(storageId).typeId = storageId.typeId;
-    }
     return status;
   }
 
@@ -393,10 +376,7 @@ public:
   void processRecvDataQueue(CreateDataCB createData) {
     std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
-    if (this->service_->collectStats()) {
-      std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
-      this->stats_.maxCreateDataQueueSize = std::max(this->stats_.maxCreateDataQueueSize, this->createDataOps_.size());
-    }
+    this->stats_.processRecvDataQueue(this->createDataOps_.size());
 
     for (auto it = this->createDataOps_.begin(); it != this->createDataOps_.end();) {
       if (recvData(*it, createData)) {
@@ -423,13 +403,9 @@ public:
       processData.template operator()<T>(data);
     });
 
-    if (this->service_->collectStats()) {
-      std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
-      this->stats_.storageStats.at(storageId).recvtp = std::chrono::system_clock::now();
-      this->stats_.storageStats.at(storageId).unpackingTime
-          += std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart);
-      this->stats_.storageStats.at(storageId).unpackingCount += 1;
-    }
+    this->stats_.postRecv(this->service_->rank(), storageId,
+                          std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart),
+                          storage.package.size());
   }
 
   /*
@@ -440,11 +416,7 @@ public:
   void processRecvOpsQueue(ProcessCB processData, [[maybe_unused]] bool flush = false) {
     std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
-    if (this->service_->collectStats()) {
-      std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
-      this->stats_.maxRecvOpsSize = std::max(this->stats_.maxRecvOpsSize, this->recvOps_.size());
-      this->stats_.maxRecvStorageSize = std::max(this->stats_.maxRecvStorageSize, this->wh_.recvStorage.size());
-    }
+    this->stats_.processRecvOpsQueue(this->recvOps_.size(), this->wh_.recvStorage.size());
 
     for (auto it = this->recvOps_.begin(); it != this->recvOps_.end();) {
       if (this->service_->requestCompleted(it->request)) {
@@ -484,16 +456,12 @@ public:
    * Send statistics when generating the dot file.
    */
   void sendStats() const {
-    serializer::Bytes buf;
     Header            header(this->rank(), 0, 0, this->channel_, 0, 0);
-
-    using Serializer = serializer::Serializer<serializer::Bytes>;
-    serializer::serialize<Serializer>(buf, 0, this->stats_.maxSendOpsSize, this->stats_.maxRecvOpsSize,
-                                      this->stats_.maxCreateDataQueueSize, this->stats_.maxSendStorageSize,
-                                      this->stats_.maxRecvStorageSize, this->stats_.storageStats);
-    infog(logh::IG::Stats, "stats", "sendStats -> ", " buf size = ", buf.size(),
-          ", storageStats size = ", this->stats_.storageStats.size());
-    this->service_->send(header, 0, Buffer{std::bit_cast<char *>(buf.data()), buf.size()});
+    std::vector<char> bufMem;
+    this->stats_.pack(bufMem);
+    infog(logh::IG::Stats, "stats", "sendStats -> ", " buf size = ", bufMem.size(), ", transmissionStats size = ",
+          this->stats_.transmissionStats.sendInfos.size() + this->stats_.transmissionStats.recvInfos.size());
+    this->service_->send(header, 0, Buffer{bufMem.data(), bufMem.size()});
   }
 
   /*
@@ -501,9 +469,9 @@ public:
    */
   std::vector<CommTaskStats> gatherStats() const {
     std::vector<CommTaskStats> stats(this->nbProcesses());
-    int                        bufSize;
+    size_t                     bufSize;
 
-    stats[0].storageStats = std::move(this->stats_.storageStats);
+    stats[0].transmissionStats = std::move(this->stats_.transmissionStats);
     stats[0].maxSendOpsSize = this->stats_.maxSendOpsSize;
     stats[0].maxRecvOpsSize = this->stats_.maxRecvOpsSize;
     stats[0].maxCreateDataQueueSize = this->stats_.maxCreateDataQueueSize;
@@ -517,24 +485,22 @@ public:
         std::this_thread::sleep_for(1ms);
         request = this->service_->probe(this->channel_, i);
       }
-      bufSize = this->service_->bufferSize(request);
+      bufSize = (size_t)this->service_->bufferSize(request);
 
-      serializer::Bytes buf(bufSize, bufSize);
-      this->service_->recv(request, Buffer{std::bit_cast<char *>(buf.data()), buf.size()});
-
-      using Serializer = serializer::Serializer<serializer::Bytes>;
-      serializer::deserialize<Serializer>(buf, 0, stats[i].maxSendOpsSize, stats[i].maxRecvOpsSize,
-                                          stats[i].maxCreateDataQueueSize, stats[i].maxSendStorageSize,
-                                          stats[i].maxRecvStorageSize, stats[i].storageStats);
-      infog(logh::IG::Stats, "stats", "comGather -> ", "target = ", i, " buf size = ", buf.size(),
-            ", storageStats size = ", stats[i].storageStats.size());
+      std::vector<char> bufMem(bufSize);
+      Buffer            buf{.mem = bufMem.data(), .len = bufSize};
+      this->service_->recv(request, buf);
+      stats[i].unpack(bufMem);
+      infog(logh::IG::Stats, "stats", "comGather -> ", "target = ", i, " buf size = ", buf.len,
+            ", transmissionStats size = ",
+            stats[i].transmissionStats.sendInfos.size() + stats[i].transmissionStats.recvInfos.size());
     }
     return stats;
   }
 
 private:
-  CommService               *service_ = nullptr;
-  std::uint8_t               channel_ = 0;
+  CommService *service_ = nullptr;
+  std::uint8_t channel_ = 0;
 
   // queues
   std::vector<CommOperation>    sendOps_;

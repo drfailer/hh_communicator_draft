@@ -4,6 +4,7 @@
 #include "communicator.hpp"
 #include "communicator_memory_manager.hpp"
 #include "generic_core_task.hpp"
+#include "stats.hpp"
 #include <algorithm>
 #include <condition_variable>
 #include <numeric>
@@ -226,8 +227,7 @@ private:
 
 public:
   [[nodiscard]] std::string extraPrintingInformation() const override {
-    std::string                      infos;
-    std::vector<comm::CommTaskStats> stats;
+    std::string infos;
 
     if (this->mm_) {
       infos += mm_->extraPrintingInformation();
@@ -238,187 +238,13 @@ public:
     }
 
     communicator_.service()->barrier();
-
-    size_t nbProcesses = communicator_.nbProcesses();
     if (communicator_.rank() == 0) {
-      stats = communicator_.gatherStats();
-      std::map<comm::StorageId, comm::StorageInfo> storageStats;
-      size_t                                       maxSendOpsSize = 0;
-      size_t                                       maxRecvOpsSize = 0;
-      size_t                                       maxCreateDataQueueSize = 0;
-      size_t                                       maxSendStorageSize = 0;
-      size_t                                       maxRecvStorageSize = 0;
-      auto                                         transmissionStats = computeTransmissionStats(stats);
-
-      infos.append("nbProcesses = " + std::to_string(nbProcesses) + "\\l");
-      for (auto const &stat : stats) {
-        maxSendOpsSize = std::max(maxSendOpsSize, stat.maxSendOpsSize);
-        maxRecvOpsSize = std::max(maxRecvOpsSize, stat.maxRecvOpsSize);
-        maxCreateDataQueueSize = std::max(maxCreateDataQueueSize, stat.maxCreateDataQueueSize);
-        maxSendStorageSize = std::max(maxSendStorageSize, stat.maxSendStorageSize);
-        maxRecvStorageSize = std::max(maxRecvStorageSize, stat.maxRecvStorageSize);
-      }
-      strAppend(infos, "maxSendOpsSize = " + std::to_string(maxSendOpsSize));
-      strAppend(infos, "maxRecvOpsSize = " + std::to_string(maxRecvOpsSize));
-      strAppend(infos, "maxCreateDataQueueSize = " + std::to_string(maxCreateDataQueueSize));
-      strAppend(infos, "maxSendStorageSize = " + std::to_string(maxSendStorageSize));
-      strAppend(infos, "maxRecvStorageSize = " + std::to_string(maxRecvStorageSize));
-
-      for (std::uint8_t typeId = 0; typeId < TM::size; ++typeId) {
-        if (!transmissionStats.contains(typeId)) {
-          continue;
-        }
-        assert(typeId < TM::size);
-        TM::apply(typeId,
-                  [&]<typename T>() { infos.append("========== " + hh::tool::typeToStr<T>() + " ==========\n"); });
-        auto transmissionDelays = transmissionStats.at(typeId).transmissionDelays;
-        auto packingDelay = transmissionStats.at(typeId).packingDelay;
-        auto unpackingDelay = transmissionStats.at(typeId).unpackingDelay;
-        auto bandWidth = transmissionStats.at(typeId).bandWidth;
-        strAppend(infos, "packing: ", packingDelay, ", (count = ", packingDelay.size(), ")");
-        strAppend(infos, "unpacking: ", unpackingDelay, ", (count = ", unpackingDelay.size(), ")");
-        strAppend(infos, "bandWidth: ", bandWidth, "MB/s");
-        infos.append("transmission: {\\l");
-        for (size_t sender = 0; sender < nbProcesses; ++sender) {
-          for (size_t receiver = 0; receiver < nbProcesses; ++receiver) {
-            if (sender == receiver || transmissionDelays[sender * nbProcesses + receiver].empty()) {
-              continue;
-            }
-            strAppend(infos, "    [", sender, " -> ", receiver,
-                      "] = ", transmissionDelays[sender * nbProcesses + receiver]);
-          }
-        }
-        strAppend(infos, "}");
-      }
+      infos += comm::CommTaskStats::template extraPrintingInformation<TM>(communicator_.gatherStats(),
+                                                                          communicator_.nbProcesses());
     } else {
       communicator_.sendStats();
     }
-    // exchange stats
     return infos;
-  }
-
-private:
-  static std::string durationPrinter(std::chrono::nanoseconds const &ns) {
-    std::ostringstream oss;
-
-    // Cast with precision loss
-    auto s = std::chrono::duration_cast<std::chrono::seconds>(ns);
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(ns);
-    auto us = std::chrono::duration_cast<std::chrono::microseconds>(ns);
-
-    if (s > std::chrono::seconds::zero()) {
-      oss << s.count() << "." << std::setfill('0') << std::setw(3) << (ms - s).count() << "s";
-    } else if (ms > std::chrono::milliseconds::zero()) {
-      oss << ms.count() << "." << std::setfill('0') << std::setw(3) << (us - ms).count() << "ms";
-    } else if (us > std::chrono::microseconds::zero()) {
-      oss << us.count() << "." << std::setfill('0') << std::setw(3) << (ns - us).count() << "us";
-    } else {
-      oss << ns.count() << "ns";
-    }
-    return oss.str();
-  }
-
-  static void strAppend(std::string &str, auto const &...args) {
-    std::ostringstream oss;
-    (
-        [&] {
-          if constexpr (std::is_same_v<decltype(args), std::vector<double> const &>) {
-            auto avg = computeAvg(args);
-            oss << avg.first << " +- " << avg.second;
-          } else if constexpr (std::is_same_v<decltype(args), std::vector<std::chrono::nanoseconds> const &>) {
-            auto avg = computeAvgDuration(args);
-            oss << durationPrinter(avg.first) << " +- " << durationPrinter(avg.second);
-          } else {
-            oss << args;
-          }
-        }(),
-        ...);
-    str.append(oss.str() + "\\l");
-  }
-
-  static std::pair<std::chrono::nanoseconds, std::chrono::nanoseconds>
-  computeAvgDuration(std::vector<std::chrono::nanoseconds> nss) {
-    if (nss.size() == 0) {
-      return {std::chrono::nanoseconds::zero(), std::chrono::nanoseconds::zero()};
-    }
-    std::chrono::nanoseconds sum = std::chrono::nanoseconds::zero(), mean = std::chrono::nanoseconds::zero();
-    double                   sd = 0;
-
-    for (auto ns : nss) {
-      sum += ns;
-    }
-    mean = sum / (nss.size());
-
-    for (auto ns : nss) {
-      auto diff = (double)(ns.count() - mean.count());
-      sd += diff * diff;
-    }
-    return {mean, std::chrono::nanoseconds((int64_t)std::sqrt(sd / (double)nss.size()))};
-  }
-
-  static std::pair<double, double> computeAvg(std::vector<double> const &values) {
-    if (values.size() == 0) {
-      return {0, 0};
-    }
-    double avg = 0;
-    double stddev = 0;
-
-    for (double value : values) {
-      avg += value;
-    }
-    avg /= values.size();
-
-    for (double value : values) {
-      double diff = value - avg;
-      stddev += diff * diff;
-    }
-    stddev = std::sqrt(stddev / values.size());
-    return {avg, stddev};
-  }
-
-  struct TransmissionStat {
-    std::vector<std::chrono::nanoseconds>              packingDelay;
-    std::vector<std::chrono::nanoseconds>              unpackingDelay;
-    std::vector<std::vector<std::chrono::nanoseconds>> transmissionDelays;
-    std::vector<double>                                bandWidth;
-  };
-
-  std::map<std::uint8_t, TransmissionStat>
-  computeTransmissionStats(std::vector<comm::CommTaskStats> const &stats) const {
-    std::map<std::uint8_t, TransmissionStat> transmissionStats;
-    size_t                                   nbProcesses = communicator_.nbProcesses();
-
-    for (size_t rank = 0; rank < communicator_.nbProcesses(); ++rank) {
-      for (auto recvStorageStat : stats[rank].storageStats) {
-        comm::StorageId   storageId = recvStorageStat.first;
-        comm::StorageInfo recvInfos = recvStorageStat.second;
-        std::uint32_t     source = storageId.source;
-        std::uint8_t      typeId = recvInfos.typeId;
-
-        if (stats[source].storageStats.contains(storageId)) {
-          auto sendInfos = stats[source].storageStats.at(storageId);
-          if (!transmissionStats.contains(typeId)) {
-            transmissionStats.insert({
-                typeId,
-                TransmissionStat{
-                    .packingDelay = {},
-                    .unpackingDelay = {},
-                    .transmissionDelays = std::vector<std::vector<std::chrono::nanoseconds>>(nbProcesses * nbProcesses),
-                    .bandWidth = {},
-                },
-            });
-          }
-          auto delay_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(recvInfos.recvtp - sendInfos.sendtp);
-          transmissionStats.at(typeId).transmissionDelays[source * nbProcesses + rank].push_back(delay_ns);
-          transmissionStats.at(typeId).packingDelay.push_back(sendInfos.packingTime);
-          transmissionStats.at(typeId).unpackingDelay.push_back(recvInfos.unpackingTime);
-          double dataSizeMB = sendInfos.dataSize / (1024. * 1024.);
-          double delay_s = delay_ns.count() / 1'000'000'000.;
-          transmissionStats.at(typeId).bandWidth.push_back(dataSizeMB / delay_s);
-        }
-      }
-    }
-    return transmissionStats;
   }
 
 public:
