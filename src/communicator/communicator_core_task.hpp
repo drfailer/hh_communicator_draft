@@ -218,6 +218,7 @@ private:
       }
       break;
     case PortState::Closing:
+      communicator_.flushRecvQueueAndWarehouse();
       state = PortState::Closed;
       break;
     case PortState::Closed:

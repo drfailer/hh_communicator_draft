@@ -412,7 +412,7 @@ public:
    * that have an associated recv data storage that will store the buffers.
    */
   template <typename ProcessCB>
-  void processRecvOpsQueue(ProcessCB processData, [[maybe_unused]] bool flush = false) {
+  void processRecvOpsQueue(ProcessCB processData) {
     std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
     this->stats_.updateRecvQueuesInfos(this->recvOps_.size(), this->wh_.recvStorage.size());
@@ -433,10 +433,6 @@ public:
       } else {
         it++;
       }
-    }
-
-    if (flush) {
-      flushRecvQueueAndWarehouse();
     }
   }
 
