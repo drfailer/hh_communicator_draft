@@ -76,7 +76,7 @@ struct CommTaskStats {
   CommTaskStats(bool enabled = false)
       : enabled(enabled) {}
 
-  void processSendOpsQueue(size_t nbOps, size_t storageSize) {
+  void updateSendQueuesInfos(size_t nbOps, size_t storageSize) {
     if (!enabled) {
       return;
     }
@@ -85,7 +85,8 @@ struct CommTaskStats {
     this->maxSendStorageSize = std::max(this->maxSendStorageSize, storageSize);
   }
 
-  void createSendStorage(std::vector<std::uint32_t> dests, StorageId storageId, delay_t packingTime, size_t dataSize) {
+  void registerSendTimings(StorageId storageId, std::vector<std::uint32_t> dests, delay_t packingTime,
+                           size_t dataSize) {
     if (!enabled) {
       return;
     }
@@ -100,7 +101,7 @@ struct CommTaskStats {
     }
   }
 
-  void processRecvDataQueue(size_t nbOps) {
+  void updateCreateDataQueueInfos(size_t nbOps) {
     if (!enabled) {
       return;
     }
@@ -108,12 +109,12 @@ struct CommTaskStats {
     this->maxCreateDataQueueSize = std::max(this->maxCreateDataQueueSize, nbOps);
   }
 
-  void postRecv(rank_t rank, StorageId storageId, delay_t unpackingTime, size_t dataSize) {
+  void registerRecvTimings(StorageId storageId, size_t dest, delay_t unpackingTime, size_t dataSize) {
     if (!enabled) {
       return;
     }
     std::lock_guard<std::mutex> lock(this->mutex);
-    this->transmissionStats.addRecv(storageId.source, rank, storageId.typeId, storageId.packageId,
+    this->transmissionStats.addRecv(storageId.source, dest, storageId.typeId, storageId.packageId,
                                     TransmissionInfo{
                                         .tp = std::chrono::system_clock::now(),
                                         .packingTime = unpackingTime,
@@ -121,7 +122,7 @@ struct CommTaskStats {
                                     });
   }
 
-  void processRecvOpsQueue(size_t nbOps, size_t storageSize) {
+  void updateRecvQueuesInfos(size_t nbOps, size_t storageSize) {
     if (!enabled) {
       return;
     }

@@ -248,7 +248,7 @@ public:
   void processSendOpsQueue(ReturnDataCB returnMemory, bool flush = false) {
     std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
-    this->stats_.processSendOpsQueue(this->sendOps_.size(), this->wh_.sendStorage.size());
+    this->stats_.updateSendQueuesInfos(this->sendOps_.size(), this->wh_.sendStorage.size());
 
     do {
       for (auto it = this->sendOps_.begin(); it != this->sendOps_.end();) {
@@ -293,9 +293,9 @@ public:
     };
     StorageId storageId((std::uint64_t)this->rank(), packageId, TM::template idOf<T>());
 
-    this->stats_.createSendStorage(dests, storageId,
-                                   std::chrono::duration_cast<std::chrono::nanoseconds>(tpackingEnd - tpackingStart),
-                                   package.size());
+    this->stats_.registerSendTimings(storageId, dests,
+                                     std::chrono::duration_cast<std::chrono::nanoseconds>(tpackingEnd - tpackingStart),
+                                     package.size());
     return {storageId, storage};
   }
 
@@ -376,7 +376,7 @@ public:
   void processRecvDataQueue(CreateDataCB createData) {
     std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
-    this->stats_.processRecvDataQueue(this->createDataOps_.size());
+    this->stats_.updateCreateDataQueueInfos(this->createDataOps_.size());
 
     for (auto it = this->createDataOps_.begin(); it != this->createDataOps_.end();) {
       if (recvData(*it, createData)) {
@@ -403,9 +403,9 @@ public:
       processData.template operator()<T>(data);
     });
 
-    this->stats_.postRecv(this->service_->rank(), storageId,
-                          std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart),
-                          storage.package.size());
+    this->stats_.registerRecvTimings(
+        storageId, this->service_->rank(),
+        std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart), storage.package.size());
   }
 
   /*
@@ -416,7 +416,7 @@ public:
   void processRecvOpsQueue(ProcessCB processData, [[maybe_unused]] bool flush = false) {
     std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
-    this->stats_.processRecvOpsQueue(this->recvOps_.size(), this->wh_.recvStorage.size());
+    this->stats_.updateRecvQueuesInfos(this->recvOps_.size(), this->wh_.recvStorage.size());
 
     for (auto it = this->recvOps_.begin(); it != this->recvOps_.end();) {
       if (this->service_->requestCompleted(it->request)) {
