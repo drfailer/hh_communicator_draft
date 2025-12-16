@@ -108,7 +108,7 @@ public: // send ////////////////////////////////////////////////////////////////
 
     checkMPI(MPI_Isend(buffer.mem, buffer.len, MPI_BYTE, dest, tag, r.comm, &r.request));
     assert(r.request != NULL);
-    return requestPool_.allocate(r);
+    return requestPool_.allocate(r, __FILE__, __LINE__);
   }
 
 public: // recv ////////////////////////////////////////////////////////////////
@@ -137,7 +137,7 @@ public: // probe ///////////////////////////////////////////////////////////////
                          .flag = 0,
     };
     checkMPI(MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, r.comm, &r.flag, &r.status));
-    return requestPool_.allocate(r);
+    return requestPool_.allocate(r, __FILE__, __LINE__);
   }
 
   Request probe(std::uint8_t channel, std::uint32_t source) override {
@@ -149,7 +149,7 @@ public: // probe ///////////////////////////////////////////////////////////////
                          .flag = 0,
     };
     checkMPI(MPI_Iprobe(source, MPI_ANY_TAG, r.comm, &r.flag, &r.status));
-    return requestPool_.allocate(r);
+    return requestPool_.allocate(r, __FILE__, __LINE__);
   }
 
 public: // requests ////////////////////////////////////////////////////////////
