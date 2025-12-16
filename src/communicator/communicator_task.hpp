@@ -55,7 +55,7 @@ public:
     auto rankIt = std::find(dests.begin(), dests.end(), task_->comm()->service()->rank());
     bool isDataProcessedOnThisRank = false;
 
-    callPreSend(data);
+    callPreSend(data); // call preSend once
     if (rankIt != dests.end()) {
       addResult(data);
       dests.erase(rankIt);
@@ -64,7 +64,9 @@ public:
     if (!dests.empty()) {
       task_->comm()->sendData(dests, data, shouldReturnMemory(data, isDataProcessedOnThisRank));
     } else {
-      // TODO: this is not logic
+      // if the data doesn't need to be sent to another node, call postSend
+      // once. Otherwise, postSend will be called once all the send requests
+      // to all the destinations are completed
       callPostSend(data);
     }
   }
