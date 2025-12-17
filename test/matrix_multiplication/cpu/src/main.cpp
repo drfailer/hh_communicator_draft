@@ -168,7 +168,7 @@ int main(int argc, char **argv) {
 
     timer_report_prec(graph_execution, milliseconds);
     timer_report_prec(create_dot_files, milliseconds);
-    std::cout << "test" << graph.mm->extraPrintingInformation() << std::endl;
+    std::cout << "test" << graph.mm->extraPrintingInformation("\n") << std::endl;
 
     utest_start();
     urun_test(mm_result, A, B, C);
