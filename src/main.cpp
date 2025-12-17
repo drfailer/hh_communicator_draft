@@ -1,6 +1,7 @@
 #include "communicator/service/clh_service.hpp"
 #include "communicator/service/mpi_service.hpp"
 #include "communicator/communicator_task.hpp"
+#include "communicator/send_strategies.hpp"
 #include "log.hpp"
 #include <hedgehog/hedgehog.h>
 #include <iostream>
@@ -30,9 +31,9 @@ struct TestGraph1 : hh::Graph<1, int, int> {
     auto bn0 = std::make_shared<hh::CommunicatorTask<int>>(service);
     auto out = std::make_shared<hh::LambdaTask<1, int, int>>("output", 1);
 
-    b01->template strategy<int>([](auto){ return std::vector<std::uint32_t>({1}); });
-    b02->template strategy<int>([](auto){ return std::vector<std::uint32_t>({2}); });
-    bn0->template strategy<int>([](auto){ return std::vector<std::uint32_t>({0}); });
+    b01->template strategy<int>(hh::comm::strategy::SendTo<int>(1));
+    b02->template strategy<int>(hh::comm::strategy::SendTo<int>(2));
+    bn0->template strategy<int>(hh::comm::strategy::SendTo<int>(0));
 
     // FIXME: the data returns to the memory pool too early
     b01->setMemoryManager(mm);

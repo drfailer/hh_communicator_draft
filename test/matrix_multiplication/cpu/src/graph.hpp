@@ -56,9 +56,9 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         auto copyTileTask = std::make_shared<CopyTileTask>(COPY_TILE_TASK_THREADS);
 
         distributeTask->template strategy<MatrixTile<MT, MatrixId::A>>([NB_PROCESSES, TN](auto tile) {
-            std::vector<std::uint32_t> dests = {(std::uint32_t)(tile->rowIdx * TN % NB_PROCESSES)};
+            std::vector<hh::comm::rank_t> dests = {(hh::comm::rank_t)(tile->rowIdx * TN % NB_PROCESSES)};
             for (size_t colIdx = 1; colIdx < TN; ++colIdx) {
-                std::uint32_t rank = (colIdx + tile->rowIdx * TN) % NB_PROCESSES;
+                hh::comm::rank_t rank = (colIdx + tile->rowIdx * TN) % NB_PROCESSES;
                 if (rank == dests[0]) {
                     break;
                 }
@@ -68,9 +68,9 @@ struct MMGraph : hh::Graph<MMGraphIO> {
             return dests;
         });
         distributeTask->template strategy<MatrixTile<MT, MatrixId::B>>([NB_PROCESSES, TM, TN](auto tile) {
-            std::vector<std::uint32_t> dests = {(std::uint32_t)(tile->colIdx % NB_PROCESSES)};
+            std::vector<hh::comm::rank_t> dests = {(hh::comm::rank_t)(tile->colIdx % NB_PROCESSES)};
             for (size_t rowIdx = 1; rowIdx < TM; ++rowIdx) {
-                std::uint32_t rank = (tile->colIdx + rowIdx * TN) % NB_PROCESSES;
+                hh::comm::rank_t rank = (tile->colIdx + rowIdx * TN) % NB_PROCESSES;
                 if (rank == dests[0]) {
                     break;
                 }
@@ -81,14 +81,14 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         });
         distributeTask->template strategy<MatrixTile<MT, MatrixId::C>>([NB_PROCESSES, TN](auto tile) {
             size_t                     idx = tile->colIdx + tile->rowIdx * TN;
-            std::vector<std::uint32_t> dests = {(std::uint32_t)(idx % NB_PROCESSES)};
+            std::vector<hh::comm::rank_t> dests = {(hh::comm::rank_t)(idx % NB_PROCESSES)};
             logh::infog(logh::IG::DestDB, "DestCB", "C[", tile->rowIdx, ",", tile->colIdx, "] => ", dests);
             return dests;
         });
         distributeTask->setMemoryManager(mm);
 
         gatherTask->template strategy<MatrixTile<MT, MatrixId::C>>(
-            [](auto) { return std::vector<std::uint32_t>({0}); });
+            [](auto) { return std::vector<hh::comm::rank_t>({0}); });
         gatherTask->setMemoryManager(mm);
 
         this->inputs(splitTask);
