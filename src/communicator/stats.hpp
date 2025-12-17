@@ -56,17 +56,18 @@ inline std::pair<double, double> computeAvg(std::vector<double> const &values) {
   }
   double avg = 0;
   double stddev = 0;
+  double nbElements = (double)values.size();
 
   for (double value : values) {
     avg += value;
   }
-  avg /= values.size();
+  avg /= nbElements;
 
   for (double value : values) {
     double diff = value - avg;
     stddev += diff * diff;
   }
-  stddev = std::sqrt(stddev / values.size());
+  stddev = std::sqrt(stddev / nbElements);
   return {avg, stddev};
 }
 
@@ -145,7 +146,7 @@ struct CommTaskStats {
     this->maxSendStorageSize = std::max(this->maxSendStorageSize, storageSize);
   }
 
-  void registerSendTimings(StorageId storageId, std::vector<std::uint32_t> dests, delay_t packingTime,
+  void registerSendTimings(StorageId storageId, std::vector<rank_t> dests, delay_t packingTime,
                            size_t dataSize) {
     if (!enabled) {
       return;
@@ -243,8 +244,8 @@ struct CommTaskStats {
           auto   recvInfo = recvInfos[i];
           auto   sendInfo = sendInfos[i];
           auto   delay_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(recvInfo.tp - sendInfo.tp);
-          double dataSizeMB = sendInfo.dataSize / (1024. * 1024.);
-          double delay_s = delay_ns.count() / 1'000'000'000.;
+          double dataSizeMB = (double)sendInfo.dataSize / (1024. * 1024.);
+          double delay_s = (double)delay_ns.count() / 1'000'000'000.;
 
           transmissionStats.at(id.typeId).packingDelay.push_back(sendInfo.packingTime);
           transmissionStats.at(id.typeId).unpackingDelay.push_back(recvInfo.packingTime);

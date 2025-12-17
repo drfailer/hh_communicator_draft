@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <type_traits>
 #include <variant>
+#include "protocol.hpp"
 
 namespace hh {
 
@@ -12,7 +13,7 @@ namespace comm {
 template <typename T>
 using clean_t = typename std::remove_const_t<std::remove_reference_t<T>>;
 
-using TypeMapIdType = unsigned char;
+using TypeMapIdType = type_id_t;
 
 template <typename T, typename... Ts>
 struct TypeMap {

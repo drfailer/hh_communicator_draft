@@ -10,7 +10,7 @@ namespace hh {
 // /!\ the sender list will not contain ranks that both send and receive
 
 template <typename T>
-using SendStrategy = std::function<std::vector<std::uint32_t>(std::shared_ptr<T>)>;
+using SendStrategy = std::function<std::vector<comm::rank_t>(std::shared_ptr<T>)>;
 
 template <typename TaskType, typename TM, typename Input>
 struct CommunicatorSend : tool::BehaviorMultiExecuteTypeDeducer_t<std::tuple<Input>> {

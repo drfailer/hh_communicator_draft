@@ -1,7 +1,6 @@
 #ifndef COMMUNICATOR_PROTOCOL
 #define COMMUNICATOR_PROTOCOL
 #include "hedgehog/src/tools/meta_functions.h"
-#include "type_map.hpp"
 #include <memory>
 
 namespace hh {
@@ -39,8 +38,8 @@ struct Header {
   buffer_id_t  bufferId;
 
   Header() = default;
-  Header(std::uint64_t source, std::uint64_t signal, std::uint64_t typeId, std::uint64_t channel,
-         std::uint16_t packageId, std::uint64_t bufferId)
+  Header(rank_t source, signal_t signal, type_id_t typeId, channel_t channel,
+         package_id_t packageId, buffer_id_t bufferId)
       : channel(channel),
         source(source),
         signal(signal),

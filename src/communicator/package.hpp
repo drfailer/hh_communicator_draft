@@ -1,6 +1,7 @@
 #ifndef COMMUNICATOR_PACKAGE
 #define COMMUNICATOR_PACKAGE
 #include "protocol.hpp"
+#include "type_map.hpp"
 #include <cstring>
 #include <map>
 #include <memory>

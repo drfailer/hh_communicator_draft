@@ -14,14 +14,14 @@ public:
   virtual ~CommService() = default;
 
 public:
-  virtual void send(Header const header, std::uint32_t dest, Buffer const &buffer) = 0;
-  virtual Request sendAsync(Header const header, std::uint32_t dest, Buffer const &buffer) = 0;
+  virtual void send(Header const header, rank_t dest, Buffer const &buffer) = 0;
+  virtual Request sendAsync(Header const header, rank_t dest, Buffer const &buffer) = 0;
 
   virtual void recv(Request probeRequest, Buffer const &buffer) = 0;
   virtual Request recvAsync(Request probeRequest, Buffer const &buffer) = 0;
 
-  virtual Request probe(std::uint8_t channel) = 0;
-  virtual Request probe(std::uint8_t channel, std::uint32_t source) = 0;
+  virtual Request probe(channel_t channel) = 0;
+  virtual Request probe(channel_t channel, rank_t source) = 0;
 
   virtual bool requestCompleted(Request request) = 0;
   virtual void requestRelease(Request) {}
@@ -32,15 +32,15 @@ public:
 
   virtual void barrier() = 0;
 
-  virtual std::uint32_t rank() const = 0;
+  virtual rank_t rank() const = 0;
   virtual std::uint32_t nbProcesses() const = 0;
 
   bool collectStats() const {
     return collectStats_;
   }
 
-  virtual std::uint64_t newChannel() = 0;
-  virtual std::uint64_t newPackageId(std::uint64_t channel) = 0;
+  virtual channel_t newChannel() = 0;
+  virtual package_id_t newPackageId(channel_t channel) = 0;
 
   std::mutex &mutex() {
       return mutex_;

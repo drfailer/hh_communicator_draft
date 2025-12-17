@@ -100,10 +100,10 @@ public:
     return false;
   }
 
-  void disconnect(std::vector<Connection> &connections, int source, comm::Buffer &buf) {
+  void disconnect(std::vector<Connection> &connections, comm::rank_t source, comm::Buffer &signalBuffre) {
     assert(connections[source].connected == true);
     connections[source].connected = false;
-    std::memcpy(&connections[source].sendCount, &buf.mem[1], sizeof(size_t));
+    std::memcpy(&connections[source].sendCount, &signalBuffre.mem[1], sizeof(size_t));
   }
 
 public:
@@ -194,17 +194,17 @@ private:
   void processOutputPort(PortState &state, std::vector<Connection> &connections) {
     comm::Signal signal = comm::Signal::None;
     comm::Header header = {0, 0, 0, 0, 0, 0};
-    char         bufMem[100] = {0};
-    comm::Buffer buf{bufMem, 100};
+    char         signalBufferMem[100] = {0};
+    comm::Buffer signalBuffre{signalBufferMem, 100};
     switch (state) {
     case PortState::Opened:
-      communicator_.recvSignal(signal, header, buf);
+      communicator_.recvSignal(signal, header, signalBuffre);
 
       switch (signal) {
       case comm::Signal::None:
         break;
       case comm::Signal::Disconnect:
-        disconnect(connections, header.source, buf);
+        disconnect(connections, header.source, signalBuffre);
         break;
       case comm::Signal::Data:
         ++connections[header.source].recvCount;

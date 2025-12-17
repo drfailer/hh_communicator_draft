@@ -45,7 +45,7 @@ private:
   };
 
 public:
-  std::uint8_t channel() const {
+  channel_t channel() const {
     return channel_;
   }
 
@@ -61,7 +61,7 @@ public:
     return packagesCount_;
   }
 
-  std::uint32_t rank() const {
+  rank_t rank() const {
     return this->service_->rank();
   }
 
@@ -107,7 +107,7 @@ public:
   /*
    * Send a signal to the given destinations.
    */
-  void sendSignal(std::vector<std::uint32_t> const &dests, Signal signal) {
+  void sendSignal(std::vector<rank_t> const &dests, Signal signal) {
     Header        header(this->rank(), 1, 0, this->channel_, 0, 0);
     char          buf[100] = {(char)signal};
     std::uint64_t len = 1;
@@ -122,7 +122,7 @@ public:
    * Send data to the given destinations.
    */
   template <typename T>
-  void sendData(std::vector<std::uint32_t> const &dests, std::shared_ptr<T> data, bool returnMemory = true) {
+  void sendData(std::vector<rank_t> const &dests, std::shared_ptr<T> data, bool returnMemory = true) {
     auto [storageId, storage] = createSendStorage(dests, data, returnMemory);
     Header header(this->rank(), 0, storageId.typeId, this->channel_, storageId.packageId, 0);
 
@@ -154,7 +154,7 @@ public:
    * signal, then receive the signal, otherwise, add a pending recv data request
    * to the queue.
    */
-  void recvSignal(Signal &signal, Header &header, Buffer &buf) {
+  void recvSignal(Signal &signal, Header &header, Buffer &signalBuffer) {
     Request request = this->service_->probe(this->channel_);
 
     signal = Signal::None;
@@ -172,8 +172,8 @@ public:
         });
         signal = Signal::Data;
       } else {
-        this->service_->recv(request, buf);
-        signal = (Signal)buf.mem[0];
+        this->service_->recv(request, signalBuffer);
+        signal = (Signal)signalBuffer.mem[0];
       }
       assert(header.source < this->nbProcesses());
       infog(logh::IG::Comm, "comm", "recvSignal -> ", " source = ", header.source, " signal = ", (int)signal);
@@ -272,9 +272,9 @@ public:
   }
 
   template <typename T>
-  std::pair<StorageId, PackageStorage<TM>> createSendStorage(std::vector<std::uint32_t> const &dests,
+  std::pair<StorageId, PackageStorage<TM>> createSendStorage(std::vector<rank_t> const &dests,
                                                              std::shared_ptr<T> data, bool returnMemory) {
-    std::uint16_t packageId = this->service_->newPackageId(this->channel_);
+    package_id_t packageId = this->service_->newPackageId(this->channel_);
 
     // measure data packing time
     time_t  tpackingStart = std::chrono::system_clock::now();
@@ -472,7 +472,7 @@ public:
     stats[0].maxCreateDataQueueSize = this->stats_.maxCreateDataQueueSize;
     stats[0].maxSendStorageSize = this->stats_.maxSendStorageSize;
     stats[0].maxRecvStorageSize = this->stats_.maxRecvStorageSize;
-    for (std::uint32_t i = 1; i < this->nbProcesses(); ++i) {
+    for (rank_t i = 1; i < this->nbProcesses(); ++i) {
       Request request = this->service_->probe(this->channel_, i);
       while (!this->service_->probeSuccess(request)) {
         this->service_->requestRelease(request);
@@ -495,7 +495,7 @@ public:
 
 private:
   CommService *service_ = nullptr;
-  std::uint8_t channel_ = 0;
+  channel_t channel_ = 0;
 
   // queues
   std::vector<CommOperation>    sendOps_;
