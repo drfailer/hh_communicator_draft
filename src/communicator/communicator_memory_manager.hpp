@@ -2,7 +2,9 @@
 #define COMMUNICATOR_COMMUNICATOR_MEMORY_MANAGER
 #include "../log.hpp"
 #include "hedgehog/src/tools/meta_functions.h"
+#include "stats.hpp"
 #include <cassert>
+#include <chrono>
 #include <condition_variable>
 #include <map>
 #include <memory>
@@ -38,9 +40,13 @@ struct SingleTypeMemoryPool {
   std::map<std::shared_ptr<T>, UsedMemory> usedMemory;
   std::mutex                               mutex;
   std::condition_variable                  cv;
-  size_t                                   preallocatedSize;
-  size_t                                   nbGetMemory;
-  size_t                                   nbReturnMemory;
+  struct {
+    size_t                   preallocatedSize;
+    size_t                   nbGetMemory;
+    size_t                   nbReturnMemory;
+    size_t                   waitCount;
+    std::chrono::nanoseconds waitTime;
+  } stats;
 
   ~SingleTypeMemoryPool() {
     if (usedMemory.size() > 0) {
@@ -59,11 +65,13 @@ struct SingleTypeMemoryPool {
 
     if (memory.empty()) {
       switch (allocMode) {
-      case MemoryPoolAllocMode::Wait:
-        logh::warn("waiting for memory pool: ", std::string(typeToStr<T>()));
+      case MemoryPoolAllocMode::Wait: {
+        ++this->stats.waitCount;
+        auto wts = std::chrono::system_clock::now();
         cv.wait(poolLock, [&]() { return !memory.empty(); });
-        logh::warn("end waiting for memory pool: ", std::string(typeToStr<T>()));
-        break;
+        auto wte = std::chrono::system_clock::now();
+        this->stats.waitTime += std::chrono::duration_cast<std::chrono::nanoseconds>(wte - wts);
+      } break;
       case MemoryPoolAllocMode::Dynamic:
         if constexpr (std::is_default_constructible_v<T>) {
           memory.push_back(std::make_shared<T>());
@@ -78,7 +86,7 @@ struct SingleTypeMemoryPool {
         break;
       }
     }
-    ++nbGetMemory;
+    ++this->stats.nbGetMemory;
     auto data = memory.back();
     memory.pop_back();
     assert(!usedMemory.contains(data) && "allocating the same memory multiple times.");
@@ -109,7 +117,7 @@ struct SingleTypeMemoryPool {
     if constexpr (requires { data->cleanMemory(); }) {
       data->cleanMemory();
     }
-    ++nbReturnMemory;
+    ++this->stats.nbReturnMemory;
     memory.push_back(data);
     cv.notify_all();
     usedMemory.erase(data);
@@ -118,7 +126,7 @@ struct SingleTypeMemoryPool {
 
   void fill(size_t size, auto &&...args) {
     std::lock_guard<std::mutex> poolLock(mutex);
-    preallocatedSize = size;
+    this->stats.preallocatedSize = size;
     memory.resize(size, nullptr);
     for (auto &data : memory) {
       data = std::make_shared<T>(std::forward<decltype(args)>(args)...);
@@ -127,9 +135,11 @@ struct SingleTypeMemoryPool {
 
   std::string extraPrintingInformation() const {
     std::string typeStr = hh::tool::typeToStr<T>();
-    return "MemoryPool[" + typeStr + "]: { " + "preallocatedSize = " + std::to_string(preallocatedSize)
-           + ", nbGetMemory = " + std::to_string(nbGetMemory) + ", nbReturnMemory = " + std::to_string(nbReturnMemory)
-           + ", poolSize = " + std::to_string(memory.size()) + " }";
+    return "MemoryPool[" + typeStr + "]: { " + "default size = " + std::to_string(this->stats.preallocatedSize)
+           + ", number gets = " + std::to_string(this->stats.nbGetMemory) + ", number returns = "
+           + std::to_string(this->stats.nbReturnMemory) + ", pool size = " + std::to_string(memory.size())
+           + ", wait time = " + comm::durationToString(this->stats.waitTime)
+           + ", wait count = " + std::to_string(this->stats.waitCount) + " }";
   }
 };
 

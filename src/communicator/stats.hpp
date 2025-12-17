@@ -10,6 +10,66 @@ namespace hh {
 
 namespace comm {
 
+inline std::string durationToString(std::chrono::nanoseconds const &ns) {
+  std::ostringstream oss;
+
+  // Cast with precision loss
+  auto s = std::chrono::duration_cast<std::chrono::seconds>(ns);
+  auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(ns);
+  auto us = std::chrono::duration_cast<std::chrono::microseconds>(ns);
+
+  if (s > std::chrono::seconds::zero()) {
+    oss << s.count() << "." << std::setfill('0') << std::setw(3) << (ms - s).count() << "s";
+  } else if (ms > std::chrono::milliseconds::zero()) {
+    oss << ms.count() << "." << std::setfill('0') << std::setw(3) << (us - ms).count() << "ms";
+  } else if (us > std::chrono::microseconds::zero()) {
+    oss << us.count() << "." << std::setfill('0') << std::setw(3) << (ns - us).count() << "us";
+  } else {
+    oss << ns.count() << "ns";
+  }
+  return oss.str();
+}
+
+inline std::pair<std::chrono::nanoseconds, std::chrono::nanoseconds>
+computeAvgDuration(std::vector<std::chrono::nanoseconds> nss) {
+  if (nss.size() == 0) {
+    return {std::chrono::nanoseconds::zero(), std::chrono::nanoseconds::zero()};
+  }
+  std::chrono::nanoseconds sum = std::chrono::nanoseconds::zero(), mean = std::chrono::nanoseconds::zero();
+  double                   sd = 0;
+
+  for (auto ns : nss) {
+    sum += ns;
+  }
+  mean = sum / (nss.size());
+
+  for (auto ns : nss) {
+    auto diff = (double)(ns.count() - mean.count());
+    sd += diff * diff;
+  }
+  return {mean, std::chrono::nanoseconds((int64_t)std::sqrt(sd / (double)nss.size()))};
+}
+
+inline std::pair<double, double> computeAvg(std::vector<double> const &values) {
+  if (values.size() == 0) {
+    return {0, 0};
+  }
+  double avg = 0;
+  double stddev = 0;
+
+  for (double value : values) {
+    avg += value;
+  }
+  avg /= values.size();
+
+  for (double value : values) {
+    double diff = value - avg;
+    stddev += diff * diff;
+  }
+  stddev = std::sqrt(stddev / values.size());
+  return {avg, stddev};
+}
+
 // Stats container /////////////////////////////////////////////////////////////
 
 using time_t = std::chrono::time_point<std::chrono::system_clock>;
@@ -147,66 +207,6 @@ struct CommTaskStats {
 
   // static function for computing stats summary ///////////////////////////////
 
-  static std::string durationPrinter(std::chrono::nanoseconds const &ns) {
-    std::ostringstream oss;
-
-    // Cast with precision loss
-    auto s = std::chrono::duration_cast<std::chrono::seconds>(ns);
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(ns);
-    auto us = std::chrono::duration_cast<std::chrono::microseconds>(ns);
-
-    if (s > std::chrono::seconds::zero()) {
-      oss << s.count() << "." << std::setfill('0') << std::setw(3) << (ms - s).count() << "s";
-    } else if (ms > std::chrono::milliseconds::zero()) {
-      oss << ms.count() << "." << std::setfill('0') << std::setw(3) << (us - ms).count() << "ms";
-    } else if (us > std::chrono::microseconds::zero()) {
-      oss << us.count() << "." << std::setfill('0') << std::setw(3) << (ns - us).count() << "us";
-    } else {
-      oss << ns.count() << "ns";
-    }
-    return oss.str();
-  }
-
-  static std::pair<std::chrono::nanoseconds, std::chrono::nanoseconds>
-  computeAvgDuration(std::vector<std::chrono::nanoseconds> nss) {
-    if (nss.size() == 0) {
-      return {std::chrono::nanoseconds::zero(), std::chrono::nanoseconds::zero()};
-    }
-    std::chrono::nanoseconds sum = std::chrono::nanoseconds::zero(), mean = std::chrono::nanoseconds::zero();
-    double                   sd = 0;
-
-    for (auto ns : nss) {
-      sum += ns;
-    }
-    mean = sum / (nss.size());
-
-    for (auto ns : nss) {
-      auto diff = (double)(ns.count() - mean.count());
-      sd += diff * diff;
-    }
-    return {mean, std::chrono::nanoseconds((int64_t)std::sqrt(sd / (double)nss.size()))};
-  }
-
-  static std::pair<double, double> computeAvg(std::vector<double> const &values) {
-    if (values.size() == 0) {
-      return {0, 0};
-    }
-    double avg = 0;
-    double stddev = 0;
-
-    for (double value : values) {
-      avg += value;
-    }
-    avg /= values.size();
-
-    for (double value : values) {
-      double diff = value - avg;
-      stddev += diff * diff;
-    }
-    stddev = std::sqrt(stddev / values.size());
-    return {avg, stddev};
-  }
-
   struct TransmissionPerfs {
     std::vector<std::chrono::nanoseconds>              packingDelay;
     std::vector<std::chrono::nanoseconds>              unpackingDelay;
@@ -265,7 +265,7 @@ struct CommTaskStats {
             oss << avg.first << " +- " << avg.second;
           } else if constexpr (std::is_same_v<decltype(args), std::vector<std::chrono::nanoseconds> const &>) {
             auto avg = computeAvgDuration(args);
-            oss << durationPrinter(avg.first) << " +- " << durationPrinter(avg.second);
+            oss << durationToString(avg.first) << " +- " << durationToString(avg.second);
           } else {
             oss << args;
           }
