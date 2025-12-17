@@ -41,7 +41,7 @@ public:
 
   bool shouldReturnMemory(std::shared_ptr<Input> data, bool isDataProcessedOnThisRank) {
     if constexpr (requires { data->canBeRecycled(); }) {
-      return data->canBeRecycled();
+      return true;
     } else {
       return !isDataProcessedOnThisRank;
     }
