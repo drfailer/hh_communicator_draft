@@ -2,6 +2,7 @@
 #define COMMUNICATOR_COMMUNICATOR_MEMORY_MANAGER
 #include "../log.hpp"
 #include "hedgehog/src/tools/meta_functions.h"
+#include <cassert>
 #include <condition_variable>
 #include <map>
 #include <memory>
@@ -9,7 +10,6 @@
 #include <source_location>
 #include <tuple>
 #include <vector>
-#include <cassert>
 
 namespace hh {
 
@@ -44,10 +44,12 @@ struct SingleTypeMemoryPool {
 
   ~SingleTypeMemoryPool() {
     if (usedMemory.size() > 0) {
-      logh::error("Memory not returned to pool (type = ", std::string(typeToStr<T>()), ").");
+      logh::error(usedMemory.size(), " elements of type `", std::string(typeToStr<T>()),
+                  "' were not returned to the pool.");
       for (auto um : usedMemory) {
         auto loc = um.second.loc;
-        logh::error("Memory allocated at ", loc.file_name(), ":", loc.line(), " was not returned to the pool.");
+        logh::error("Memory allocated at (", loc.file_name(), ":", loc.line(),
+                    ") was not returned to the pool (type = `", std::string(typeToStr<T>()), "').");
       }
     }
   }
@@ -183,17 +185,17 @@ struct MemoryPool {
     return mm;
   }
 
-  std::string extraPrintingInformation() const {
-    std::string infos = "MemoryManager: {\\l";
+  std::string extraPrintingInformation(std::string const &eol = "\\l") const {
+    std::string infos = "MemoryManager: {" + eol;
     (
         [&] {
           auto pool = this->template pool<Types>();
           if (pool) {
-            infos.append("    " + pool->extraPrintingInformation() + "\\l");
+            infos.append("    " + pool->extraPrintingInformation() + eol);
           }
         }(),
         ...);
-    return infos + "}\\l";
+    return infos + "}" + eol;
   }
 };
 
