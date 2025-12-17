@@ -11,7 +11,16 @@ std::mutex stdout_mutex;
 struct TestGraph1 : hh::Graph<1, int, int> {
   hh::comm::CommService *communicator_;
 
-  TestGraph1(hh::comm::CommService *service) : hh::Graph<1, int, int>("TestGraph1"), communicator_(service) {
+  /*
+   * Running this program should return a memory error. In this graph, the input
+   * task gives the data to two communicator task and each will try to return
+   * the momory to the pool (mm). This specific use case would normally require
+   * creating a custom type that implements some of the memory manager related
+   * functions to avoid the double free.
+   */
+
+  TestGraph1(hh::comm::CommService *service, std::shared_ptr<hh::tool::MemoryPool<int>> mm)
+      : hh::Graph<1, int, int>("TestGraph1"), communicator_(service) {
     assert(service->nbProcesses() == 3);
     auto in = std::make_shared<hh::LambdaTask<1, int, int>>("input", 1);
     auto b01 = std::make_shared<hh::CommunicatorTask<int>>(service);
@@ -20,9 +29,6 @@ struct TestGraph1 : hh::Graph<1, int, int> {
     auto frgn2 = std::make_shared<hh::LambdaTask<1, int, int>>("foreign task", 1);
     auto bn0 = std::make_shared<hh::CommunicatorTask<int>>(service);
     auto out = std::make_shared<hh::LambdaTask<1, int, int>>("output", 1);
-
-    auto mm = std::make_shared<hh::tool::MemoryPool<int>>();
-    mm->template fill<int>(5);
 
     b01->template strategy<int>([](auto){ return std::vector<std::uint32_t>({1}); });
     b02->template strategy<int>([](auto){ return std::vector<std::uint32_t>({2}); });
@@ -34,24 +40,28 @@ struct TestGraph1 : hh::Graph<1, int, int> {
     bn0->setMemoryManager(mm);
 
     in->setLambda<int>([service](std::shared_ptr<int> data, auto self) {
-      auto output = std::make_shared<int>(*data + 1);
-      hh::logh::log(stdout, "[", service->rank(), "][in]: input = ", *data, ", output = ", *output);
-      self.addResult(output);
+      int output = *data + 1;
+      hh::logh::log(stdout, "[", service->rank(), "][in]: input = ", *data, ", output = ", output);
+      *data += 1;
+      self.addResult(data);
     });
     frgn1->setLambda<int>([service](std::shared_ptr<int> data, auto self) {
-      auto output = std::make_shared<int>(*data + 1);
-      hh::logh::log(stdout, "[", service->rank(), "][frng1]: input = ", *data, ", output = ", *output);
-      self.addResult(output);
+      int output = *data + 1;
+      hh::logh::log(stdout, "[", service->rank(), "][frng1]: input = ", *data, ", output = ", output);
+      *data += 1;
+      self.addResult(data);
     });
     frgn2->setLambda<int>([service](std::shared_ptr<int> data, auto self) {
-      auto output = std::make_shared<int>(*data * 2);
-      hh::logh::log(stdout, "[", service->rank(), "][frng2]: input = ", *data, ", output = ", *output);
-      self.addResult(output);
+      int output = *data * 2;
+      hh::logh::log(stdout, "[", service->rank(), "][frng2]: input = ", *data, ", output = ", output);
+      *data *= 2;
+      self.addResult(data);
     });
     out->setLambda<int>([service](std::shared_ptr<int> data, auto self) {
-      auto output = std::make_shared<int>(*data + 1);
-      hh::logh::log(stdout, "[", service->rank(), "][out]: input = ", *data, ", output = ", *output);
-      self.addResult(output);
+      int output = *data + 1;
+      hh::logh::log(stdout, "[", service->rank(), "][out]: input = ", *data, ", output = ", output);
+      *data += 1;
+      self.addResult(data);
     });
 
     this->inputs(in);
@@ -77,20 +87,29 @@ int main(int argc, char **argv) {
   // hh::comm::CommService *service = new hh::comm::CLHService(true);
   hh::comm::CommService *service = new hh::comm::MPIService(&argc, &argv, true);
 
-  auto data = std::make_shared<int>(4);
-  TestGraph1 graph(service);
+  auto mm = std::make_shared<hh::tool::MemoryPool<int>>();
+  mm->template fill<int>(5);
+
+  // auto data = std::make_shared<int>(4);
+  TestGraph1 graph(service, mm);
   std::vector<std::uint32_t> results;
 
   std::cout << "rank = " << service->rank() << std::endl;
 
   graph.executeGraph(true);
-  graph.pushData(data);
+  if (service->rank() == 0) {
+      auto data = mm->template getMemory<int>();
+      *data = 4;
+      graph.pushData(data);
+  }
   service->barrier();
   graph.finishPushingData();
 
   if (service->rank() == 0) {
     while (auto result = graph.getBlockingResult()) {
-      results.push_back(*std::get<std::shared_ptr<int>>(*result));
+      auto resultPtr = std::get<std::shared_ptr<int>>(*result);
+      results.push_back(*resultPtr);
+      mm->template returnMemory<int>(std::move(resultPtr));
     }
   }
 

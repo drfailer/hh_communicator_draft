@@ -95,6 +95,8 @@ struct SingleTypeMemoryPool {
                     loc.line(), ").");
         return false;
       }
+      // in that case, we consider that the data has been allocated manually
+      // and can be used to extend the pool.
     }
     if constexpr (requires { data->postProcess(); }) {
       data->postProcess();
