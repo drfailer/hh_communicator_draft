@@ -33,7 +33,7 @@ ProductState::ProductState(std::shared_ptr<MMType> mm, size_t M, size_t N, size_
 }
 
 std::shared_ptr<MatrixTile<MT, MatrixId::P>> ProductState::getPAndUpdateCount(auto a, auto b) {
-    auto p = mm->template getMemory<MatrixTile<MT, MatrixId::P>>();
+    auto p = mm->template getMemory<MatrixTile<MT, MatrixId::P>>(hh::tool::MemoryPoolAllocMode::Wait);
     p->rows = a->rows;
     p->cols = b->cols;
     p->processCount = 1;
