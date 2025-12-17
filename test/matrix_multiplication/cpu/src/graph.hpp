@@ -6,6 +6,7 @@
 #include "task.hpp"
 #include <cblas.h>
 #include <communicator/communicator_task.hpp>
+#include <communicator/send_strategies.hpp>
 #include <hedgehog/hedgehog.h>
 #include <vector>
 
@@ -80,7 +81,7 @@ struct MMGraph : hh::Graph<MMGraphIO> {
             return dests;
         });
         distributeTask->template strategy<MatrixTile<MT, MatrixId::C>>([NB_PROCESSES, TN](auto tile) {
-            size_t                     idx = tile->colIdx + tile->rowIdx * TN;
+            size_t                        idx = tile->colIdx + tile->rowIdx * TN;
             std::vector<hh::comm::rank_t> dests = {(hh::comm::rank_t)(idx % NB_PROCESSES)};
             logh::infog(logh::IG::DestDB, "DestCB", "C[", tile->rowIdx, ",", tile->colIdx, "] => ", dests);
             return dests;
@@ -88,7 +89,7 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         distributeTask->setMemoryManager(mm);
 
         gatherTask->template strategy<MatrixTile<MT, MatrixId::C>>(
-            [](auto) { return std::vector<hh::comm::rank_t>({0}); });
+            hh::comm::strategy::Gather<MatrixTile<MT, MatrixId::C>>(0));
         gatherTask->setMemoryManager(mm);
 
         this->inputs(splitTask);
