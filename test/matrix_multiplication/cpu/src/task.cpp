@@ -12,7 +12,7 @@ void SplitTask::split(std::shared_ptr<Matrix<MT, Id>> matrix) {
 
     for (size_t row = 0; row < nbTileRow; ++row) {
         for (size_t col = 0; col < nbTileCol; ++col) {
-            auto tile = mm->template getMemory<MatrixTile<MT, Id>>();
+            auto tile = mm->template getMemory<MatrixTile<MT, Id>>(hh::tool::MemoryPoolAllocMode::Wait);
             // auto tile = std::make_shared<MatrixTile<MT, Id>>(tileSize);
 
             tile->rows = std::min(tileSize, matrix->rows - row * tileSize);
@@ -50,11 +50,13 @@ void ProductTask::execute(std::shared_ptr<ProductData<MT>> data) {
     //             a->colIdx, "] x B[", b->rowIdx, ",", b->colIdx, "]");
 
     if constexpr (std::is_same_v<MT, float>) {
-        cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, a->rows, b->cols, a->cols, 1.f, (const float *)a->mem,
-                    a->ld, (const float *)b->mem, b->ld, 0, (float *)p->mem, p->ld);
+        cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, (blasint)a->rows, (blasint)b->cols, (blasint)a->cols,
+                    1.f, (const float *)a->mem, (blasint)a->ld, (const float *)b->mem, (blasint)b->ld, 0,
+                    (float *)p->mem, (blasint)p->ld);
     } else if constexpr (std::is_same_v<MT, double>) {
-        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, a->rows, b->cols, a->cols, 1.f, (const double *)a->mem,
-                    a->ld, (const double *)b->mem, b->ld, 0, (double *)p->mem, p->ld);
+        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, (blasint)a->rows, (blasint)b->cols, (blasint)a->cols,
+                    1.f, (const double *)a->mem, (blasint)a->ld, (const double *)b->mem, (blasint)b->ld, 0,
+                    (double *)p->mem, (blasint)p->ld);
     } else {
         logh::error("should not use the default implementation");
         for (size_t row = 0; row < p->rows; ++row) {

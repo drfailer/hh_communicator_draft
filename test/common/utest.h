@@ -109,8 +109,8 @@ inline int assert_equal_(std::string const &group, auto const &found,
     return 0;
 }
 
-inline int assert_float_equal_(std::string const &group, float found,
-                               float expect, float prec,
+inline int assert_float_equal_(std::string const &group, auto found,
+                               auto expect, auto prec,
                                std::string const &lhs_str,
                                std::string const &rhs_str,
                                std::string const &filename, size_t line) {

@@ -1,12 +1,12 @@
 #include "../../../common/ap.h"
 #include "../../../common/timer.h"
 #include "../../../common/utest.h"
-#include "../../../../src/communicator/service/clh_service.hpp"
-#include "../../../../src/communicator/service/mpi_service.hpp"
 #include "graph.hpp"
 #include <cblas.h>
+#include <communicator/service/clh_service.hpp>
+#include <communicator/service/mpi_service.hpp>
 
-int GLOBAL_RANK = 0;
+hh::comm::rank_t GLOBAL_RANK = 0;
 
 template <MatrixId Id>
 std::shared_ptr<Matrix<MT, Id>> createMatrix(size_t cols, size_t rows) {
@@ -69,36 +69,33 @@ Config parseArgs(int argc, char **argv) {
     return config;
 }
 
-UTest(mm_result, std::shared_ptr<Matrix<MT, MatrixId::A>> A, std::shared_ptr<Matrix<MT, MatrixId::B>> B,
-      std::shared_ptr<Matrix<MT, MatrixId::C>> C) {
-    Matrix<MT, MatrixId::C> expected(C->rows, C->cols);
-    size_t                  M = C->rows;
-    size_t                  N = C->cols;
-    size_t                  K = A->cols;
-
-    // int nbProcesses = -1;
-    // MPI_Comm_size(MPI_COMM_WORLD, &nbProcesses);
-    openblas_set_num_threads_local(20);
+void matmul(std::shared_ptr<Matrix<MT, MatrixId::A>> A, std::shared_ptr<Matrix<MT, MatrixId::B>> B,
+            std::shared_ptr<Matrix<MT, MatrixId::C>> C) {
+    blasint M = (blasint)C->rows;
+    blasint N = (blasint)C->cols;
+    blasint K = (blasint)A->cols;
 
     if constexpr (std::is_same_v<MT, float>) {
-        cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, M, N, K, 1.f, (const float *)A->mem, A->ld,
-                    (const float *)B->mem, B->ld, 0, (float *)expected.mem, C->ld);
+        cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, M, N, K, 1.f, (const float *)A->mem, (blasint)A->ld,
+                    (const float *)B->mem, (blasint)B->ld, 0, (float *)C->mem, (blasint)C->ld);
     } else if constexpr (std::is_same_v<MT, double>) {
         timer_start(cblas);
-        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, M, N, K, 1.f, (const double *)A->mem, A->ld,
-                    (const double *)B->mem, B->ld, 0, (double *)expected.mem, C->ld);
+        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, M, N, K, 1.f, (const double *)A->mem, (blasint)A->ld,
+                    (const double *)B->mem, (blasint)B->ld, 0, (double *)C->mem, (blasint)C->ld);
         timer_end(cblas);
         timer_report_prec(cblas, milliseconds);
     } else {
         TODO("unsuported type for test");
     }
+}
 
+UTest(mm_result, std::shared_ptr<Matrix<MT, MatrixId::C>> C, std::shared_ptr<Matrix<MT, MatrixId::C>> E) {
     for (size_t row = 0; row < C->rows; ++row) {
         for (size_t col = 0; col < C->cols; ++col) {
-            MT eval = expected.mem[col + row * C->ld];
+            MT eval = E->mem[col + row * C->ld];
             MT fval = C->mem[col + row * C->ld];
             if constexpr (std::is_floating_point_v<MT>) {
-                uassert_float_equal(fval, eval, 1e-6);
+                uassert_float_equal(fval, eval, (MT)1e-6);
             } else {
                 uassert_equal(fval, eval);
             }
@@ -118,12 +115,15 @@ int main(int argc, char **argv) {
     std::shared_ptr<Matrix<MT, MatrixId::A>> A = nullptr;
     std::shared_ptr<Matrix<MT, MatrixId::B>> B = nullptr;
     std::shared_ptr<Matrix<MT, MatrixId::C>> C = nullptr;
+    std::shared_ptr<Matrix<MT, MatrixId::C>> E = nullptr;
 
     if (service->rank() == 0) {
         A = createMatrix<MatrixId::A>(config.M, config.K);
         B = createMatrix<MatrixId::B>(config.K, config.N);
         C = createMatrix<MatrixId::C>(config.M, config.N);
+        E = createMatrix<MatrixId::C>(config.M, config.N);
         std::memset(C->mem, 0, sizeof(MT) * C->rows * C->cols);
+        matmul(A, B, E);
     }
 
     MMGraph graph(service, config.M, config.N, config.K, config.tileSize, config.poolSize, config.threads);
@@ -168,10 +168,10 @@ int main(int argc, char **argv) {
 
     timer_report_prec(graph_execution, milliseconds);
     timer_report_prec(create_dot_files, milliseconds);
-    std::cout << "test" << graph.mm->extraPrintingInformation() << std::endl;
+    std::cout << "test" << graph.mm->extraPrintingInformation("\n") << std::endl;
 
     utest_start();
-    urun_test(mm_result, A, B, C);
+    urun_test(mm_result, C, E);
     utest_end();
 
     return 0;

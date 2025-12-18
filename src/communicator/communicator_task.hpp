@@ -9,22 +9,15 @@ namespace hh {
 
 // /!\ the sender list will not contain ranks that both send and receive
 
-struct CommunicatorTaskOpt {
-  bool sendersAreReceivers = false; // also transmit the data to the current node
-  bool scatter = true; // scatter the data between receivers, or send the same data to all
-};
-
 template <typename T>
-using DestCBType = std::function<std::vector<std::uint32_t>(std::shared_ptr<T>)>;
+using SendStrategy = std::function<std::vector<comm::rank_t>(std::shared_ptr<T>)>;
 
 template <typename TaskType, typename TM, typename Input>
 struct CommunicatorSend : tool::BehaviorMultiExecuteTypeDeducer_t<std::tuple<Input>> {
 private:
   size_t                     rankIdx_ = 0;
   TaskType                  *task_ = nullptr;
-  bool                       isReceiver_ = false;
-  std::vector<std::uint32_t> receivers_;
-  DestCBType<Input>          destCB_ = nullptr;
+  SendStrategy<Input>          strategy_ = nullptr;
 
 public:
   CommunicatorSend(TaskType *task)
@@ -47,7 +40,6 @@ public:
   }
 
   bool shouldReturnMemory(std::shared_ptr<Input> data, bool isDataProcessedOnThisRank) {
-    // FIXME: we consider that canBeRecycled is always correct?
     if constexpr (requires { data->canBeRecycled(); }) {
       return true;
     } else {
@@ -57,35 +49,13 @@ public:
 
   void execute(std::shared_ptr<Input> data) override {
     logh::infog(logh::IG::CommunicatorTaskExecute, "communicator task execute", "[", (int)task_->comm()->channel(),
-                "]: rank = ", task_->comm()->service()->rank(), ", isReceiver_ = ", isReceiver_);
+                "]: rank = ", task_->comm()->service()->rank());
 
-    /*
-     * The CommunicatorTask has the following behavior:
-     * - if the rank is a receiver, then just transmit input data (we stay on one node)
-     * - if the rank is a sender:
-     *   - if the destCB_ has been specified, use it to know the destination ranks
-     *   - else if scatter then scatter the data between the receivers (and optionally the current rank)
-     *   - else, send the data to all the receivers (and optionally the current rank)
-     */
-    if (isReceiver_) {
-      addResult(data);
-    } else {
-      callPreSend(data);
-      if (destCB_) {
-        sendWithDestCB(data);
-      } else if (task_->options().scatter) {
-        sendScatter(data);
-      } else {
-        sendDistribute(data);
-      }
-    }
-  }
-
-  void sendWithDestCB(std::shared_ptr<Input> data) {
-    auto dests = destCB_(data);
+    auto dests = strategy_(data);
     auto rankIt = std::find(dests.begin(), dests.end(), task_->comm()->service()->rank());
     bool isDataProcessedOnThisRank = false;
 
+    callPreSend(data); // call preSend once
     if (rankIt != dests.end()) {
       addResult(data);
       dests.erase(rankIt);
@@ -94,46 +64,17 @@ public:
     if (!dests.empty()) {
       task_->comm()->sendData(dests, data, shouldReturnMemory(data, isDataProcessedOnThisRank));
     } else {
+      // if the data doesn't need to be sent to another node, call postSend
+      // once. Otherwise, postSend will be called once all the send requests
+      // to all the destinations are completed
       callPostSend(data);
     }
   }
 
-  void sendScatter(std::shared_ptr<Input> data) {
-    std::uint32_t receiver = receivers_[rankIdx_];
+  void initialize() {}
 
-    rankIdx_ = (rankIdx_ + 1) % receivers_.size();
-    if (receiver == task_->comm()->service()->rank()) {
-      addResult(data);
-      callPostSend(data);
-    } else {
-      task_->comm()->sendData({receiver}, data, shouldReturnMemory(data, false));
-    }
-  }
-
-  void sendDistribute(std::shared_ptr<Input> data) {
-    bool isDataProcessedOnThisRank = false;
-
-    if (task_->options().sendersAreReceivers) {
-      addResult(data);
-      isDataProcessedOnThisRank = true;
-    }
-    if (!receivers_.empty()) {
-      task_->comm()->sendData(receivers_, data, shouldReturnMemory(data, isDataProcessedOnThisRank));
-    } else {
-      callPostSend(data);
-    }
-  }
-
-  void initialize() {
-    receivers_ = task_->comm()->receivers();
-    isReceiver_ = std::find(receivers_.begin(), receivers_.end(), task_->comm()->service()->rank()) != receivers_.end();
-    if (!isReceiver_ && task_->options().sendersAreReceivers && task_->options().scatter) {
-      receivers_.push_back(task_->comm()->service()->rank());
-    }
-  }
-
-  void destCB(DestCBType<Input> cb) {
-    destCB_ = cb;
+  void strategy(SendStrategy<Input> cb) {
+    strategy_ = cb;
   }
 };
 
@@ -146,8 +87,8 @@ struct CommunicatorMultiSend<TaskType, TM, std::tuple<Inputs...>> : Communicator
       : CommunicatorSend<TaskType, TM, Inputs>(task)... {}
 
   template <typename Input>
-  void destCB(DestCBType<Input> cb) {
-    ((CommunicatorSend<TaskType, TM, Input> *)this)->destCB(cb);
+  void strategy(SendStrategy<Input> cb) {
+    ((CommunicatorSend<TaskType, TM, Input> *)this)->strategy(cb);
   }
 
   void initialize() {
@@ -174,17 +115,14 @@ private:
 
 private:
   std::shared_ptr<CoreTaskType> const coreTask_ = nullptr;
-  CommunicatorTaskOpt                 options_;
 
 public:
-  explicit CommunicatorTask(comm::CommService *service, std::vector<std::uint32_t> const &receivers,
-                            CommunicatorTaskOpt opt = {}, std::string const &name = "CommunicatorTask")
-      : behavior::TaskNode(std::make_shared<CoreTaskType>(this, service, receivers, name)),
+  explicit CommunicatorTask(comm::CommService *service, std::string const &name = "CommunicatorTask")
+      : behavior::TaskNode(std::make_shared<CoreTaskType>(this, service, name)),
         behavior::Copyable<SelfType>(1),
         CommunicatorMultiSend<CommunicatorTask<Types...>, TM, Inputs>(this),
         tool::BehaviorTaskMultiSendersTypeDeducer_t<Outputs>((std::dynamic_pointer_cast<CoreTaskType>(this->core()))),
-        coreTask_(std::dynamic_pointer_cast<CoreTaskType>(this->core())),
-        options_(opt) {
+        coreTask_(std::dynamic_pointer_cast<CoreTaskType>(this->core())) {
     if (coreTask_ == nullptr) {
       throw std::runtime_error("The core used by the task should be a CoreTask.");
     }
@@ -198,10 +136,6 @@ public:
 
   [[nodiscard]] comm::Communicator<TM> *comm() const {
     return coreTask_->comm();
-  }
-
-  [[nodiscard]] CommunicatorTaskOpt options() {
-    return options_;
   }
 
   [[nodiscard]] bool canTerminate() const override {

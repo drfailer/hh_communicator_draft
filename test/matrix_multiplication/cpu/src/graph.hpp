@@ -1,11 +1,12 @@
 #ifndef GRAPH
 #define GRAPH
-#include "../.././src/communicator/communicator_task.hpp"
 #include "data.hpp"
 #include "log.hpp"
 #include "state.hpp"
 #include "task.hpp"
 #include <cblas.h>
+#include <communicator/communicator_task.hpp>
+#include <communicator/send_strategies.hpp>
 #include <hedgehog/hedgehog.h>
 #include <vector>
 
@@ -37,17 +38,10 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         mm->template fill<MatrixTile<MT, MatrixId::C>>(TM * TN, tileSize);
         mm->template fill<MatrixTile<MT, MatrixId::P>>(poolSize, tileSize);
 
-        std::vector<std::uint32_t> distributeTaskReceivers;
-        for (size_t i = 1; i < NB_PROCESSES; ++i) {
-            distributeTaskReceivers.emplace_back(i);
-        }
-
         auto splitTask = std::make_shared<SplitTask>(tileSize, mm, SPLIT_TASK_THREADS);
         auto distributeTask
             = std::make_shared<hh::CommunicatorTask<MatrixTile<MT, MatrixId::A>, MatrixTile<MT, MatrixId::B>,
-                                                    MatrixTile<MT, MatrixId::C>>>(
-                service, distributeTaskReceivers,
-                hh::CommunicatorTaskOpt{.sendersAreReceivers = true, .scatter = true});
+                                                    MatrixTile<MT, MatrixId::C>>>(service);
 
         auto productState = std::make_shared<ProductState>(mm, TM, TN, TK, RANK, NB_PROCESSES);
         auto productStateManager = std::make_shared<hh::StateManager<ProductStateIO>>(productState);
@@ -57,17 +51,15 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         auto sumStateManager = std::make_shared<SumStateManager>(sumState);
         auto sumTask = std::make_shared<SumTask>(SUM_TASK_THREADS);
 
-        auto gatherTask = std::make_shared<hh::CommunicatorTask<MatrixTile<MT, MatrixId::C>>>(
-            service, std::vector<std::uint32_t>({0}),
-            hh::CommunicatorTaskOpt{.sendersAreReceivers = false, .scatter = false});
+        auto gatherTask = std::make_shared<hh::CommunicatorTask<MatrixTile<MT, MatrixId::C>>>(service);
 
         auto copyTileState = std::make_shared<CopyTileStateManager>(std::make_shared<CopyTileState>(mm, TM, TN, RANK));
         auto copyTileTask = std::make_shared<CopyTileTask>(COPY_TILE_TASK_THREADS);
 
-        distributeTask->template destCB<MatrixTile<MT, MatrixId::A>>([NB_PROCESSES, TN](auto tile) {
-            std::vector<std::uint32_t> dests = {(std::uint32_t)(tile->rowIdx * TN % NB_PROCESSES)};
+        distributeTask->template strategy<MatrixTile<MT, MatrixId::A>>([NB_PROCESSES, TN](auto tile) {
+            std::vector<hh::comm::rank_t> dests = {(hh::comm::rank_t)(tile->rowIdx * TN % NB_PROCESSES)};
             for (size_t colIdx = 1; colIdx < TN; ++colIdx) {
-                std::uint32_t rank = (colIdx + tile->rowIdx * TN) % NB_PROCESSES;
+                hh::comm::rank_t rank = (colIdx + tile->rowIdx * TN) % NB_PROCESSES;
                 if (rank == dests[0]) {
                     break;
                 }
@@ -76,10 +68,10 @@ struct MMGraph : hh::Graph<MMGraphIO> {
             logh::infog(logh::IG::DestDB, "DestCB", "A[", tile->rowIdx, ",", tile->colIdx, "] => ", dests);
             return dests;
         });
-        distributeTask->template destCB<MatrixTile<MT, MatrixId::B>>([NB_PROCESSES, TM, TN](auto tile) {
-            std::vector<std::uint32_t> dests = {(std::uint32_t)(tile->colIdx % NB_PROCESSES)};
+        distributeTask->template strategy<MatrixTile<MT, MatrixId::B>>([NB_PROCESSES, TM, TN](auto tile) {
+            std::vector<hh::comm::rank_t> dests = {(hh::comm::rank_t)(tile->colIdx % NB_PROCESSES)};
             for (size_t rowIdx = 1; rowIdx < TM; ++rowIdx) {
-                std::uint32_t rank = (tile->colIdx + rowIdx * TN) % NB_PROCESSES;
+                hh::comm::rank_t rank = (tile->colIdx + rowIdx * TN) % NB_PROCESSES;
                 if (rank == dests[0]) {
                     break;
                 }
@@ -88,14 +80,16 @@ struct MMGraph : hh::Graph<MMGraphIO> {
             logh::infog(logh::IG::DestDB, "DestCB", "B[", tile->rowIdx, ",", tile->colIdx, "] => ", dests);
             return dests;
         });
-        distributeTask->template destCB<MatrixTile<MT, MatrixId::C>>([NB_PROCESSES, TN](auto tile) {
-            size_t                     idx = tile->colIdx + tile->rowIdx * TN;
-            std::vector<std::uint32_t> dests = {(std::uint32_t)(idx % NB_PROCESSES)};
+        distributeTask->template strategy<MatrixTile<MT, MatrixId::C>>([NB_PROCESSES, TN](auto tile) {
+            size_t                        idx = tile->colIdx + tile->rowIdx * TN;
+            std::vector<hh::comm::rank_t> dests = {(hh::comm::rank_t)(idx % NB_PROCESSES)};
             logh::infog(logh::IG::DestDB, "DestCB", "C[", tile->rowIdx, ",", tile->colIdx, "] => ", dests);
             return dests;
         });
-
         distributeTask->setMemoryManager(mm);
+
+        gatherTask->template strategy<MatrixTile<MT, MatrixId::C>>(
+            hh::comm::strategy::Gather<MatrixTile<MT, MatrixId::C>>(0));
         gatherTask->setMemoryManager(mm);
 
         this->inputs(splitTask);

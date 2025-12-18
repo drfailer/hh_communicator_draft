@@ -63,18 +63,20 @@ private:
   }
 
 public: // send ////////////////////////////////////////////////////////////////
-  void send(Header const header, std::uint32_t dest, Buffer const &buffer) override {
+  void send(Header const header, rank_t dest, Buffer const &buffer) override {
     std::uint32_t tag = headerToTag(header);
-    CLH_Request  *request = clh_send(this->clh_, header.channel, dest, tag, CLH_Buffer{buffer.mem, buffer.len});
+    CLH_Request  *request = clh_send(this->clh_, (std::uint32_t)header.channel, (std::uint32_t)dest, tag,
+                                     CLH_Buffer{buffer.mem, buffer.len});
 
     assert(request != nullptr);
     checkCLH(clh_wait(this->clh_, request));
     clh_request_release(this->clh_, request);
   }
 
-  Request sendAsync(Header const header, std::uint32_t dest, Buffer const &buffer) override {
+  Request sendAsync(Header const header, rank_t dest, Buffer const &buffer) override {
     std::uint32_t tag = headerToTag(header);
-    CLH_Request  *r = clh_send(this->clh_, header.channel, dest, tag, CLH_Buffer{buffer.mem, buffer.len});
+    CLH_Request  *r = clh_send(this->clh_, (std::uint32_t)header.channel, (std::uint32_t)dest, tag,
+                               CLH_Buffer{buffer.mem, buffer.len});
     assert(r != nullptr);
     return requestPool_.allocate(r);
   }
@@ -101,14 +103,14 @@ public: // recv ////////////////////////////////////////////////////////////////
   }
 
 public: // probe ///////////////////////////////////////////////////////////////
-  Request probe(std::uint8_t channel) override {
-    CLH_Request *r = clh_probe(this->clh_, channel, 0, 0, true);
+  Request probe(channel_t channel) override {
+    CLH_Request *r = clh_probe(this->clh_, (std::uint32_t)channel, 0, 0, true);
     assert(r != nullptr);
     return requestPool_.allocate(r);
   }
 
-  Request probe(std::uint8_t channel, std::uint32_t source) override {
-    CLH_Request *r = clh_probe_source(this->clh_, channel, source, 0, 0, true);
+  Request probe(channel_t channel, rank_t source) override {
+    CLH_Request *r = clh_probe_source(this->clh_, (std::uint32_t)channel, (std::uint32_t)source, 0, 0, true);
     assert(r != nullptr);
     return requestPool_.allocate(r);
   }
@@ -160,22 +162,22 @@ public: // synchronization /////////////////////////////////////////////////////
   }
 
 public:
-  std::uint32_t rank() const override {
-    return rank_;
+  rank_t rank() const override {
+    return (rank_t)rank_;
   }
   std::uint32_t nbProcesses() const override {
     return nbProcesses_;
   }
 
 public:
-  std::uint64_t newChannel() override {
+  channel_t newChannel() override {
     assert(channelGenerator_ < 255);
     packageCounters_.push_back(0);
     return ++channelGenerator_;
   }
 
-  std::uint64_t newPackageId(std::uint64_t channel) override {
-    std::uint64_t result = packageCounters_[channel];
+  package_id_t newPackageId(channel_t channel) override {
+    package_id_t result = packageCounters_[channel];
     // update the id and make sure it stays on 14 bits
     packageCounters_[channel] = (packageCounters_[channel] + 1) % 16384;
     return result;
@@ -196,7 +198,7 @@ private:
   CLH_Handle                 clh_ = nullptr;
   RequestPool<CLH_Request *> requestPool_ = {};
   std::uint64_t              channelGenerator_ = 0;
-  std::vector<std::uint64_t> packageCounters_ = {};
+  std::vector<size_t>        packageCounters_ = {};
 };
 
 } // end namespace comm

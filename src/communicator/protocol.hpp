@@ -1,7 +1,6 @@
 #ifndef COMMUNICATOR_PROTOCOL
 #define COMMUNICATOR_PROTOCOL
 #include "hedgehog/src/tools/meta_functions.h"
-#include "type_map.hpp"
 #include <memory>
 
 namespace hh {
@@ -23,17 +22,24 @@ enum class Signal : std::uint8_t {
 
 // Header //////////////////////////////////////////////////////////////////////
 
+using channel_t = std::uint64_t;
+using rank_t = std::uint64_t;
+using signal_t = std::uint64_t;
+using type_id_t = std::uint64_t;
+using package_id_t = std::uint64_t;
+using buffer_id_t = std::uint64_t;
+
 struct Header {
-  std::uint64_t channel;
-  std::uint64_t source;
-  std::uint64_t signal;
-  std::uint64_t typeId;
-  std::uint64_t packageId;
-  std::uint64_t bufferId;
+  channel_t    channel;
+  rank_t     source;
+  signal_t     signal;
+  type_id_t    typeId;
+  package_id_t packageId;
+  buffer_id_t  bufferId;
 
   Header() = default;
-  Header(std::uint64_t source, std::uint64_t signal, std::uint64_t typeId, std::uint64_t channel,
-         std::uint16_t packageId, std::uint64_t bufferId)
+  Header(rank_t source, signal_t signal, type_id_t typeId, channel_t channel,
+         package_id_t packageId, buffer_id_t bufferId)
       : channel(channel),
         source(source),
         signal(signal),

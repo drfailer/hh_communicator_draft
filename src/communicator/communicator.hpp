@@ -6,7 +6,6 @@
 #include "type_map.hpp"
 #include <cassert>
 #include <map>
-#include <serializer/serializer.hpp>
 #include <set>
 #include <utility>
 #include <vector>
@@ -18,24 +17,24 @@ namespace comm {
 template <typename TM>
 class Communicator {
 public:
-  Communicator(CommService *service, std::vector<std::uint32_t> const &receivers)
+  Communicator(CommService *service)
       : service_(service),
         channel_(service->newChannel()),
-        receivers_(receivers),
+        stats_(service->collectStats()),
         packagesCount_(service->nbProcesses(), 0) {}
 
 private:
   struct CommOperation {
-    std::uint64_t packageId;
-    std::uint64_t bufferId;
-    Request       request;
-    StorageId     storageId;
+    package_id_t packageId;
+    buffer_id_t  bufferId;
+    Request      request;
+    StorageId    storageId;
   };
 
   struct CreateDataOperation {
-    std::uint64_t source;
-    Header        header;
-    Request       request;
+    rank_t  source;
+    Header  header;
+    Request request;
 
     bool operator<(CreateDataOperation const &other) const {
       if (this->source == other.source) {
@@ -46,12 +45,8 @@ private:
   };
 
 public:
-  std::uint8_t channel() const {
+  channel_t channel() const {
     return channel_;
-  }
-
-  std::vector<std::uint32_t> const &receivers() const {
-    return receivers_;
   }
 
   CommService *service() const {
@@ -66,7 +61,7 @@ public:
     return packagesCount_;
   }
 
-  std::uint32_t rank() const {
+  rank_t rank() const {
     return this->service_->rank();
   }
 
@@ -92,20 +87,33 @@ public:
 
 public:
   /*
-   * Send a signal to the given destinations.
+   * broadcast disconnection signal
    */
-  void sendSignal(std::vector<std::uint32_t> const &dests, Signal signal) {
-    Header        header(this->service_->rank(), 1, 0, this->channel_, 0, 0);
-    char          buf[100] = {(char)signal};
-    std::uint64_t len = 1;
+  void notifyDisconnection() {
+    Header header(this->rank(), 1, 0, this->channel_, 0, 0);
+    char   buf[100] = {(char)Signal::Disconnect};
+    size_t len = 1;
 
-    infog(logh::IG::Comm, "comm", "signal = ", (int)signal);
-    for (auto dest : dests) {
-      if (signal == Signal::Disconnect) {
+    for (size_t dest = 0; dest < this->nbProcesses(); ++dest) {
+      if (dest != this->rank()) {
         size_t size = sizeof(this->packagesCount_[dest]);
         std::memcpy(&buf[1], &this->packagesCount_[dest], size);
         len = 1 + size;
+        this->service_->send(header, dest, Buffer{buf, len});
       }
+    }
+  }
+
+  /*
+   * Send a signal to the given destinations.
+   */
+  void sendSignal(std::vector<rank_t> const &dests, Signal signal) {
+    Header header(this->rank(), 1, 0, this->channel_, 0, 0);
+    char   buf[100] = {(char)signal};
+    size_t len = 1;
+
+    infog(logh::IG::Comm, "comm", "signal = ", (int)signal);
+    for (auto dest : dests) {
       this->service_->send(header, dest, Buffer{buf, len});
     }
   }
@@ -114,9 +122,9 @@ public:
    * Send data to the given destinations.
    */
   template <typename T>
-  void sendData(std::vector<std::uint32_t> const &dests, std::shared_ptr<T> data, bool returnMemory = true) {
+  void sendData(std::vector<rank_t> const &dests, std::shared_ptr<T> data, bool returnMemory = true) {
     auto [storageId, storage] = createSendStorage(dests, data, returnMemory);
-    Header header(this->service_->rank(), 0, storageId.typeId, this->channel_, storageId.packageId, 0);
+    Header header(this->rank(), 0, storageId.typeId, this->channel_, storageId.packageId, 0);
 
     infog(logh::IG::Comm, "comm", "sendData -> ", " typeId = ", (int)TM::template idOf<T>(),
           " requestId = ", (int)header.packageId);
@@ -128,7 +136,7 @@ public:
     for (auto dest : dests) {
       this->packagesCount_[dest] += 1;
       for (size_t i = 0; i < storage.package.data.size(); ++i) {
-        header.bufferId = (std::uint8_t)i;
+        header.bufferId = (buffer_id_t)i;
         std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
         Request                     request = this->service_->sendAsync(header, dest, storage.package.data[i]);
         this->sendOps_.push_back(CommOperation{
@@ -146,14 +154,14 @@ public:
    * signal, then receive the signal, otherwise, add a pending recv data request
    * to the queue.
    */
-  void recvSignal(Signal &signal, Header &header, Buffer &buf) {
+  void recvSignal(Signal &signal, Header &header, Buffer &signalBuffer) {
     Request request = this->service_->probe(this->channel_);
 
     signal = Signal::None;
 
     if (this->service_->probeSuccess(request)) {
       header = this->service_->requestHeader(request);
-      assert(header.source != this->service_->rank());
+      assert(header.source != this->rank());
 
       if (header.signal == 0) {
         std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
@@ -164,10 +172,10 @@ public:
         });
         signal = Signal::Data;
       } else {
-        this->service_->recv(request, buf);
-        signal = (Signal)buf.mem[0];
+        this->service_->recv(request, signalBuffer);
+        signal = (Signal)signalBuffer.mem[0];
       }
-      assert(header.source < this->service_->nbProcesses());
+      assert(header.source < this->nbProcesses());
       infog(logh::IG::Comm, "comm", "recvSignal -> ", " source = ", header.source, " signal = ", (int)signal);
     } else {
       this->service_->requestRelease(request);
@@ -182,9 +190,9 @@ public:
    */
   template <typename CreateDataCB>
   bool recvData(CreateDataOperation const &prd, CreateDataCB createData) {
-    auto packageId = prd.header.packageId;
-    auto bufferId = prd.header.bufferId;
-    auto typeId = prd.header.typeId;
+    auto      packageId = prd.header.packageId;
+    auto      bufferId = prd.header.bufferId;
+    auto      typeId = prd.header.typeId;
     StorageId storageId(prd.source, packageId, typeId, 0);
 
     infog(logh::IG::Comm, "comm", "recvData -> ", " source = ", prd.source, " typeId = ", (int)typeId,
@@ -228,7 +236,7 @@ public:
         delete[] storage.package.data[0].mem;
       }
       if (storage.returnMemory) {
-        cb.template operator()<T>(data);
+        cb.template operator()<T>(std::move(data));
       }
     });
   }
@@ -240,11 +248,7 @@ public:
   void processSendOpsQueue(ReturnDataCB returnMemory, bool flush = false) {
     std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
-    if (this->service_->collectStats()) {
-      std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
-      this->stats_.maxSendOpsSize = std::max(this->stats_.maxSendOpsSize, this->sendOps_.size());
-      this->stats_.maxSendStorageSize = std::max(this->stats_.maxSendStorageSize, this->wh_.sendStorage.size());
-    }
+    this->stats_.updateSendQueuesInfos(this->sendOps_.size(), this->wh_.sendStorage.size());
 
     do {
       for (auto it = this->sendOps_.begin(); it != this->sendOps_.end();) {
@@ -268,9 +272,9 @@ public:
   }
 
   template <typename T>
-  std::pair<StorageId, PackageStorage<TM>> createSendStorage(std::vector<std::uint32_t> const &dests,
-                                                             std::shared_ptr<T> data, bool returnMemory) {
-    std::uint16_t packageId = this->service_->newPackageId(this->channel_);
+  std::pair<StorageId, PackageStorage<TM>> createSendStorage(std::vector<rank_t> const &dests, std::shared_ptr<T> data,
+                                                             bool returnMemory) {
+    package_id_t packageId = this->service_->newPackageId(this->channel_);
 
     // measure data packing time
     time_t  tpackingStart = std::chrono::system_clock::now();
@@ -287,46 +291,38 @@ public:
         .returnMemory = returnMemory,
         .dbgBufferReceived = {false, false, false, false},
     };
-    StorageId storageId((std::uint64_t)this->service_->rank(), packageId, TM::template idOf<T>());
+    StorageId storageId(this->rank(), packageId, TM::template idOf<T>());
 
-    if (this->service_->collectStats()) {
-      std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
-      this->stats_.storageStats.insert({storageId, StorageInfo{}});
-      this->stats_.storageStats.at(storageId).typeId = storageId.typeId;
-      this->stats_.storageStats.at(storageId).packingCount += 1;
-      this->stats_.storageStats.at(storageId).packingTime
-          += std::chrono::duration_cast<std::chrono::nanoseconds>(tpackingEnd - tpackingStart);
-      this->stats_.storageStats.at(storageId).sendtp = std::chrono::system_clock::now();
-      this->stats_.storageStats.at(storageId).dataSize = package.size();
-    }
+    this->stats_.registerSendTimings(storageId, dests,
+                                     std::chrono::duration_cast<std::chrono::nanoseconds>(tpackingEnd - tpackingStart),
+                                     package.size());
     return {storageId, storage};
   }
 
   /*
    * Flush operation queue and remove storage entries from the warehouse.
-   * TODO: rewrite this function
    */
-  void flushQueueAndWarehouse(std::vector<CommOperation> &queue, std::map<StorageId, PackageStorage<TM>> &wh) {
-    std::vector<Request> requests;
-
-    for (auto &op : queue) {
-      logh::error("request canceled");
-      this->service_->requestCancel(op.request);
-      requests.push_back(op.request);
+  void flushRecvQueueAndWarehouse() {
+    if (!this->recvOps_.empty()) {
+      logh::error("Cancelling ", this->recvOps_.size(), " recv operations.");
     }
-    queue.clear();
+    for (auto &op : this->recvOps_) {
+      this->service_->requestCancel(op.request);
+    }
+    this->recvOps_.clear();
 
-    // TODO: this should be done for mpi
-    // int done = false;
-    // do {
-    //   std::lock_guard<std::mutex> mpiLock(handle->comm->mpiMutex);
-    //   using namespace std::chrono_literals;
-    //   std::this_thread::sleep_for(4ms);
-    //   checkMPI(MPI_Testall(requests.size(), requests.data(), &done, MPI_STATUSES_IGNORE));
-    // } while (!done);
-    // queue.clear();
+    if (!this->createDataOps_.empty()) {
+      logh::error("Cancelling ", this->createDataOps_.size(), " create data operations.");
+    }
+    for (auto &op : this->createDataOps_) {
+      this->service_->requestRelease(op.request);
+    }
+    this->createDataOps_.clear();
 
-    for (auto it : wh) {
+    if (!this->wh_.recvStorage.empty()) {
+      logh::error("Removing ", this->wh_.recvStorage.size(), " from storage.");
+    }
+    for (auto it : this->wh_.recvStorage) {
       auto storageId = it.first;
       auto storage = it.second;
       assert(storageId.typeId < TM::size);
@@ -336,7 +332,7 @@ public:
         }
       });
     }
-    wh.clear();
+    this->wh_.recvStorage.clear();
   }
 
   /*
@@ -366,12 +362,6 @@ public:
       };
       this->wh_.recvStorage.insert({storageId, storage});
     });
-
-    if (this->service_->collectStats()) {
-      std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
-      this->stats_.storageStats.insert({storageId, {}});
-      this->stats_.storageStats.at(storageId).typeId = storageId.typeId;
-    }
     return status;
   }
 
@@ -385,10 +375,7 @@ public:
   void processRecvDataQueue(CreateDataCB createData) {
     std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
-    if (this->service_->collectStats()) {
-      std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
-      this->stats_.maxCreateDataQueueSize = std::max(this->stats_.maxCreateDataQueueSize, this->createDataOps_.size());
-    }
+    this->stats_.updateCreateDataQueueInfos(this->createDataOps_.size());
 
     for (auto it = this->createDataOps_.begin(); it != this->createDataOps_.end();) {
       if (recvData(*it, createData)) {
@@ -415,13 +402,9 @@ public:
       processData.template operator()<T>(data);
     });
 
-    if (this->service_->collectStats()) {
-      std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
-      this->stats_.storageStats.at(storageId).recvtp = std::chrono::system_clock::now();
-      this->stats_.storageStats.at(storageId).unpackingTime
-          += std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart);
-      this->stats_.storageStats.at(storageId).unpackingCount += 1;
-    }
+    this->stats_.registerRecvTimings(
+        storageId, this->service_->rank(),
+        std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart), storage.package.size());
   }
 
   /*
@@ -429,14 +412,10 @@ public:
    * that have an associated recv data storage that will store the buffers.
    */
   template <typename ProcessCB>
-  void processRecvOpsQueue(ProcessCB processData, [[maybe_unused]] bool flush = false) {
+  void processRecvOpsQueue(ProcessCB processData) {
     std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
-    if (this->service_->collectStats()) {
-      std::lock_guard<std::mutex> statsLock(this->stats_.mutex);
-      this->stats_.maxRecvOpsSize = std::max(this->stats_.maxRecvOpsSize, this->recvOps_.size());
-      this->stats_.maxRecvStorageSize = std::max(this->stats_.maxRecvStorageSize, this->wh_.recvStorage.size());
-    }
+    this->stats_.updateRecvQueuesInfos(this->recvOps_.size(), this->wh_.recvStorage.size());
 
     for (auto it = this->recvOps_.begin(); it != this->recvOps_.end();) {
       if (this->service_->requestCompleted(it->request)) {
@@ -455,20 +434,15 @@ public:
         it++;
       }
     }
-
-    if (flush) {
-      flushQueueAndWarehouse(this->recvOps_, this->wh_.recvStorage);
-    }
   }
 
 public:
   template <typename... Ts>
   void infog(logh::IG ig, std::string const &name, Ts &&...args) const {
     if constexpr (sizeof...(Ts)) {
-      logh::infog(ig, name, "[", (int)this->channel_, "]: rank = ", this->service_->rank(), ", ",
-                  std::forward<Ts>(args)...);
+      logh::infog(ig, name, "[", (int)this->channel_, "]: rank = ", this->rank(), ", ", std::forward<Ts>(args)...);
     } else {
-      logh::infog(ig, name, "[", (int)this->channel_, "]: rank = ", this->service_->rank());
+      logh::infog(ig, name, "[", (int)this->channel_, "]: rank = ", this->rank());
     }
   }
 
@@ -477,59 +451,51 @@ public:
    * Send statistics when generating the dot file.
    */
   void sendStats() const {
-    serializer::Bytes buf;
-    Header            header(this->service_->rank(), 0, 0, this->channel_, 0, 0);
-
-    using Serializer = serializer::Serializer<serializer::Bytes>;
-    serializer::serialize<Serializer>(buf, 0, this->stats_.maxSendOpsSize, this->stats_.maxRecvOpsSize,
-                                      this->stats_.maxCreateDataQueueSize, this->stats_.maxSendStorageSize,
-                                      this->stats_.maxRecvStorageSize, this->stats_.storageStats);
-    infog(logh::IG::Stats, "stats", "sendStats -> ", " buf size = ", buf.size(),
-          ", storageStats size = ", this->stats_.storageStats.size());
-    this->service_->send(header, 0, Buffer{std::bit_cast<char *>(buf.data()), buf.size()});
+    Header            header(this->rank(), 0, 0, this->channel_, 0, 0);
+    std::vector<char> bufMem;
+    this->stats_.pack(bufMem);
+    infog(logh::IG::Stats, "stats", "sendStats -> ", " buf size = ", bufMem.size(), ", transmissionStats size = ",
+          this->stats_.transmissionStats.sendInfos.size() + this->stats_.transmissionStats.recvInfos.size());
+    this->service_->send(header, 0, Buffer{bufMem.data(), bufMem.size()});
   }
 
   /*
    * Gather statistics on the master rank.
    */
   std::vector<CommTaskStats> gatherStats() const {
-    std::vector<CommTaskStats> stats(this->service_->nbProcesses());
-    int                        bufSize;
+    std::vector<CommTaskStats> stats(this->nbProcesses());
+    size_t                     bufSize;
 
-    stats[0].storageStats = std::move(this->stats_.storageStats);
+    stats[0].transmissionStats = std::move(this->stats_.transmissionStats);
     stats[0].maxSendOpsSize = this->stats_.maxSendOpsSize;
     stats[0].maxRecvOpsSize = this->stats_.maxRecvOpsSize;
     stats[0].maxCreateDataQueueSize = this->stats_.maxCreateDataQueueSize;
     stats[0].maxSendStorageSize = this->stats_.maxSendStorageSize;
     stats[0].maxRecvStorageSize = this->stats_.maxRecvStorageSize;
-    for (std::uint32_t i = 1; i < this->service_->nbProcesses(); ++i) {
+    for (rank_t i = 1; i < this->nbProcesses(); ++i) {
       Request request = this->service_->probe(this->channel_, i);
       while (!this->service_->probeSuccess(request)) {
         this->service_->requestRelease(request);
         using namespace std::chrono_literals;
         std::this_thread::sleep_for(1ms);
         request = this->service_->probe(this->channel_, i);
-        ;
       }
-      bufSize = this->service_->bufferSize(request);
+      bufSize = (size_t)this->service_->bufferSize(request);
 
-      serializer::Bytes buf(bufSize, bufSize);
-      this->service_->recv(request, Buffer{std::bit_cast<char *>(buf.data()), buf.size()});
-
-      using Serializer = serializer::Serializer<serializer::Bytes>;
-      serializer::deserialize<Serializer>(buf, 0, stats[i].maxSendOpsSize, stats[i].maxRecvOpsSize,
-                                          stats[i].maxCreateDataQueueSize, stats[i].maxSendStorageSize,
-                                          stats[i].maxRecvStorageSize, stats[i].storageStats);
-      infog(logh::IG::Stats, "stats", "comGather -> ", "target = ", i, " buf size = ", buf.size(),
-            ", storageStats size = ", stats[i].storageStats.size());
+      std::vector<char> bufMem(bufSize);
+      Buffer            buf{.mem = bufMem.data(), .len = bufSize};
+      this->service_->recv(request, buf);
+      stats[i].unpack(bufMem);
+      infog(logh::IG::Stats, "stats", "comGather -> ", "target = ", i, " buf size = ", buf.len,
+            ", transmissionStats size = ",
+            stats[i].transmissionStats.sendInfos.size() + stats[i].transmissionStats.recvInfos.size());
     }
     return stats;
   }
 
 private:
-  CommService               *service_ = nullptr;
-  std::uint8_t               channel_ = 0;
-  std::vector<std::uint32_t> receivers_ = {};
+  CommService *service_ = nullptr;
+  channel_t    channel_ = 0;
 
   // queues
   std::vector<CommOperation>    sendOps_;
