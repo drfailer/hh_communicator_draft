@@ -25,16 +25,16 @@ public:
 
 private:
   struct CommOperation {
-    std::uint64_t packageId;
-    std::uint64_t bufferId;
-    Request       request;
-    StorageId     storageId;
+    package_id_t packageId;
+    buffer_id_t  bufferId;
+    Request      request;
+    StorageId    storageId;
   };
 
   struct CreateDataOperation {
-    std::uint64_t source;
-    Header        header;
-    Request       request;
+    rank_t  source;
+    Header  header;
+    Request request;
 
     bool operator<(CreateDataOperation const &other) const {
       if (this->source == other.source) {
@@ -90,9 +90,9 @@ public:
    * broadcast disconnection signal
    */
   void notifyDisconnection() {
-    Header        header(this->rank(), 1, 0, this->channel_, 0, 0);
-    char          buf[100] = {(char)Signal::Disconnect};
-    std::uint64_t len = 1;
+    Header header(this->rank(), 1, 0, this->channel_, 0, 0);
+    char   buf[100] = {(char)Signal::Disconnect};
+    size_t len = 1;
 
     for (size_t dest = 0; dest < this->nbProcesses(); ++dest) {
       if (dest != this->rank()) {
@@ -108,9 +108,9 @@ public:
    * Send a signal to the given destinations.
    */
   void sendSignal(std::vector<rank_t> const &dests, Signal signal) {
-    Header        header(this->rank(), 1, 0, this->channel_, 0, 0);
-    char          buf[100] = {(char)signal};
-    std::uint64_t len = 1;
+    Header header(this->rank(), 1, 0, this->channel_, 0, 0);
+    char   buf[100] = {(char)signal};
+    size_t len = 1;
 
     infog(logh::IG::Comm, "comm", "signal = ", (int)signal);
     for (auto dest : dests) {
@@ -136,7 +136,7 @@ public:
     for (auto dest : dests) {
       this->packagesCount_[dest] += 1;
       for (size_t i = 0; i < storage.package.data.size(); ++i) {
-        header.bufferId = (std::uint8_t)i;
+        header.bufferId = (buffer_id_t)i;
         std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
         Request                     request = this->service_->sendAsync(header, dest, storage.package.data[i]);
         this->sendOps_.push_back(CommOperation{
@@ -272,8 +272,8 @@ public:
   }
 
   template <typename T>
-  std::pair<StorageId, PackageStorage<TM>> createSendStorage(std::vector<rank_t> const &dests,
-                                                             std::shared_ptr<T> data, bool returnMemory) {
+  std::pair<StorageId, PackageStorage<TM>> createSendStorage(std::vector<rank_t> const &dests, std::shared_ptr<T> data,
+                                                             bool returnMemory) {
     package_id_t packageId = this->service_->newPackageId(this->channel_);
 
     // measure data packing time
@@ -291,7 +291,7 @@ public:
         .returnMemory = returnMemory,
         .dbgBufferReceived = {false, false, false, false},
     };
-    StorageId storageId((std::uint64_t)this->rank(), packageId, TM::template idOf<T>());
+    StorageId storageId(this->rank(), packageId, TM::template idOf<T>());
 
     this->stats_.registerSendTimings(storageId, dests,
                                      std::chrono::duration_cast<std::chrono::nanoseconds>(tpackingEnd - tpackingStart),
@@ -320,7 +320,7 @@ public:
     this->createDataOps_.clear();
 
     if (!this->wh_.recvStorage.empty()) {
-        logh::error("Removing ", this->wh_.recvStorage.size(), " from storage.");
+      logh::error("Removing ", this->wh_.recvStorage.size(), " from storage.");
     }
     for (auto it : this->wh_.recvStorage) {
       auto storageId = it.first;
@@ -495,7 +495,7 @@ public:
 
 private:
   CommService *service_ = nullptr;
-  channel_t channel_ = 0;
+  channel_t    channel_ = 0;
 
   // queues
   std::vector<CommOperation>    sendOps_;

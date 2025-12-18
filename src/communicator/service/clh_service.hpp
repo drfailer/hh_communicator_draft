@@ -65,7 +65,8 @@ private:
 public: // send ////////////////////////////////////////////////////////////////
   void send(Header const header, rank_t dest, Buffer const &buffer) override {
     std::uint32_t tag = headerToTag(header);
-    CLH_Request  *request = clh_send(this->clh_, (std::uint32_t)header.channel, (std::uint32_t)dest, tag, CLH_Buffer{buffer.mem, buffer.len});
+    CLH_Request  *request = clh_send(this->clh_, (std::uint32_t)header.channel, (std::uint32_t)dest, tag,
+                                     CLH_Buffer{buffer.mem, buffer.len});
 
     assert(request != nullptr);
     checkCLH(clh_wait(this->clh_, request));
@@ -74,7 +75,8 @@ public: // send ////////////////////////////////////////////////////////////////
 
   Request sendAsync(Header const header, rank_t dest, Buffer const &buffer) override {
     std::uint32_t tag = headerToTag(header);
-    CLH_Request  *r = clh_send(this->clh_, (std::uint32_t)header.channel, (std::uint32_t)dest, tag, CLH_Buffer{buffer.mem, buffer.len});
+    CLH_Request  *r = clh_send(this->clh_, (std::uint32_t)header.channel, (std::uint32_t)dest, tag,
+                               CLH_Buffer{buffer.mem, buffer.len});
     assert(r != nullptr);
     return requestPool_.allocate(r);
   }
@@ -196,7 +198,7 @@ private:
   CLH_Handle                 clh_ = nullptr;
   RequestPool<CLH_Request *> requestPool_ = {};
   std::uint64_t              channelGenerator_ = 0;
-  std::vector<std::uint64_t> packageCounters_ = {};
+  std::vector<size_t>        packageCounters_ = {};
 };
 
 } // end namespace comm

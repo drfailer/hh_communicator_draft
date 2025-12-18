@@ -121,8 +121,9 @@ public: // recv ////////////////////////////////////////////////////////////////
 
   Request recvAsync(Request probeRequest, Buffer const &buffer) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
-    MPIRequest                  &r = requestPool_.dataRef(probeRequest);
-    checkMPI(MPI_Irecv(buffer.mem, (int)buffer.len, MPI_BYTE, r.status.MPI_SOURCE, r.status.MPI_TAG, r.comm, &r.request));
+    MPIRequest                 &r = requestPool_.dataRef(probeRequest);
+    checkMPI(
+        MPI_Irecv(buffer.mem, (int)buffer.len, MPI_BYTE, r.status.MPI_SOURCE, r.status.MPI_TAG, r.comm, &r.request));
     assert(r.request != NULL);
     return probeRequest;
   }
@@ -155,7 +156,7 @@ public: // probe ///////////////////////////////////////////////////////////////
 public: // requests ////////////////////////////////////////////////////////////
   bool requestCompleted(Request request) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
-    MPIRequest                  &r = requestPool_.dataRef(request);
+    MPIRequest                 &r = requestPool_.dataRef(request);
     r.flag = 0;
     assert(r.request != NULL);
     checkMPI(MPI_Test(&r.request, &r.flag, &r.status));
@@ -214,7 +215,7 @@ public:
 public:
   channel_t newChannel() override {
     std::lock_guard<std::mutex> mpiLock(mutex());
-    channel_t               channel = comms_.size();
+    channel_t                   channel = comms_.size();
     packageCounters_.push_back(0);
     comms_.push_back(MPI_Comm{});
     checkMPI(MPI_Comm_split(MPI_COMM_WORLD, (int)channel, (int)rank_, &comms_.back()));
@@ -240,11 +241,11 @@ private:
   }
 
 private:
-  int                        rank_ = -1;
-  int                        nbProcesses_ = -1;
-  RequestPool<MPIRequest>    requestPool_ = {};
-  std::vector<MPI_Comm>      comms_ = {};
-  std::vector<std::uint64_t> packageCounters_ = {};
+  int                     rank_ = -1;
+  int                     nbProcesses_ = -1;
+  RequestPool<MPIRequest> requestPool_ = {};
+  std::vector<MPI_Comm>   comms_ = {};
+  std::vector<size_t>     packageCounters_ = {};
 };
 
 } // end namespace comm

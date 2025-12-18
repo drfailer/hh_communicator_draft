@@ -80,20 +80,20 @@ void unpack(Package &&package, std::shared_ptr<T> data) {
 // Package Wharehouse //////////////////////////////////////////////////////////
 
 struct StorageId {
-  std::uint64_t source;
-  std::uint64_t typeId;
-  std::uint64_t packageId;
+  rank_t        source;
+  type_id_t     typeId;
+  package_id_t  packageId;
   std::uint64_t cid;
 
   StorageId() = default;
 
-  StorageId(std::uint64_t source, std::uint64_t packageId, std::uint64_t typeId, std::uint64_t cid)
+  StorageId(rank_t source, package_id_t packageId, type_id_t typeId, std::uint64_t cid)
       : source(source),
         typeId(typeId),
         packageId(packageId),
         cid(cid) {}
 
-  StorageId(std::uint64_t source, std::uint64_t packageId, std::uint64_t typeId)
+  StorageId(rank_t source, package_id_t packageId, type_id_t typeId)
       : StorageId(source, packageId, typeId, counter_++) {}
 
   bool operator<(StorageId const &other) const {
@@ -110,15 +110,15 @@ struct StorageId {
   }
 
 private:
-  static inline std::uint64_t counter_ = 0;
+  static inline size_t counter_ = 0;
 };
 
 template <typename TM>
 struct PackageWarehouse {
   struct Storage {
     Package            package;
-    std::uint64_t      bufferCount;
-    std::uint64_t      ttlBufferCount;
+    size_t             bufferCount;
+    size_t             ttlBufferCount;
     variant_type_t<TM> data;
     bool               returnMemory;
     bool               dbgBufferReceived[4]; // TODO: remove
