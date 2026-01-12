@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <iomanip>
+#include <fstream>
 #include <serializer/serializer.hpp>
 
 namespace hh {
@@ -276,7 +277,7 @@ struct CommTaskStats {
   }
 
   template <typename TM>
-  static std::string extraPrintingInformation(std::vector<CommTaskStats> const &stats, size_t nbProcesses) {
+  static std::string extraPrintingInformation(std::vector<CommTaskStats> const &stats, channel_t channel, size_t nbProcesses) {
     std::string infos;
 
     // find the max
@@ -300,6 +301,8 @@ struct CommTaskStats {
 
     // transmission stats
     auto transmissionStats = computeTransmissionStats<TM>(stats, nbProcesses);
+    // TODO: this is not the correct place for doing this, however, the const methods make things difficult...
+    generateTransmissionFile<TM>(transmissionStats, channel, nbProcesses);
     for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
       if (!transmissionStats.contains(typeId)) {
         continue;
@@ -328,6 +331,30 @@ struct CommTaskStats {
     }
 
     return infos;
+  }
+
+  // type,sender,receiver,times...
+  template <typename TM>
+  static void generateTransmissionFile(TransmissionPerfsPerType const &stats, channel_t channel, size_t nbProcesses) {
+      std::ofstream file("transmissions_" + std::to_string(channel) + ".csv", std::ios_base::app);
+
+      file << "type,sender,receiver,times\n";
+      for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
+          if (!stats.contains(typeId)) {
+              continue;
+          }
+          for (size_t i = 0; i < nbProcesses; ++i) {
+              if (i == channel) {
+                  continue;
+              }
+              TM::apply(typeId, [&]<typename T>() { file << hh::tool::typeToStr<T>() << ','; });
+              file << channel << ',' << i;
+              for (auto delay : stats.at(typeId).transmissionDelays[channel * nbProcesses + i]) {
+                  file << ',' << delay.count();
+              }
+              file << '\n';
+          }
+      }
   }
 };
 
