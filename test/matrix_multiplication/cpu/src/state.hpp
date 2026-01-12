@@ -1,5 +1,5 @@
-#ifndef STATE
-#define STATE
+#ifndef STATE_HPP
+#define STATE_HPP
 #include "data.hpp"
 #include "log.hpp"
 #include <hedgehog/hedgehog.h>

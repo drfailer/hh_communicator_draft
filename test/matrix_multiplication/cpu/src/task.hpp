@@ -1,5 +1,5 @@
-#ifndef TASK
-#define TASK
+#ifndef TASK_HPP
+#define TASK_HPP
 #include "data.hpp"
 #include "log.hpp"
 #include <hedgehog/hedgehog.h>

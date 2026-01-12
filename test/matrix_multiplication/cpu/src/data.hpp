@@ -1,5 +1,5 @@
-#ifndef DATA
-#define DATA
+#ifndef DATA_HPP
+#define DATA_HPP
 #include <communicator/communicator_memory_manager.hpp>
 #include <communicator/package.hpp>
 #include "log.hpp"
