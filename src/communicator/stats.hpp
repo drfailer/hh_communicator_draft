@@ -347,7 +347,7 @@ struct CommTaskStats {
               if (i == channel) {
                   continue;
               }
-              TM::apply(typeId, [&]<typename T>() { file << hh::tool::typeToStr<T>() << ','; });
+              TM::apply(typeId, [&]<typename T>() { file << '"' << hh::tool::typeToStr<T>() << '"' << ','; });
               file << channel << ',' << i;
               for (auto delay : stats.at(typeId).transmissionDelays[channel * nbProcesses + i]) {
                   file << ',' << delay.count();
