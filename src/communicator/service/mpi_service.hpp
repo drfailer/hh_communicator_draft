@@ -2,12 +2,14 @@
 #define COMMUNICATOR_MPI_SERVICE
 #include "../../log.hpp"
 #include "../protocol.hpp"
+#include "../request.hpp"
 #include "comm_service.hpp"
 #include <cassert>
 #include <chrono>
 #include <cstddef>
+#include <cassert>
 #include <cstdlib>
-#include <mpi/mpi.h>
+#include <mpi.h>
 #include <stdexcept>
 #include <thread>
 
@@ -20,6 +22,7 @@ public:
   MPIService(int *argc, char ***argv, bool collectStats = false)
       : CommService(collectStats) {
     int32_t provided = 0;
+    // MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided);
     MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided);
     MPI_Comm_rank(MPI_COMM_WORLD, &this->rank_);
     MPI_Comm_size(MPI_COMM_WORLD, &this->nbProcesses_);
