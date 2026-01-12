@@ -1,5 +1,5 @@
 #include "task.hpp"
-#include <openblas/cblas.h>
+#include <cblas.h>
 
 /******************************************************************************/
 /*                                 split task                                 */

@@ -1,5 +1,5 @@
-include config/blackbird.mk
-# include config/desktop.mk
+# include config/blackbird.mk
+include config/desktop.mk
 SRC=$(wildcard src/*.cpp)
 OBJ=$(addprefix build/,$(SRC:src/%.cpp=%.o))
 DEP=$(addprefix build/,$(SRC:src/%.cpp=%.d))
