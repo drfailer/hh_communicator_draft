@@ -17,6 +17,8 @@ def collect_data(filename):
                 data[type_name] = dict()
             data[type_name][dest] = times
 
+    return data
+
 
 def plot(data):
     fig, ax = plt.subplots(len(data.keys()), squeeze=False)
