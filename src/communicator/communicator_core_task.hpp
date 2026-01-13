@@ -241,6 +241,7 @@ public:
     communicator_.service()->barrier();
     if (communicator_.rank() == 0) {
       infos += comm::CommTaskStats::template extraPrintingInformation<TM>(communicator_.gatherStats(),
+                                                                          communicator_.service()->startTime(),
                                                                           communicator_.channel(),
                                                                           communicator_.nbProcesses());
     } else {

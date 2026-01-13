@@ -2,6 +2,7 @@
 #define COMMUNICATOR_COMM_SERVICE
 #include "../protocol.hpp"
 #include "../request.hpp"
+#include "../stats.hpp"
 #include <cassert>
 #include <thread>
 
@@ -11,7 +12,8 @@ namespace comm {
 
 class CommService {
 public:
-  CommService(bool collectStats) : collectStats_(collectStats) {}
+  CommService(bool collectStats)
+      : collectStats_(collectStats), startTime_(std::chrono::system_clock::now()) {}
   virtual ~CommService() = default;
 
 public:
@@ -47,9 +49,14 @@ public:
       return mutex_;
   }
 
+  time_t startTime() const {
+      return startTime_;
+  }
+
 private:
   bool          collectStats_ = false;
   std::mutex    mutex_;
+  time_t        startTime_;
 };
 
 } // end namespace comm

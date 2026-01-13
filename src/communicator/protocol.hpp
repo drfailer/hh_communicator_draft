@@ -31,7 +31,7 @@ using buffer_id_t = std::uint64_t;
 
 struct Header {
   channel_t    channel;
-  rank_t     source;
+  rank_t       source;
   signal_t     signal;
   type_id_t    typeId;
   package_id_t packageId;

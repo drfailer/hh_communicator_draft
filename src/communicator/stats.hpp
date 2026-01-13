@@ -210,16 +210,18 @@ struct CommTaskStats {
   // static function for computing stats summary ///////////////////////////////
 
   struct TransmissionPerfs {
-    std::vector<std::chrono::nanoseconds>              packingDelay;
-    std::vector<std::chrono::nanoseconds>              unpackingDelay;
-    std::vector<std::vector<std::chrono::nanoseconds>> transmissionDelays; // 2D array: delay [i] -> [j]
-    std::vector<double>                                bandWidth;
+    using time_unit_t = std::chrono::nanoseconds;
+    std::vector<time_unit_t>              packingDelay;
+    std::vector<time_unit_t>              unpackingDelay;
+    std::vector<std::vector<time_unit_t>> transmissionDurations; // 2D array: delay [i] -> [j]
+    std::vector<std::vector<time_unit_t>> transmissionTimestamps; // 2D array: delay [i] -> [j]
+    std::vector<double>                   bandWidth;
   };
   using TransmissionPerfsPerType = std::map<type_id_t, TransmissionPerfs>; // stats organized per type
 
   template <typename TM>
   static TransmissionPerfsPerType computeTransmissionStats(std::vector<comm::CommTaskStats> const &stats,
-                                                           size_t                                  nbProcesses) {
+                                                           time_t startTime, size_t nbProcesses) {
     TransmissionPerfsPerType transmissionStats;
 
     for (type_id_t tid = 0; tid < TM::size; ++tid) {
@@ -227,7 +229,8 @@ struct CommTaskStats {
           {tid, TransmissionPerfs{
                     .packingDelay = {},
                     .unpackingDelay = {},
-                    .transmissionDelays = std::vector<std::vector<std::chrono::nanoseconds>>(nbProcesses * nbProcesses),
+                    .transmissionDurations = std::vector<std::vector<std::chrono::nanoseconds>>(nbProcesses * nbProcesses),
+                    .transmissionTimestamps = std::vector<std::vector<std::chrono::nanoseconds>>(nbProcesses * nbProcesses),
                     .bandWidth = {},
                 }});
     }
@@ -245,12 +248,20 @@ struct CommTaskStats {
           auto   recvInfo = recvInfos[i];
           auto   sendInfo = sendInfos[i];
           auto   delay_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(recvInfo.tp - sendInfo.tp);
+          auto   timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(sendInfo.tp - startTime);
           double dataSizeMB = (double)sendInfo.dataSize / (1024. * 1024.);
           double delay_s = (double)delay_ns.count() / 1'000'000'000.;
 
           transmissionStats.at(id.typeId).packingDelay.push_back(sendInfo.packingTime);
           transmissionStats.at(id.typeId).unpackingDelay.push_back(recvInfo.packingTime);
-          transmissionStats.at(id.typeId).transmissionDelays[sendRank * nbProcesses + recvRank].push_back(delay_ns);
+          transmissionStats
+              .at(id.typeId)
+              .transmissionDurations[sendRank * nbProcesses + recvRank]
+              .push_back(delay_ns);
+          transmissionStats
+              .at(id.typeId)
+              .transmissionTimestamps[sendRank * nbProcesses + recvRank]
+              .push_back(timestamp);
           transmissionStats.at(id.typeId).bandWidth.push_back(dataSizeMB / delay_s);
         }
       }
@@ -277,7 +288,7 @@ struct CommTaskStats {
   }
 
   template <typename TM>
-  static std::string extraPrintingInformation(std::vector<CommTaskStats> const &stats, channel_t channel, size_t nbProcesses) {
+  static std::string extraPrintingInformation(std::vector<CommTaskStats> const &stats, time_t startTime, channel_t channel, size_t nbProcesses) {
     std::string infos;
 
     // find the max
@@ -300,7 +311,7 @@ struct CommTaskStats {
     strAppend(infos, "maxRecvStorageSize = " + std::to_string(maxRecvStorageSize));
 
     // transmission stats
-    auto transmissionStats = computeTransmissionStats<TM>(stats, nbProcesses);
+    auto transmissionStats = computeTransmissionStats<TM>(stats, startTime, nbProcesses);
     // TODO: this is not the correct place for doing this, however, the const methods make things difficult...
     generateTransmissionFile<TM>(transmissionStats, channel, nbProcesses);
     for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
@@ -310,7 +321,7 @@ struct CommTaskStats {
       assert(typeId < TM::size);
       TM::apply(typeId,
                 [&]<typename T>() { infos.append("========== " + hh::tool::typeToStr<T>() + " ==========\n"); });
-      auto transmissionDelays = transmissionStats.at(typeId).transmissionDelays;
+      auto transmissionDurations = transmissionStats.at(typeId).transmissionDurations;
       auto packingDelay = transmissionStats.at(typeId).packingDelay;
       auto unpackingDelay = transmissionStats.at(typeId).unpackingDelay;
       auto bandWidth = transmissionStats.at(typeId).bandWidth;
@@ -320,11 +331,11 @@ struct CommTaskStats {
       infos.append("transmission: {\\l");
       for (size_t sender = 0; sender < nbProcesses; ++sender) {
         for (size_t receiver = 0; receiver < nbProcesses; ++receiver) {
-          if (sender == receiver || transmissionDelays[sender * nbProcesses + receiver].empty()) {
+          if (sender == receiver || transmissionDurations[sender * nbProcesses + receiver].empty()) {
             continue;
           }
           strAppend(infos, "    [", sender, " -> ", receiver,
-                    "] = ", transmissionDelays[sender * nbProcesses + receiver]);
+                    "] = ", transmissionDurations[sender * nbProcesses + receiver]);
         }
       }
       strAppend(infos, "}");
@@ -336,9 +347,9 @@ struct CommTaskStats {
   // type,sender,receiver,times...
   template <typename TM>
   static void generateTransmissionFile(TransmissionPerfsPerType const &stats, channel_t channel, size_t nbProcesses) {
-      std::ofstream file("transmissions_" + std::to_string(channel) + ".csv", std::ios_base::app);
+      std::ofstream file("transmissions_" + std::to_string(channel) + ".data", std::ios_base::app);
+      char sep = ';';
 
-      file << "type,sender,receiver,times\n";
       for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
           if (!stats.contains(typeId)) {
               continue;
@@ -347,10 +358,13 @@ struct CommTaskStats {
               if (i == channel) {
                   continue;
               }
-              TM::apply(typeId, [&]<typename T>() { file << '"' << hh::tool::typeToStr<T>() << '"' << ','; });
-              file << channel << ',' << i;
-              for (auto delay : stats.at(typeId).transmissionDelays[channel * nbProcesses + i]) {
-                  file << ',' << delay.count();
+              TM::apply(typeId, [&]<typename T>() { file << hh::tool::typeToStr<T>() << sep; });
+              file << channel << sep << i;
+              auto durations = stats.at(typeId).transmissionDurations[channel * nbProcesses + i];
+              auto timestamps = stats.at(typeId).transmissionTimestamps[channel * nbProcesses + i];
+              assert(durations.size() == timestamps.size());
+              for (size_t i = 0; i < durations.size(); ++i) {
+                  file << sep << timestamps[i].count() << ',' << durations[i].count();
               }
               file << '\n';
           }
