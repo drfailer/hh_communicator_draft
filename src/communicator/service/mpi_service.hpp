@@ -2,7 +2,7 @@
 #define COMMUNICATOR_MPI_SERVICE
 #include "../../log.hpp"
 #include "../protocol.hpp"
-#include "../request.hpp"
+#include "request.hpp"
 #include "comm_service.hpp"
 #include <cassert>
 #include <chrono>
@@ -80,7 +80,7 @@ private:
   };
 
 public: // send ////////////////////////////////////////////////////////////////
-  void send(Header const header, rank_t dest, Buffer const &buffer) override {
+  void send(Header const &header, rank_t dest, Buffer const &buffer) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     int                         tag = headerToTag(header);
 
@@ -93,7 +93,7 @@ public: // send ////////////////////////////////////////////////////////////////
     checkMPI(MPI_Send(buffer.mem, (int)buffer.len, MPI_BYTE, (int)dest, tag, this->comms_[header.channel]));
   }
 
-  Request sendAsync(Header const header, rank_t dest, Buffer const &buffer) override {
+  Request sendAsync(Header const &header, rank_t dest, Buffer const &buffer) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPIRequest                  r = {
                          .request = {},
@@ -115,7 +115,28 @@ public: // send ////////////////////////////////////////////////////////////////
   }
 
 public: // recv ////////////////////////////////////////////////////////////////
-  // TODO: recv without request???
+  void recv(Header const &header, Buffer const &buffer) override {
+    std::lock_guard<std::mutex> mpiLock(this->mutex());
+    MPI_Status                  status;
+    int tag = headerToTag(header);
+    checkMPI(MPI_Recv(buffer.mem, (int)buffer.len, MPI_BYTE, (int)header.source,
+                      tag, this->comms_[header.channel], &status));
+  }
+
+  Request recvAsync(Header const &header, Buffer const &buffer) override {
+    std::lock_guard<std::mutex> mpiLock(this->mutex());
+    int tag = headerToTag(header);
+    MPIRequest                  r = {
+                         .request = {},
+                         .status = {},
+                         .comm = this->comms_[header.channel],
+                         .flag = 0,
+    };
+    checkMPI(MPI_Irecv(buffer.mem, (int)buffer.len, MPI_BYTE, (int)header.source, tag, r.comm, &r.request));
+    assert(r.request != NULL);
+    return requestPool_.allocate(r);
+  }
+
   void recv(Request probeRequest, Buffer const &buffer) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPIRequest                  r = requestPool_.getDataAndRelease(probeRequest);

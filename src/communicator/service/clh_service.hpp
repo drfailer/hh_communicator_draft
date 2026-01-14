@@ -2,7 +2,7 @@
 #define COMMUNICATOR_CLH_SERVICE
 #include "../../log.hpp"
 #include "../protocol.hpp"
-#include "../request.hpp"
+#include "request.hpp"
 #include "comm_service.hpp"
 #include <cassert>
 #include <chrono>
@@ -63,7 +63,7 @@ private:
   }
 
 public: // send ////////////////////////////////////////////////////////////////
-  void send(Header const header, rank_t dest, Buffer const &buffer) override {
+  void send(Header const &header, rank_t dest, Buffer const &buffer) override {
     std::uint32_t tag = headerToTag(header);
     CLH_Request  *request = clh_send(this->clh_, (std::uint32_t)header.channel, (std::uint32_t)dest, tag,
                                      CLH_Buffer{buffer.mem, buffer.len});
@@ -73,7 +73,7 @@ public: // send ////////////////////////////////////////////////////////////////
     clh_request_release(this->clh_, request);
   }
 
-  Request sendAsync(Header const header, rank_t dest, Buffer const &buffer) override {
+  Request sendAsync(Header const &header, rank_t dest, Buffer const &buffer) override {
     std::uint32_t tag = headerToTag(header);
     CLH_Request  *r = clh_send(this->clh_, (std::uint32_t)header.channel, (std::uint32_t)dest, tag,
                                CLH_Buffer{buffer.mem, buffer.len});
@@ -82,7 +82,15 @@ public: // send ////////////////////////////////////////////////////////////////
   }
 
 public: // recv ////////////////////////////////////////////////////////////////
-  // TODO: recv without request???
+  void recv(Header const &header, Buffer const &buffer) override {
+      // TODO
+  }
+
+  Request recvAsync(Header const &header, Buffer const &buffer) override {
+      // TODO
+      return 0;
+  }
+
   void recv(Request probeRequest, Buffer const &buffer) override {
     CLH_Request *pr = requestPool_.getDataAndRelease(probeRequest);
     CLH_Request *r = clh_request_recv(this->clh_, pr, CLH_Buffer{buffer.mem, buffer.len});

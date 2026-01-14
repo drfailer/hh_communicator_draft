@@ -1,7 +1,7 @@
 #ifndef COMMUNICATOR_COMM_SERVICE
 #define COMMUNICATOR_COMM_SERVICE
 #include "../protocol.hpp"
-#include "../request.hpp"
+#include "request.hpp"
 #include "../stats.hpp"
 #include <cassert>
 #include <thread>
@@ -17,8 +17,11 @@ public:
   virtual ~CommService() = default;
 
 public:
-  virtual void send(Header const header, rank_t dest, Buffer const &buffer) = 0;
-  virtual Request sendAsync(Header const header, rank_t dest, Buffer const &buffer) = 0;
+  virtual void send(Header const &header, rank_t dest, Buffer const &buffer) = 0;
+  virtual Request sendAsync(Header const &header, rank_t dest, Buffer const &buffer) = 0;
+
+  virtual void recv(Header const &header, Buffer const &buffer) = 0;
+  virtual Request recvAsync(Header const &header, Buffer const &buffer) = 0;
 
   virtual void recv(Request probeRequest, Buffer const &buffer) = 0;
   virtual Request recvAsync(Request probeRequest, Buffer const &buffer) = 0;
