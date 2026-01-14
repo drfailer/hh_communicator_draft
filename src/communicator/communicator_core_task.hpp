@@ -79,34 +79,6 @@ public:
   ~CommunicatorCoreTask() {}
 
 public:
-  struct Connection {
-    bool   connected;
-    size_t sendCount;
-    size_t recvCount;
-  };
-
-  std::vector<Connection> createConnectionVector() {
-    std::vector<Connection> connections(communicator_.nbProcesses(), Connection{true, 0, 0});
-    connections[communicator_.rank()].connected = false;
-    return connections;
-  }
-
-  bool isConnected(std::vector<Connection> const &connections) const {
-    for (auto connection : connections) {
-      if (connection.connected || connection.recvCount < connection.sendCount) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  void disconnect(std::vector<Connection> &connections, comm::rank_t source, comm::Buffer &signalBuffre) {
-    assert(connections[source].connected == true);
-    connections[source].connected = false;
-    std::memcpy(&connections[source].sendCount, &signalBuffre.mem[1], sizeof(size_t));
-  }
-
-public:
   void run() override {
     this->isActive(true);
     this->nvtxProfiler()->initialize(this->threadId(), this->graphId());
@@ -153,77 +125,12 @@ private:
     senderDisconnect_ = true;
   }
 
-  enum class PortState {
-    Opened,
-    Closing,
-    Closed,
-  };
-
   void networkDeamon() {
-    using namespace std::chrono_literals;
-    auto                    inputPortState = PortState::Opened;
-    auto                    outputPortState = PortState::Opened;
-    std::vector<Connection> connections = createConnectionVector();
-
-    while (inputPortState != PortState::Closed || outputPortState != PortState::Closed) {
-      processInputPort(inputPortState);
-      processOutputPort(outputPortState, connections);
-      std::this_thread::sleep_for(4ms);
-    }
-  }
-
-  void processInputPort(PortState &state) {
-    switch (state) {
-    case PortState::Opened:
-      communicator_.processSendOpsQueue(ReturnMemory<Types...>(mm_));
-      if (senderDisconnect_) {
-        state = PortState::Closing;
-      }
-      break;
-    case PortState::Closing:
-      communicator_.processSendOpsQueue(ReturnMemory<Types...>(mm_), true);
-      communicator_.notifyDisconnection();
-      communicator_.processSendOpsQueue(ReturnMemory<Types...>(mm_), true);
-      state = PortState::Closed;
-      break;
-    case PortState::Closed:
-      break;
-    }
-  }
-
-  void processOutputPort(PortState &state, std::vector<Connection> &connections) {
-    comm::Signal signal = comm::Signal::None;
-    comm::Header header = {0, 0, 0, 0, 0, 0};
-    char         signalBufferMem[100] = {0};
-    comm::Buffer signalBuffre{signalBufferMem, 100};
-    switch (state) {
-    case PortState::Opened:
-      communicator_.recvSignal(signal, header, signalBuffre);
-
-      switch (signal) {
-      case comm::Signal::None:
-        break;
-      case comm::Signal::Disconnect:
-        disconnect(connections, header.source, signalBuffre);
-        break;
-      case comm::Signal::Data:
-        ++connections[header.source].recvCount;
-        break;
-      }
-      communicator_.processRecvDataQueue(GetMemory<Types...>(mm_));
-      communicator_.processRecvOpsQueue(ProcessData(this->task()));
-
-      if (!isConnected(connections) && !communicator_.hasPendingOperations()) {
-        state = PortState::Closing;
-      }
-      break;
-    case PortState::Closing:
-      communicator_.flushRecvQueueAndWarehouse();
-      state = PortState::Closed;
-      break;
-    case PortState::Closed:
-      break;
-    }
+      this->communicator_.run(
+              GetMemory<Types...>(this->mm_),
+              ReturnMemory<Types...>(this->mm_),
+              ProcessData(this->task()),
+              [&]() { return this->senderDisconnect_; });
   }
 
 public:
