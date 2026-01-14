@@ -1,6 +1,6 @@
 #ifndef COMMUNICATOR_REQUEST
 #define COMMUNICATOR_REQUEST
-#include "../log.hpp"
+#include "../../log.hpp"
 #include <thread>
 #include <type_traits>
 #include <vector>
