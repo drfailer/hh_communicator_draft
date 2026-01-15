@@ -10,6 +10,21 @@
 #include <utility>
 #include <vector>
 
+// This communicator works the following way:
+// 1. Probes for incomming request (data or signal).
+//
+// Signal is received:
+// 2. Handle the signal:
+//   - Data: start data reception
+//   - Disconnect: disconnect the sender. Terminates when all senders are
+//                 disconnected and the core task is terminated (see hedgehog
+//                 core task termination makanism).
+//
+// Data is received:
+// 2. wait for the data to be available (get memory from the pool)
+// 3. when the data is created, recv all the buffers
+// 4. call addResult
+
 namespace hh {
 
 namespace comm {
