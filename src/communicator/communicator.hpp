@@ -248,7 +248,6 @@ private:
   struct CreateDataOperation {
     rank_t  source;
     Header  header;
-    Request request;
 
     bool operator<(CreateDataOperation const &other) const {
       if (this->source == other.source) {
@@ -407,6 +406,7 @@ private:
 
     if (this->service_->probeSuccess(request)) {
       header = this->service_->requestHeader(request);
+      header.channel = this->channel_;
       assert(header.source != this->rank());
 
       if (header.signal == 0) {
@@ -414,9 +414,9 @@ private:
         this->createDataOps_.insert(CreateDataOperation{
             .source = header.source,
             .header = header,
-            .request = request,
         });
         signal = Signal::Data;
+        this->service_->requestRelease(request);
       } else {
         this->service_->recv(request, signalBuffer);
         signal = (Signal)signalBuffer.mem[0];
@@ -436,31 +436,30 @@ private:
    */
   template <typename CreateDataCB>
   bool recvData(CreateDataOperation const &prd, CreateDataCB createData) {
-    auto      packageId = prd.header.packageId;
-    auto      bufferId = prd.header.bufferId;
-    auto      typeId = prd.header.typeId;
-    StorageId storageId(prd.source, packageId, typeId, 0);
-
-    infog(logh::IG::Comm, "comm", "recvData -> ", " source = ", prd.source, " typeId = ", (int)typeId,
-          " requestId = ", (int)packageId, " bufferId = ", (int)bufferId);
-
     std::lock_guard<std::mutex> whLock(this->wh_.mutex);
-    if (!this->wh_.recvStorage.contains(storageId)) {
-      if (!createRecvStorage(storageId, createData)) {
-        infog(logh::IG::Comm, "comm", "createRecvStorage returned false");
-        return false;
-      }
+    Header    header = prd.header;
+    StorageId storageId(header.source, header.packageId, header.typeId, 0);
+
+    if (this->wh_.recvStorage.contains(storageId)) {
+        return true;
     }
+
+    if (!createRecvStorage(storageId, createData)) {
+      infog(logh::IG::Comm, "comm", "createRecvStorage returned false");
+      return false;
+    }
+
     auto &storage = this->wh_.recvStorage.at(storageId);
-    auto  request = this->service_->recvAsync(prd.request, storage.package.data[bufferId]);
-    assert(storage.dbgBufferReceived[bufferId] == false);
-    storage.dbgBufferReceived[bufferId] = true;
-    this->recvOps_.push_back(CommOperation{
-        .packageId = packageId,
-        .bufferId = bufferId,
-        .request = request,
-        .storageId = storageId,
-    });
+    for (header.bufferId = 0; header.bufferId < storage.package.data.size(); ++header.bufferId) {
+      assert(storage.dbgBufferReceived[header.bufferId] == false);
+      storage.dbgBufferReceived[header.bufferId] = true;
+      this->recvOps_.push_back(CommOperation{
+          .packageId = header.packageId,
+          .bufferId = header.bufferId,
+          .request = this->service_->recvAsync(header, storage.package.data[header.bufferId]),
+          .storageId = storageId,
+      });
+    }
     return true;
   }
 
@@ -529,9 +528,6 @@ private:
 
     if (!this->createDataOps_.empty()) {
       logh::error("Cancelling ", this->createDataOps_.size(), " create data operations.");
-    }
-    for (auto &op : this->createDataOps_) {
-      this->service_->requestRelease(op.request);
     }
     this->createDataOps_.clear();
 
