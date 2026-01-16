@@ -6,7 +6,6 @@
 #include "type_map.hpp"
 #include <cassert>
 #include <map>
-#include <set>
 #include <utility>
 #include <vector>
 
@@ -245,19 +244,6 @@ private:
     StorageId    storageId;
   };
 
-  struct CreateDataOperation {
-    rank_t  source;
-    Header  header;
-
-    bool operator<(CreateDataOperation const &other) const {
-      if (this->source == other.source) {
-        return this->header < other.header;
-      }
-      return this->source < other.source;
-    }
-  };
-
-
 /******************************************************************************/
 /*                           send queue operations                            */
 /******************************************************************************/
@@ -411,10 +397,7 @@ private:
 
       if (header.signal == 0) {
         std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
-        this->createDataOps_.insert(CreateDataOperation{
-            .source = header.source,
-            .header = header,
-        });
+        this->createDataOps_.push_back(header);
         signal = Signal::Data;
         this->service_->requestRelease(request);
       } else {
@@ -435,9 +418,8 @@ private:
    * requests will remain in the queue util memory is available.
    */
   template <typename CreateDataCB>
-  bool recvData(CreateDataOperation const &prd, CreateDataCB createData) {
+  bool recvData(Header header, CreateDataCB createData) {
     std::lock_guard<std::mutex> whLock(this->wh_.mutex);
-    Header    header = prd.header;
     StorageId storageId(header.source, header.packageId, header.typeId, 0);
 
     if (this->wh_.recvStorage.contains(storageId)) {
@@ -628,10 +610,10 @@ private:
   std::vector<Connection> connections_;
 
   // queues
-  std::vector<CommOperation>    sendOps_;
-  std::vector<CommOperation>    recvOps_;
-  std::set<CreateDataOperation> createDataOps_;
-  std::mutex                    queuesMutex_; // the communicator is shared accross instances of a task
+  std::vector<CommOperation> sendOps_;
+  std::vector<CommOperation> recvOps_;
+  std::vector<Header>        createDataOps_;
+  std::mutex                 queuesMutex_; // the communicator is shared accross instances of a task
 
   // packages
   PackageWarehouse<TM> wh_;
