@@ -110,7 +110,6 @@ public: // send ////////////////////////////////////////////////////////////////
     assert(header.bufferId == testHeader.bufferId);
 
     checkMPI(MPI_Isend(buffer.mem, (int)buffer.len, MPI_BYTE, (int)dest, tag, r.comm, &r.request));
-    assert(r.request != nullptr);
     return requestPool_.allocate(r);
   }
 
@@ -133,7 +132,6 @@ public: // recv ////////////////////////////////////////////////////////////////
                          .flag = 0,
     };
     checkMPI(MPI_Irecv(buffer.mem, (int)buffer.len, MPI_BYTE, (int)header.source, tag, r.comm, &r.request));
-    assert(r.request != nullptr);
     return requestPool_.allocate(r);
   }
 
@@ -148,7 +146,6 @@ public: // recv ////////////////////////////////////////////////////////////////
     MPIRequest                 &r = requestPool_.dataRef(probeRequest);
     checkMPI(
         MPI_Irecv(buffer.mem, (int)buffer.len, MPI_BYTE, r.status.MPI_SOURCE, r.status.MPI_TAG, r.comm, &r.request));
-    assert(r.request != nullptr);
     return probeRequest;
   }
 
@@ -182,7 +179,6 @@ public: // requests ////////////////////////////////////////////////////////////
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPIRequest                 &r = requestPool_.dataRef(request);
     r.flag = 0;
-    assert(r.request != nullptr);
     checkMPI(MPI_Test(&r.request, &r.flag, &r.status));
     return r.flag != 0;
   }
