@@ -84,10 +84,14 @@ public: // send ////////////////////////////////////////////////////////////////
 public: // recv ////////////////////////////////////////////////////////////////
   void recv(Header const &header, Buffer const &buffer) override {
       // TODO
+      (void)header;
+      (void)buffer;
   }
 
   Request recvAsync(Header const &header, Buffer const &buffer) override {
       // TODO
+      (void)header;
+      (void)buffer;
       return 0;
   }
 

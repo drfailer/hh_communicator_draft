@@ -6,9 +6,23 @@
 #include "type_map.hpp"
 #include <cassert>
 #include <map>
-#include <set>
 #include <utility>
 #include <vector>
+
+// This communicator works the following way:
+// 1. Probes for incomming request (data or signal).
+//
+// Signal is received:
+// 2. Handle the signal:
+//   - Data: start data reception
+//   - Disconnect: disconnect the sender. Terminates when all senders are
+//                 disconnected and the core task is terminated (see hedgehog
+//                 core task termination makanism).
+//
+// Data is received:
+// 2. wait for the data to be available (get memory from the pool)
+// 3. when the data is created, recv all the buffers
+// 4. call addResult
 
 namespace hh {
 
@@ -230,20 +244,6 @@ private:
     StorageId    storageId;
   };
 
-  struct CreateDataOperation {
-    rank_t  source;
-    Header  header;
-    Request request;
-
-    bool operator<(CreateDataOperation const &other) const {
-      if (this->source == other.source) {
-        return this->header < other.header;
-      }
-      return this->source < other.source;
-    }
-  };
-
-
 /******************************************************************************/
 /*                           send queue operations                            */
 /******************************************************************************/
@@ -392,16 +392,14 @@ private:
 
     if (this->service_->probeSuccess(request)) {
       header = this->service_->requestHeader(request);
+      header.channel = this->channel_;
       assert(header.source != this->rank());
 
       if (header.signal == 0) {
         std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
-        this->createDataOps_.insert(CreateDataOperation{
-            .source = header.source,
-            .header = header,
-            .request = request,
-        });
+        this->createDataOps_.push_back(header);
         signal = Signal::Data;
+        this->service_->requestRelease(request);
       } else {
         this->service_->recv(request, signalBuffer);
         signal = (Signal)signalBuffer.mem[0];
@@ -420,32 +418,30 @@ private:
    * requests will remain in the queue util memory is available.
    */
   template <typename CreateDataCB>
-  bool recvData(CreateDataOperation const &prd, CreateDataCB createData) {
-    auto      packageId = prd.header.packageId;
-    auto      bufferId = prd.header.bufferId;
-    auto      typeId = prd.header.typeId;
-    StorageId storageId(prd.source, packageId, typeId, 0);
-
-    infog(logh::IG::Comm, "comm", "recvData -> ", " source = ", prd.source, " typeId = ", (int)typeId,
-          " requestId = ", (int)packageId, " bufferId = ", (int)bufferId);
-
+  bool recvData(Header header, CreateDataCB createData) {
     std::lock_guard<std::mutex> whLock(this->wh_.mutex);
-    if (!this->wh_.recvStorage.contains(storageId)) {
-      if (!createRecvStorage(storageId, createData)) {
-        infog(logh::IG::Comm, "comm", "createRecvStorage returned false");
-        return false;
-      }
+    StorageId storageId(header.source, header.packageId, header.typeId, 0);
+
+    if (this->wh_.recvStorage.contains(storageId)) {
+        return true;
     }
+
+    if (!createRecvStorage(storageId, createData)) {
+      infog(logh::IG::Comm, "comm", "createRecvStorage returned false");
+      return false;
+    }
+
     auto &storage = this->wh_.recvStorage.at(storageId);
-    auto  request = this->service_->recvAsync(prd.request, storage.package.data[bufferId]);
-    assert(storage.dbgBufferReceived[bufferId] == false);
-    storage.dbgBufferReceived[bufferId] = true;
-    this->recvOps_.push_back(CommOperation{
-        .packageId = packageId,
-        .bufferId = bufferId,
-        .request = request,
-        .storageId = storageId,
-    });
+    for (header.bufferId = 0; header.bufferId < storage.package.data.size(); ++header.bufferId) {
+      assert(storage.dbgBufferReceived[header.bufferId] == false);
+      storage.dbgBufferReceived[header.bufferId] = true;
+      this->recvOps_.push_back(CommOperation{
+          .packageId = header.packageId,
+          .bufferId = header.bufferId,
+          .request = this->service_->recvAsync(header, storage.package.data[header.bufferId]),
+          .storageId = storageId,
+      });
+    }
     return true;
   }
 
@@ -514,9 +510,6 @@ private:
 
     if (!this->createDataOps_.empty()) {
       logh::error("Cancelling ", this->createDataOps_.size(), " create data operations.");
-    }
-    for (auto &op : this->createDataOps_) {
-      this->service_->requestRelease(op.request);
     }
     this->createDataOps_.clear();
 
@@ -617,10 +610,10 @@ private:
   std::vector<Connection> connections_;
 
   // queues
-  std::vector<CommOperation>    sendOps_;
-  std::vector<CommOperation>    recvOps_;
-  std::set<CreateDataOperation> createDataOps_;
-  std::mutex                    queuesMutex_; // the communicator is shared accross instances of a task
+  std::vector<CommOperation> sendOps_;
+  std::vector<CommOperation> recvOps_;
+  std::vector<Header>        createDataOps_;
+  std::mutex                 queuesMutex_; // the communicator is shared accross instances of a task
 
   // packages
   PackageWarehouse<TM> wh_;
