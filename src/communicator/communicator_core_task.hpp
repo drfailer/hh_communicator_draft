@@ -85,7 +85,13 @@ public:
     this->preRun();
 
     this->senderDisconnect_ = false;
-    this->deamon_ = std::thread(&CommunicatorCoreTask<Types...>::networkDeamon, this);
+    this->deamon_ = std::thread([this]() {
+      this->communicator_.run(
+              GetMemory<Types...>(this->mm_),
+              ReturnMemory<Types...>(this->mm_),
+              ProcessData(this->task()),
+              [&]() { return this->senderDisconnect_; });
+    });
 
     taskLoop();
 
@@ -123,14 +129,6 @@ private:
       this->operateReceivers();
     }
     senderDisconnect_ = true;
-  }
-
-  void networkDeamon() {
-      this->communicator_.run(
-              GetMemory<Types...>(this->mm_),
-              ReturnMemory<Types...>(this->mm_),
-              ProcessData(this->task()),
-              [&]() { return this->senderDisconnect_; });
   }
 
 public:

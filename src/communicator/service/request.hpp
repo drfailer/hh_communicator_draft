@@ -14,6 +14,7 @@
  * an index in a pool array). The other advantage of this is that we can easily
  * track the memory.
  *
+ * QUESTION: is it better to use an index based pool or rawptr?
  */
 
 namespace hh {

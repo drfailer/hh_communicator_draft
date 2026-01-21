@@ -150,9 +150,9 @@ private:
       }
       break;
     case PortState::Closing:
-      this->processSendOpsQueue(releaseData, true);
-      this->notifyDisconnection();
-      this->processSendOpsQueue(releaseData, true);
+      processSendOpsQueue(releaseData, true);
+      notifyDisconnection();
+      processSendOpsQueue(releaseData, true);
       this->senderPortState_ = PortState::Closed;
       break;
     case PortState::Closed:
