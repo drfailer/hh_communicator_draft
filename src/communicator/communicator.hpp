@@ -4,6 +4,7 @@
 #include "service/comm_service.hpp"
 #include "stats.hpp"
 #include "type_map.hpp"
+#include "../log.hpp"
 #include <cassert>
 #include <map>
 #include <utility>
@@ -128,6 +129,8 @@ public:
     this->recverPortState_ = PortState::Opened;
     this->connections_ = std::vector(this->nbProcesses(), Connection{true, 0, 0});
     this->connections_[this->rank()].connected = false;
+    this->signalBufferMem_ = std::vector<char>(1 + sizeof(size_t) * this->nbProcesses());
+    this->sendCountsMap_ = std::vector<size_t>(this->nbProcesses() * this->nbProcesses(), 0);
   }
 
   void run(auto allocData, auto releaseData, auto onRecv, auto canTerminate) {
@@ -139,23 +142,39 @@ public:
   }
 
 private:
-  enum class PortState { Opened, Closing, Closed };
+  enum class PortState { Opened, ClosingMaster, ClosingSlave, Closed };
 
   void runSender(auto releaseData, auto canTerminate) {
     switch (this->senderPortState_) {
     case PortState::Opened:
       processSendOpsQueue(releaseData);
       if (canTerminate()) {
-        this->senderPortState_ = PortState::Closing;
+        this->senderPortState_ = this->rank() == 0
+            ? PortState::ClosingMaster
+            : PortState::ClosingSlave;
       }
       break;
-    case PortState::Closing:
+    case PortState::ClosingMaster:
+      if (allDisconnectionSignalsReceived()) {
+        processSendOpsQueue(releaseData, true);
+        assert(this->sendOps_.empty());
+        sendDisconnectionSignalToSlaves();
+        processSendOpsQueue(releaseData, true);
+        this->senderPortState_ = PortState::Closed;
+      } else {
+        processSendOpsQueue(releaseData);
+      }
+      break;
+    case PortState::ClosingSlave:
+      assert(this->rank() != 0);
       processSendOpsQueue(releaseData, true);
-      notifyDisconnection();
+      assert(this->sendOps_.empty());
+      sendDisconnectionSignalToMaster();
       processSendOpsQueue(releaseData, true);
       this->senderPortState_ = PortState::Closed;
       break;
     case PortState::Closed:
+      assert(this->sendOps_.empty());
       break;
     }
   }
@@ -163,18 +182,23 @@ private:
   void runRecver(auto allocData, auto onRecv) {
     comm::Signal signal = comm::Signal::None;
     comm::Header header = {0, 0, 0, 0, 0, 0};
-    char         signalBufferMem[100] = {0};
-    comm::Buffer signalBuffer{signalBufferMem, 100};
 
     switch (this->recverPortState_) {
     case PortState::Opened:
-      recvSignal(signal, header, signalBuffer);
+      // TODO: this function should be named `probeIncommingRequests`, and the
+      // signal should be a request kind, and the actual sigal is retreived
+      // from the request content
+      recvSignal(signal, header);
 
       switch (signal) {
       case comm::Signal::None:
         break;
       case comm::Signal::Disconnect:
-        disconnect(header.source, signalBuffer);
+        if (this->rank() == 0) {
+          recvDisconnectionSignalFromSlave(header);
+        } else {
+          recvDisconnectionSignalFromMaster();
+        }
         break;
       case comm::Signal::Data:
         ++this->connections_[header.source].recvCount;
@@ -183,11 +207,12 @@ private:
       processCreateDataQueue(allocData);
       processRecvOpsQueue(onRecv);
 
-      if (!isConnected() && !hasPendingOperations()) {
-        this->recverPortState_ = PortState::Closing;
+      if (!isConnectedOrExpectsMorePackages() && !hasPendingOperations()) {
+        this->recverPortState_ = PortState::ClosingSlave;
       }
       break;
-    case PortState::Closing:
+    case PortState::ClosingMaster: // fallthrough
+    case PortState::ClosingSlave:
       flushRecvQueueAndWarehouse();
       this->recverPortState_ = PortState::Closed;
       break;
@@ -203,7 +228,17 @@ private:
     size_t recvCount;
   };
 
-  bool isConnected() const {
+  bool allDisconnectionSignalsReceived() const {
+    for (auto connection : this->connections_) {
+      if (connection.connected) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+
+  bool isConnectedOrExpectsMorePackages() const {
     for (auto connection : this->connections_) {
       if (connection.connected || connection.recvCount < connection.sendCount) {
         return true;
@@ -212,27 +247,49 @@ private:
     return false;
   }
 
-  void disconnect(comm::rank_t source, comm::Buffer &signalBuffer) {
-    assert(this->connections_[source].connected == true);
-    this->connections_[source].connected = false;
-    std::memcpy(&this->connections_[source].sendCount, &signalBuffer.mem[1], sizeof(size_t));
+  void sendDisconnectionSignalToMaster() {
+    Header header(this->rank(), 1, 0, this->channel_, 0, 0);
+
+    assert(this->sendOps_.empty());
+
+    this->signalBufferMem_[0] = (char)Signal::Disconnect;
+    std::memcpy(&this->signalBufferMem_[1], this->packagesCount_.data(), this->nbProcesses() * sizeof(size_t));
+    this->service_->send(header, 0, Buffer{this->signalBufferMem_.data(), this->signalBufferMem_.size()});
   }
 
-  /*
-   * broadcast disconnection signal
-   */
-  void notifyDisconnection() {
+  void sendDisconnectionSignalToSlaves() {
     Header header(this->rank(), 1, 0, this->channel_, 0, 0);
-    char   buf[100] = {(char)Signal::Disconnect};
-    size_t len = 1;
+
+    this->signalBufferMem_[0] = (char)Signal::Disconnect;
+    for (size_t dest = 1; dest < this->nbProcesses(); ++dest) {
+      this->sendCountsMap_[dest * this->nbProcesses()] = this->packagesCount_[dest];
+      std::memcpy(&this->signalBufferMem_[1], &this->sendCountsMap_[dest * this->nbProcesses()], this->nbProcesses() * sizeof(size_t));
+      this->service_->send(header, dest, Buffer{this->signalBufferMem_.data(), this->signalBufferMem_.size()});
+    }
+  }
+
+  void recvDisconnectionSignalFromSlave(Header const &header) {
+    size_t *sendCounts = (size_t*)(&this->signalBufferMem_[1]);
+
+    assert(this->connections_[header.source].connected == true);
+    this->connections_[header.source].connected = false;
+    this->connections_[header.source].sendCount = sendCounts[0];
 
     for (size_t dest = 0; dest < this->nbProcesses(); ++dest) {
-      if (dest != this->rank()) {
-        size_t size = sizeof(this->packagesCount_[dest]);
-        std::memcpy(&buf[1], &this->packagesCount_[dest], size);
-        len = 1 + size;
-        this->service_->send(header, dest, Buffer{buf, len});
+      this->sendCountsMap_[dest * this->nbProcesses() + header.source] = sendCounts[dest];
+    }
+  }
+
+  void recvDisconnectionSignalFromMaster() {
+    size_t *sendCounts = (size_t*)(&this->signalBufferMem_[1]);
+
+    for (size_t source = 0; source < this->nbProcesses(); ++source) {
+      if (source == this->rank()) {
+        continue;
       }
+      assert(this->connections_[source].connected == true);
+      this->connections_[source].connected = false;
+      this->connections_[source].sendCount = sendCounts[source];
     }
   }
 
@@ -385,7 +442,7 @@ private:
    * signal, then receive the signal, otherwise, add a pending recv data request
    * to the queue.
    */
-  void recvSignal(Signal &signal, Header &header, Buffer &signalBuffer) {
+  void recvSignal(Signal &signal, Header &header) {
     Request request = this->service_->probe(this->channel_);
 
     signal = Signal::None;
@@ -401,8 +458,9 @@ private:
         signal = Signal::Data;
         this->service_->requestRelease(request);
       } else {
-        this->service_->recv(request, signalBuffer);
-        signal = (Signal)signalBuffer.mem[0];
+        comm::Buffer buf{this->signalBufferMem_.data(), this->signalBufferMem_.size()};
+        this->service_->recv(request, buf);
+        signal = (Signal)buf.mem[0];
       }
       assert(header.source < this->nbProcesses());
       infog(logh::IG::Comm, "comm", "recvSignal -> ", " source = ", header.source, " signal = ", (int)signal);
@@ -595,7 +653,6 @@ private:
     }
   }
 
-
 /******************************************************************************/
 /*                                 attributes                                 */
 /******************************************************************************/
@@ -621,6 +678,10 @@ private:
   // stats
   CommTaskStats       stats_;
   std::vector<size_t> packagesCount_ = {};
+
+  // diconnection buffer
+  std::vector<char>   signalBufferMem_;
+  std::vector<size_t> sendCountsMap_; // this is a 2D array
 };
 
 } // end namespace comm
