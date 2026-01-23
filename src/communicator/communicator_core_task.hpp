@@ -128,7 +128,7 @@ private:
       // Operate the connectedReceivers to get a data and send it to execute
       this->operateReceivers();
     }
-    senderDisconnect_ = true;
+    this->senderDisconnect_ = true;
   }
 
 public:
