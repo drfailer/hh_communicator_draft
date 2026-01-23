@@ -53,21 +53,28 @@ public:
 
     auto dests = strategy_(data);
     auto rankIt = std::find(dests.begin(), dests.end(), task_->comm()->service()->rank());
-    bool isDataProcessedOnThisRank = false;
+    bool isDataProcessedOnThisRank = (rankIt != dests.end());
 
     callPreSend(data); // call preSend once
-    if (rankIt != dests.end()) {
-      addResult(data);
+
+    if (isDataProcessedOnThisRank) {
       dests.erase(rankIt);
-      isDataProcessedOnThisRank = true;
-    }
-    if (!dests.empty()) {
-      task_->comm()->sendData(dests, data, shouldReturnMemory(data, isDataProcessedOnThisRank));
+
+      if (dests.empty()) {
+        // In this case, we only transmit the data on the current rank.
+        // As a fix to memory cleanup issue, `postSend` is called beforehand to
+        // make sure that `canBeRecycled` result is correct.
+        callPostSend(data);
+        addResult(data);
+      } else {
+        // Otherwise, `postSend` will only be called once all the send network
+        // requests are done. `addResult` is called first to ensure that the
+        // data is transmitted to the current node in priority.
+        addResult(data);
+        task_->comm()->sendData(dests, data, shouldReturnMemory(data, isDataProcessedOnThisRank));
+      }
     } else {
-      // if the data doesn't need to be sent to another node, call postSend
-      // once. Otherwise, postSend will be called once all the send requests
-      // to all the destinations are completed
-      callPostSend(data);
+      task_->comm()->sendData(dests, data, shouldReturnMemory(data, isDataProcessedOnThisRank));
     }
   }
 
