@@ -2,7 +2,7 @@
 #include "../../../common/timer.h"
 #include "../../../common/utest.h"
 #include "graph.hpp"
-#include <cblas.h>
+#include <openblas/cblas.h>
 #include <communicator/service/clh_service.hpp>
 #include <communicator/service/mpi_service.hpp>
 

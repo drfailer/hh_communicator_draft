@@ -4,7 +4,7 @@
 #include "log.hpp"
 #include "state.hpp"
 #include "task.hpp"
-#include <cblas.h>
+#include <openblas/cblas.h>
 #include <communicator/communicator_task.hpp>
 #include <communicator/send_strategies.hpp>
 #include <hedgehog/hedgehog.h>
