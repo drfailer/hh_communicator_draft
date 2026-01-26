@@ -141,7 +141,7 @@ public:
     CommunicatorMultiSend<CommunicatorTask<Types...>, TM, Inputs>::initialize();
   }
 
-  [[nodiscard]] comm::Communicator<TM> *comm() const {
+  [[nodiscard]] comm::Communicator<Types...> *comm() const {
     return coreTask_->comm();
   }
 
@@ -153,9 +153,9 @@ public:
     throw std::runtime_error("error: the communicator task should not be copied.");
   }
 
-  template <typename... MMTypes>
-  void setMemoryManager(std::shared_ptr<tool::MemoryPool<MMTypes...>> mm) {
-    this->coreTask_->setMemoryManager(mm->template convert<Types...>());
+  template <typename MM>
+  void setMemoryManager(std::shared_ptr<MM> mm) {
+    this->coreTask_->setMemoryManager(std::make_shared<comm::tool::MemoryManager<Types...>>(mm));
   }
 
   using tool::BehaviorTaskMultiSendersTypeDeducer_t<std::tuple<Types...>>::addResult;

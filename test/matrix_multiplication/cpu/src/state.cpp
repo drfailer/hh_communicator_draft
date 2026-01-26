@@ -33,7 +33,7 @@ ProductState::ProductState(std::shared_ptr<MMType> mm, size_t M, size_t N, size_
 }
 
 std::shared_ptr<MatrixTile<MT, MatrixId::P>> ProductState::getPAndUpdateCount(auto a, auto b) {
-    auto p = mm->template getMemory<MatrixTile<MT, MatrixId::P>>(hh::tool::MemoryPoolAllocMode::Wait);
+    auto p = mm->template allocate<MatrixTile<MT, MatrixId::P>>(hh::comm::tool::MemoryManagerAllocateMode::Wait);
     p->rows = a->rows;
     p->cols = b->cols;
     p->processCount = 1;
@@ -162,9 +162,9 @@ void SumState::execute(std::shared_ptr<ProductData<MT>> data) {
     }
 
     --a->processCount;
-    mm->returnMemory(std::move(a));
+    mm->release(std::move(a));
     --b->processCount;
-    mm->returnMemory(std::move(b));
+    mm->release(std::move(b));
 }
 
 void SumState::execute(std::shared_ptr<SumData<MT>> data) {
@@ -180,7 +180,7 @@ void SumState::execute(std::shared_ptr<SumData<MT>> data) {
     auto &queue = queues.at(key);
 
     --data->p->processCount;
-    mm->returnMemory(std::move(data->p));
+    mm->release(std::move(data->p));
 
     if (--data->c->processCount == 0) {
         assert(queue.empty());
@@ -236,7 +236,7 @@ void CopyTileState::execute(std::shared_ptr<MatrixTile<MT, MatrixId::C>> tile) {
 
 void CopyTileState::execute(std::shared_ptr<MatrixTilePair> data) {
     --data->second->processCount;
-    mm->returnMemory(std::move(data->second));
+    mm->release(std::move(data->second));
     if (--nbCopies == 0) {
         logh::warn("copy tile state result");
         this->addResult(c);
