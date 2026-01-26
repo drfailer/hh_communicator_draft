@@ -2,7 +2,7 @@
 #define COMMUNICATOR_COMMUNICATOR_CORE_TASK
 #include "../log.hpp"
 #include "communicator.hpp"
-#include "communicator_memory_manager.hpp"
+#include "tool/memory_manager.hpp"
 #include "generic_core_task.hpp"
 #include "stats.hpp"
 #include <algorithm>
@@ -19,36 +19,6 @@ class CommunicatorTask;
 namespace core {
 
 // functors ////////////////////////////////////////////////////////////////////
-
-template <typename... Types>
-struct GetMemory {
-  std::shared_ptr<tool::MemoryPool<Types...>> mm;
-
-  template <typename T>
-  std::shared_ptr<T> operator()() {
-    if (!mm) {
-      if constexpr (std::is_default_constructible_v<T>) {
-        return std::make_shared<T>();
-      } else {
-        throw std::runtime_error(
-            "error: fail to create data in communicator task, provide a memory manager to solve this issue.");
-      }
-    }
-    return mm->template getMemory<T>(tool::MemoryPoolAllocMode::Fail);
-  }
-};
-
-template <typename... Types>
-struct ReturnMemory {
-  std::shared_ptr<tool::MemoryPool<Types...>> mm;
-
-  template <typename T>
-  void operator()(std::shared_ptr<T> data) {
-    if (mm) {
-      mm->returnMemory(std::move(data));
-    }
-  }
-};
 
 template <typename TaskType>
 struct ProcessData {
@@ -87,8 +57,7 @@ public:
     this->senderDisconnect_ = false;
     this->deamon_ = std::thread([this]() {
       this->communicator_.run(
-              GetMemory<Types...>(this->mm_),
-              ReturnMemory<Types...>(this->mm_),
+              this->mm_,
               ProcessData(this->task()),
               [&]() { return this->senderDisconnect_; });
     });
@@ -156,8 +125,8 @@ public:
   }
 
 public:
-  void setMemoryManager(std::shared_ptr<tool::MemoryPool<Types...>> mm) {
-    this->mm_ = mm;
+  void setMemoryManager(std::shared_ptr<comm::tool::MemoryManager<Types...>> mm) {
+      this->mm_ = mm;
   }
 
   comm::Communicator<TM> *comm() {
@@ -165,10 +134,10 @@ public:
   }
 
 private:
-  std::thread                                 deamon_;
-  std::shared_ptr<tool::MemoryPool<Types...>> mm_;
-  comm::Communicator<TM>                      communicator_;
-  bool                                        senderDisconnect_;
+  std::thread                                          deamon_;
+  std::shared_ptr<comm::tool::MemoryManager<Types...>> mm_;
+  comm::Communicator<TM>                               communicator_;
+  bool                                                 senderDisconnect_;
 };
 
 } // end namespace core

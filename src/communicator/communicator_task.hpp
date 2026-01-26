@@ -153,9 +153,10 @@ public:
     throw std::runtime_error("error: the communicator task should not be copied.");
   }
 
-  template <typename... MMTypes>
-  void setMemoryManager(std::shared_ptr<tool::MemoryPool<MMTypes...>> mm) {
-    this->coreTask_->setMemoryManager(mm->template convert<Types...>());
+  // TODO: the default implementation was supporting subtype set
+  //       template <typename... MMTypes>
+  void setMemoryManager(std::shared_ptr<comm::tool::MemoryManager<Types...>> mm) {
+    this->coreTask_->setMemoryManager(mm);
   }
 
   using tool::BehaviorTaskMultiSendersTypeDeducer_t<std::tuple<Types...>>::addResult;

@@ -2,6 +2,7 @@
 #include "communicator/service/mpi_service.hpp"
 #include "communicator/communicator_task.hpp"
 #include "communicator/send_strategies.hpp"
+#include "communicator/tool/memory_pool.hpp"
 #include "log.hpp"
 #include <hedgehog/hedgehog.h>
 #include <iostream>
@@ -20,7 +21,7 @@ struct TestGraph1 : hh::Graph<1, int, int> {
    * functions to avoid the double free.
    */
 
-  TestGraph1(hh::comm::CommService *service, std::shared_ptr<hh::tool::MemoryPool<int>> mm)
+  TestGraph1(hh::comm::CommService *service, std::shared_ptr<hh::comm::tool::MemoryPool<int>> mm)
       : hh::Graph<1, int, int>("TestGraph1"), communicator_(service) {
     assert(service->nbProcesses() == 3);
     auto in = std::make_shared<hh::LambdaTask<1, int, int>>("input", 1);
@@ -36,9 +37,9 @@ struct TestGraph1 : hh::Graph<1, int, int> {
     bn0->template strategy<int>(hh::comm::strategy::SendTo<int>(0));
 
     // FIXME: the data returns to the memory pool too early
-    b01->setMemoryManager(mm);
-    b02->setMemoryManager(mm);
-    bn0->setMemoryManager(mm);
+    b01->setMemoryManager(mm->memoryManager());
+    b02->setMemoryManager(mm->memoryManager());
+    bn0->setMemoryManager(mm->memoryManager());
 
     in->setLambda<int>([service](std::shared_ptr<int> data, auto self) {
       int output = *data + 1;
@@ -88,7 +89,7 @@ int main(int argc, char **argv) {
   // hh::comm::CommService *service = new hh::comm::CLHService(true);
   hh::comm::CommService *service = new hh::comm::MPIService(&argc, &argv, true);
 
-  auto mm = std::make_shared<hh::tool::MemoryPool<int>>();
+  auto mm = std::make_shared<hh::comm::tool::MemoryPool<int>>();
   mm->template fill<int>(5);
 
   // auto data = std::make_shared<int>(4);
@@ -99,7 +100,7 @@ int main(int argc, char **argv) {
 
   graph.executeGraph(true);
   if (service->rank() == 0) {
-      auto data = mm->template getMemory<int>();
+      auto data = mm->template allocate<int>();
       *data = 4;
       graph.pushData(data);
   }
@@ -110,7 +111,7 @@ int main(int argc, char **argv) {
     while (auto result = graph.getBlockingResult()) {
       auto resultPtr = std::get<std::shared_ptr<int>>(*result);
       results.push_back(*resultPtr);
-      mm->template returnMemory<int>(std::move(resultPtr));
+      mm->template release<int>(std::move(resultPtr));
     }
   }
 
