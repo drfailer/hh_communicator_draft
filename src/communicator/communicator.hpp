@@ -104,8 +104,9 @@ public:
    * Send data to the given destinations.
    */
   template <typename T>
-  void sendData(std::vector<rank_t> const &dests, std::shared_ptr<T> data, bool returnMemory = true) {
-    auto [storageId, storage] = createSendStorage(dests, data, returnMemory);
+  void sendData(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
+    bool useAddResult = std::find(dests.begin(), dests.end(), this->rank()) != dests.end();
+    auto [storageId, storage] = createSendStorage(dests, data, useAddResult);
     Header header(this->rank(), 0, storageId.typeId, this->channel_, storageId.packageId, 0);
 
     infog(logh::IG::Comm, "comm", "sendData -> ", " typeId = ", (int)TM::template idOf<T>(),
@@ -116,6 +117,9 @@ public:
     this->wh_.mutex.unlock();
 
     for (auto dest : dests) {
+      if (dest == this->rank()) {
+        continue;
+      }
       this->packagesCount_[dest] += 1;
       for (size_t i = 0; i < storage.package.data.size(); ++i) {
         header.bufferId = (buffer_id_t)i;
@@ -140,21 +144,21 @@ public:
     this->sendCountsMap_ = std::vector<size_t>(this->nbProcesses() * this->nbProcesses(), 0);
   }
 
-  void run(auto onRecv, auto canTerminate) {
+  void run(auto addResult, auto canTerminate) {
     init();
     while (this->senderPortState_ != PortState::Closed || this->recverPortState_ != PortState::Closed) {
-      runSender(canTerminate);
-      runRecver(onRecv);
+      runSender(addResult, canTerminate);
+      runRecver(addResult);
     }
   }
 
 private:
   enum class PortState { Opened, ClosingMaster, ClosingSlave, Closed };
 
-  void runSender(auto canTerminate) {
+  void runSender(auto addResult, auto canTerminate) {
     switch (this->senderPortState_) {
     case PortState::Opened:
-      processSendOpsQueue();
+      processSendOpsQueue(addResult);
       if (canTerminate()) {
         this->senderPortState_ = this->rank() == 0
             ? PortState::ClosingMaster
@@ -163,21 +167,21 @@ private:
       break;
     case PortState::ClosingMaster:
       if (allDisconnectionSignalsReceived()) {
-        processSendOpsQueue(true);
+        processSendOpsQueue(addResult, true);
         assert(this->sendOps_.empty());
         sendDisconnectionSignalToSlaves();
-        processSendOpsQueue(true);
+        processSendOpsQueue(addResult, true);
         this->senderPortState_ = PortState::Closed;
       } else {
-        processSendOpsQueue();
+        processSendOpsQueue(addResult);
       }
       break;
     case PortState::ClosingSlave:
       assert(this->rank() != 0);
-      processSendOpsQueue(true);
+      processSendOpsQueue(addResult, true);
       assert(this->sendOps_.empty());
       sendDisconnectionSignalToMaster();
-      processSendOpsQueue(true);
+      processSendOpsQueue(addResult, true);
       this->senderPortState_ = PortState::Closed;
       break;
     case PortState::Closed:
@@ -186,7 +190,7 @@ private:
     }
   }
 
-  void runRecver(auto onRecv) {
+  void runRecver(auto addResult) {
     comm::Signal signal = comm::Signal::None;
     comm::Header header = {0, 0, 0, 0, 0, 0};
 
@@ -212,7 +216,7 @@ private:
         break;
       }
       processCreateDataQueue();
-      processRecvOpsQueue(onRecv);
+      processRecvOpsQueue(addResult);
 
       if (!isConnectedOrExpectsMorePackages() && !hasPendingOperations()) {
         this->recverPortState_ = PortState::ClosingSlave;
@@ -315,7 +319,7 @@ private:
   /*
    * Process the send operation queue.
    */
-  void processSendOpsQueue(bool flush = false) {
+  void processSendOpsQueue(auto addResult, bool flush = false) {
     std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
     this->stats_.updateSendQueuesInfos(this->sendOps_.size(), this->wh_.sendStorage.size());
@@ -329,7 +333,7 @@ private:
           ++storage.bufferCount;
 
           if (storage.bufferCount == storage.ttlBufferCount) {
-            postSend(it->storageId, storage);
+            postSend(it->storageId, storage, addResult);
             this->wh_.sendStorage.erase(it->storageId);
           }
           this->service_->requestRelease(it->request);
@@ -344,7 +348,7 @@ private:
   /*
    * Manages the data after send.
    */
-  void postSend(StorageId storageId, PackageStorage<TM> storage) {
+  void postSend(StorageId storageId, PackageStorage<TM> storage, auto addResult) {
     assert(storageId.typeId < TM::size);
     TM::apply(storageId.typeId, [&]<typename T>() {
       std::shared_ptr<T> data = std::get<std::shared_ptr<T>>(storage.data);
@@ -356,16 +360,18 @@ private:
         // support the 'pack' operation
         delete[] storage.package.data[0].mem;
       }
-      if (storage.returnMemory) {
+      if (storage.useAddResult) {
+        addResult(std::move(data));
+      } else {
         this->mm_->release(std::move(data));
       }
     });
   }
 
   template <typename T>
-  std::pair<StorageId, PackageStorage<TM>> createSendStorage(std::vector<rank_t> const &dests, std::shared_ptr<T> data,
-                                                             bool returnMemory) {
+  std::pair<StorageId, PackageStorage<TM>> createSendStorage(std::vector<rank_t> const &dests, std::shared_ptr<T> data, bool useAddResult) {
     package_id_t packageId = this->service_->newPackageId(this->channel_);
+    size_t nbDests = useAddResult ? dests.size() - 1 : dests.size();
 
     // measure data packing time
     time_t  tpackingStart = std::chrono::system_clock::now();
@@ -377,9 +383,9 @@ private:
     PackageStorage<TM> storage = {
         .package = package,
         .bufferCount = 0,
-        .ttlBufferCount = package.data.size() * dests.size(),
+        .ttlBufferCount = package.data.size() * nbDests,
         .data = data,
-        .returnMemory = returnMemory,
+        .useAddResult = useAddResult,
         .dbgBufferReceived = {false, false, false, false},
     };
     StorageId storageId(this->rank(), packageId, TM::template idOf<T>());
@@ -416,8 +422,7 @@ private:
    * Process the recv operations. This operations are to pending MPI requests
    * that have an associated recv data storage that will store the buffers.
    */
-  template <typename ProcessCB>
-  void processRecvOpsQueue(ProcessCB processData) {
+  void processRecvOpsQueue(auto addResult) {
     std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
     this->stats_.updateRecvQueuesInfos(this->recvOps_.size(), this->wh_.recvStorage.size());
@@ -430,7 +435,7 @@ private:
         ++storage.bufferCount;
 
         if (storage.bufferCount == storage.ttlBufferCount) {
-          postRecv(it->storageId, storage, processData);
+          postRecv(it->storageId, storage, addResult);
           this->wh_.recvStorage.erase(it->storageId);
         }
         this->service_->requestRelease(it->request);
@@ -509,8 +514,7 @@ private:
   /*
    * Process data after recv.
    */
-  template <typename ProcessCB>
-  void postRecv(StorageId storageId, PackageStorage<TM> storage, ProcessCB processData) {
+  void postRecv(StorageId storageId, PackageStorage<TM> storage, auto addResult) {
     infog(logh::IG::Comm, "comm", "processCreateDataQueue -> unpacking data");
     time_t tunpackingStart, tunpackingEnd;
     assert(storageId.typeId < TM::size);
@@ -519,7 +523,7 @@ private:
       tunpackingStart = std::chrono::system_clock::now();
       unpack(std::move(storage.package), data);
       tunpackingEnd = std::chrono::system_clock::now();
-      processData.template operator()<T>(data);
+      addResult(data);
     });
 
     this->stats_.registerRecvTimings(
@@ -548,7 +552,7 @@ private:
           .bufferCount = 0,
           .ttlBufferCount = package.data.size(),
           .data = data,
-          .returnMemory = true,
+          .useAddResult = false,
           .dbgBufferReceived = {false, false, false, false},
       };
       this->wh_.recvStorage.insert({storageId, storage});
