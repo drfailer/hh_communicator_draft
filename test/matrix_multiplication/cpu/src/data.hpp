@@ -1,6 +1,6 @@
 #ifndef DATA_HPP
 #define DATA_HPP
-#include <communicator/communicator_memory_manager.hpp>
+#include <communicator/tool/memory_pool.hpp>
 #include <communicator/package.hpp>
 #include "log.hpp"
 #include <cstddef>
@@ -149,7 +149,7 @@ struct SumData {
 using MatrixTilePair
     = std::pair<std::shared_ptr<Matrix<MT, MatrixId::C>>, std::shared_ptr<MatrixTile<MT, MatrixId::C>>>;
 
-using MMType = hh::tool::MemoryPool<MatrixTile<MT, MatrixId::A>, MatrixTile<MT, MatrixId::B>,
+using MMType = hh::comm::tool::MemoryPool<MatrixTile<MT, MatrixId::A>, MatrixTile<MT, MatrixId::B>,
                                     MatrixTile<MT, MatrixId::C>, MatrixTile<MT, MatrixId::P>>;
 
 #endif

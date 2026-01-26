@@ -17,7 +17,7 @@ namespace hh {
 namespace comm {
 namespace tool {
 
-enum class MemoryManagerAllocatedMode {
+enum class MemoryManagerAllocateMode {
   Wait, //< get is blocking and waits for the memory to be available
   Dynamic, //< allocates new memory if none is available
   Fail, //< return nullptr directly if no memory is availble
@@ -29,7 +29,7 @@ struct SingleTypeMemoryManager {
 
   virtual ~SingleTypeMemoryManager() = default;
 
-  virtual std::shared_ptr<T> allocate(MemoryManagerAllocatedMode mode = MemoryManagerAllocatedMode::Fail,
+  virtual std::shared_ptr<T> allocate(MemoryManagerAllocateMode mode = MemoryManagerAllocateMode::Fail,
                                       std::source_location       loc = std::source_location::current())
       = 0;
 
@@ -48,7 +48,7 @@ public:
   SingleTypeMemoryManagerAbstraction(SingleTypeMemoryManager<T> *mmi)
       : mmi_(mmi) {}
 
-  std::shared_ptr<T> allocate(MemoryManagerAllocatedMode mode, std::source_location loc) {
+  std::shared_ptr<T> allocate(MemoryManagerAllocateMode mode, std::source_location loc) {
     return this->mmi_->allocate(mode, loc);
   }
 
@@ -78,7 +78,7 @@ struct MemoryManager : SingleTypeMemoryManagerAbstraction<Types>... {
       : MemoryManager(mmi.get()) {}
 
   template <typename T>
-  std::shared_ptr<T> allocate(MemoryManagerAllocatedMode mode = MemoryManagerAllocatedMode::Fail,
+  std::shared_ptr<T> allocate(MemoryManagerAllocateMode mode = MemoryManagerAllocateMode::Fail,
                               std::source_location       loc = std::source_location::current()) {
     return static_cast<SingleTypeMemoryManagerAbstraction<T> *>(this)->allocate(mode, loc);
   }

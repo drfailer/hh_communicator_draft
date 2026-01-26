@@ -33,20 +33,20 @@ public:
     }
   }
 
-  std::shared_ptr<T> allocate(MemoryManagerAllocatedMode mode = MemoryManagerAllocatedMode::Fail,
+  std::shared_ptr<T> allocate(MemoryManagerAllocateMode mode = MemoryManagerAllocateMode::Fail,
                               std::source_location       loc = std::source_location::current()) override {
     std::unique_lock<std::mutex> poolLock(mutex);
 
     if (memory.empty()) {
       switch (mode) {
-      case MemoryManagerAllocatedMode::Wait: {
+      case MemoryManagerAllocateMode::Wait: {
         ++this->stats.waitCount;
         auto wts = std::chrono::system_clock::now();
         cv.wait(poolLock, [&]() { return !memory.empty(); });
         auto wte = std::chrono::system_clock::now();
         this->stats.waitTime += std::chrono::duration_cast<std::chrono::nanoseconds>(wte - wts);
       } break;
-      case MemoryManagerAllocatedMode::Dynamic:
+      case MemoryManagerAllocateMode::Dynamic:
         if constexpr (std::is_default_constructible_v<T>) {
           memory.push_back(std::make_shared<T>());
         } else {
@@ -55,7 +55,7 @@ public:
           return nullptr;
         }
         break;
-      case MemoryManagerAllocatedMode::Fail:
+      case MemoryManagerAllocateMode::Fail:
         return nullptr;
         break;
       }
@@ -135,12 +135,8 @@ private:
 template <typename... Types>
 class MemoryPool : public SingleTypeMemoryPool<Types>... {
 public:
-  std::shared_ptr<MemoryManager<Types...>> memoryManager() {
-    return std::make_shared<MemoryManager<Types...>>(this);
-  }
-
   template <typename T>
-  std::shared_ptr<T> allocate(MemoryManagerAllocatedMode mode = MemoryManagerAllocatedMode::Fail,
+  std::shared_ptr<T> allocate(MemoryManagerAllocateMode mode = MemoryManagerAllocateMode::Fail,
                               std::source_location       loc = std::source_location::current()) {
     return static_cast<SingleTypeMemoryPool<T> *>(this)->allocate(mode, loc);
   }

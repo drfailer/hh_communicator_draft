@@ -37,9 +37,9 @@ struct TestGraph1 : hh::Graph<1, int, int> {
     bn0->template strategy<int>(hh::comm::strategy::SendTo<int>(0));
 
     // FIXME: the data returns to the memory pool too early
-    b01->setMemoryManager(mm->memoryManager());
-    b02->setMemoryManager(mm->memoryManager());
-    bn0->setMemoryManager(mm->memoryManager());
+    b01->setMemoryManager(mm);
+    b02->setMemoryManager(mm);
+    bn0->setMemoryManager(mm);
 
     in->setLambda<int>([service](std::shared_ptr<int> data, auto self) {
       int output = *data + 1;
