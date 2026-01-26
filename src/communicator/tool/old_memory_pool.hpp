@@ -1,8 +1,8 @@
-#ifndef COMMUNICATOR_COMMUNICATOR_MEMORY_MANAGER
-#define COMMUNICATOR_COMMUNICATOR_MEMORY_MANAGER
-#include "../log.hpp"
+#ifndef COMMUNICATOR_MEMORY_POOL
+#define COMMUNICATOR_MEMORY_POOL
+#include "../../log.hpp"
 #include "hedgehog/src/tools/meta_functions.h"
-#include "stats.hpp"
+#include "../stats.hpp"
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
