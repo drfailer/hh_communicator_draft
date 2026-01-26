@@ -57,7 +57,6 @@ public:
     this->senderDisconnect_ = false;
     this->deamon_ = std::thread([this]() {
       this->communicator_.run(
-              this->mm_,
               ProcessData(this->task()),
               [&]() { return this->senderDisconnect_; });
     });
@@ -127,16 +126,17 @@ public:
 public:
   void setMemoryManager(std::shared_ptr<comm::tool::MemoryManager<Types...>> mm) {
       this->mm_ = mm;
+      this->communicator_.memoryManager(mm);
   }
 
-  comm::Communicator<TM> *comm() {
+  comm::Communicator<Types...> *comm() {
     return &communicator_;
   }
 
 private:
   std::thread                                          deamon_;
   std::shared_ptr<comm::tool::MemoryManager<Types...>> mm_;
-  comm::Communicator<TM>                               communicator_;
+  comm::Communicator<Types...>                         communicator_;
   bool                                                 senderDisconnect_;
 };
 

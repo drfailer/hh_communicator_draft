@@ -141,7 +141,7 @@ public:
     CommunicatorMultiSend<CommunicatorTask<Types...>, TM, Inputs>::initialize();
   }
 
-  [[nodiscard]] comm::Communicator<TM> *comm() const {
+  [[nodiscard]] comm::Communicator<Types...> *comm() const {
     return coreTask_->comm();
   }
 

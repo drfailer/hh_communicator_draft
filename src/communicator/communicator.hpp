@@ -30,8 +30,10 @@ namespace hh {
 
 namespace comm {
 
-template <typename TM>
+template <typename ...Types>
 class Communicator {
+  using TM = comm::TypeMap<Types...>;
+
 public:
   Communicator(CommService *service)
       : service_(service),
@@ -78,6 +80,10 @@ public:
 
   size_t nbCreateDataOps() const {
     return this->createDataOps_.size();
+  }
+
+  void memoryManager(std::shared_ptr<tool::MemoryManager<Types...>> mm) {
+      this->mm_ = mm;
   }
 
   /*
@@ -134,21 +140,21 @@ public:
     this->sendCountsMap_ = std::vector<size_t>(this->nbProcesses() * this->nbProcesses(), 0);
   }
 
-  void run(auto mm, auto onRecv, auto canTerminate) {
+  void run(auto onRecv, auto canTerminate) {
     init();
     while (this->senderPortState_ != PortState::Closed || this->recverPortState_ != PortState::Closed) {
-      runSender(mm, canTerminate);
-      runRecver(mm, onRecv);
+      runSender(canTerminate);
+      runRecver(onRecv);
     }
   }
 
 private:
   enum class PortState { Opened, ClosingMaster, ClosingSlave, Closed };
 
-  void runSender(auto mm, auto canTerminate) {
+  void runSender(auto canTerminate) {
     switch (this->senderPortState_) {
     case PortState::Opened:
-      processSendOpsQueue(mm);
+      processSendOpsQueue();
       if (canTerminate()) {
         this->senderPortState_ = this->rank() == 0
             ? PortState::ClosingMaster
@@ -157,21 +163,21 @@ private:
       break;
     case PortState::ClosingMaster:
       if (allDisconnectionSignalsReceived()) {
-        processSendOpsQueue(mm, true);
+        processSendOpsQueue(true);
         assert(this->sendOps_.empty());
         sendDisconnectionSignalToSlaves();
-        processSendOpsQueue(mm, true);
+        processSendOpsQueue(true);
         this->senderPortState_ = PortState::Closed;
       } else {
-        processSendOpsQueue(mm);
+        processSendOpsQueue();
       }
       break;
     case PortState::ClosingSlave:
       assert(this->rank() != 0);
-      processSendOpsQueue(mm, true);
+      processSendOpsQueue(true);
       assert(this->sendOps_.empty());
       sendDisconnectionSignalToMaster();
-      processSendOpsQueue(mm, true);
+      processSendOpsQueue(true);
       this->senderPortState_ = PortState::Closed;
       break;
     case PortState::Closed:
@@ -180,7 +186,7 @@ private:
     }
   }
 
-  void runRecver(auto allocData, auto onRecv) {
+  void runRecver(auto onRecv) {
     comm::Signal signal = comm::Signal::None;
     comm::Header header = {0, 0, 0, 0, 0, 0};
 
@@ -205,7 +211,7 @@ private:
         ++this->connections_[header.source].recvCount;
         break;
       }
-      processCreateDataQueue(allocData);
+      processCreateDataQueue();
       processRecvOpsQueue(onRecv);
 
       if (!isConnectedOrExpectsMorePackages() && !hasPendingOperations()) {
@@ -309,7 +315,7 @@ private:
   /*
    * Process the send operation queue.
    */
-  void processSendOpsQueue(auto mm, bool flush = false) {
+  void processSendOpsQueue(bool flush = false) {
     std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
     this->stats_.updateSendQueuesInfos(this->sendOps_.size(), this->wh_.sendStorage.size());
@@ -323,7 +329,7 @@ private:
           ++storage.bufferCount;
 
           if (storage.bufferCount == storage.ttlBufferCount) {
-            postSend(it->storageId, storage, mm);
+            postSend(it->storageId, storage);
             this->wh_.sendStorage.erase(it->storageId);
           }
           this->service_->requestRelease(it->request);
@@ -338,7 +344,7 @@ private:
   /*
    * Manages the data after send.
    */
-  void postSend(StorageId storageId, PackageStorage<TM> storage, auto mm) {
+  void postSend(StorageId storageId, PackageStorage<TM> storage) {
     assert(storageId.typeId < TM::size);
     TM::apply(storageId.typeId, [&]<typename T>() {
       std::shared_ptr<T> data = std::get<std::shared_ptr<T>>(storage.data);
@@ -351,7 +357,7 @@ private:
         delete[] storage.package.data[0].mem;
       }
       if (storage.returnMemory) {
-        mm->release(std::move(data));
+        this->mm_->release(std::move(data));
       }
     });
   }
@@ -392,13 +398,13 @@ private:
   /*
    * Process the pending recv data queue.
    */
-  void processCreateDataQueue(auto mm) {
+  void processCreateDataQueue() {
     std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
     this->stats_.updateCreateDataQueueInfos(this->createDataOps_.size());
 
     for (auto it = this->createDataOps_.begin(); it != this->createDataOps_.end();) {
-      if (recvData(*it, mm)) {
+      if (recvData(*it)) {
         it = this->createDataOps_.erase(it);
       } else {
         it++;
@@ -473,7 +479,7 @@ private:
    * a nullptr (eg the pool is empty). In this case, the pending recv data
    * requests will remain in the queue util memory is available.
    */
-  bool recvData(Header header, auto mm) {
+  bool recvData(Header header) {
     std::lock_guard<std::mutex> whLock(this->wh_.mutex);
     StorageId storageId(header.source, header.packageId, header.typeId, 0);
 
@@ -481,7 +487,7 @@ private:
         return true;
     }
 
-    if (!createRecvStorage(storageId, mm)) {
+    if (!createRecvStorage(storageId)) {
       infog(logh::IG::Comm, "comm", "createRecvStorage returned false");
       return false;
     }
@@ -525,12 +531,12 @@ private:
    * If the memory manager (createData) returns a valid pointer, creates a new
    * storage entry in the warehouse.
    */
-  bool createRecvStorage(StorageId storageId, auto mm) {
+  bool createRecvStorage(StorageId storageId) {
     bool status = true;
 
     assert(storageId.typeId < TM::size);
     TM::apply(storageId.typeId, [&]<typename T>() {
-      auto data = mm->template allocate<T>();
+      auto data = this->mm_->template allocate<T>();
 
       if (data == nullptr) {
         status = false;
@@ -678,6 +684,9 @@ private:
   // diconnection buffer
   std::vector<char>   signalBufferMem_;
   std::vector<size_t> sendCountsMap_; // this is a 2D array
+
+  // memory manager
+  std::shared_ptr<tool::MemoryManager<Types...>> mm_ = nullptr;
 };
 
 } // end namespace comm
