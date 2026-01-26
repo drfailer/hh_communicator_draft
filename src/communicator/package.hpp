@@ -120,7 +120,7 @@ struct PackageWarehouse {
     size_t             bufferCount;
     size_t             ttlBufferCount;
     variant_type_t<TM> data;
-    bool               returnMemory;
+    bool               useAddResult;
     bool               dbgBufferReceived[4]; // TODO: remove
   };
 

@@ -15,66 +15,24 @@ using SendStrategy = std::function<std::vector<comm::rank_t>(std::shared_ptr<T>)
 template <typename TaskType, typename TM, typename Input>
 struct CommunicatorSend : tool::BehaviorMultiExecuteTypeDeducer_t<std::tuple<Input>> {
 private:
-  size_t                     rankIdx_ = 0;
-  TaskType                  *task_ = nullptr;
-  SendStrategy<Input>          strategy_ = nullptr;
+  TaskType            *task_ = nullptr;
+  SendStrategy<Input>  strategy_ = nullptr;
 
 public:
   CommunicatorSend(TaskType *task)
       : task_(task) {}
 
-  void addResult(std::shared_ptr<Input> data) {
-    task_->addResult(data);
-  }
-
-  void callPreSend(std::shared_ptr<Input> data) {
-    if constexpr (requires { data->preSend(); }) {
-      data->preSend();
-    }
-  }
-
-  void callPostSend(std::shared_ptr<Input> data) {
-    if constexpr (requires { data->postSend(); }) {
-      data->postSend();
-    }
-  }
-
-  bool shouldReturnMemory(std::shared_ptr<Input> data, bool isDataProcessedOnThisRank) {
-    if constexpr (requires { data->canBeRecycled(); }) {
-      return true;
-    } else {
-      return !isDataProcessedOnThisRank;
-    }
-  }
-
   void execute(std::shared_ptr<Input> data) override {
     logh::infog(logh::IG::CommunicatorTaskExecute, "communicator task execute", "[", (int)task_->comm()->channel(),
                 "]: rank = ", task_->comm()->service()->rank());
-
-    auto dests = strategy_(data);
-    auto rankIt = std::find(dests.begin(), dests.end(), task_->comm()->service()->rank());
-    bool isDataProcessedOnThisRank = (rankIt != dests.end());
-
-    callPreSend(data); // call preSend once
-
-    if (isDataProcessedOnThisRank) {
-      dests.erase(rankIt);
-
-      if (dests.empty()) {
-        // In this case, we only transmit the data on the current rank.
-        // As a fix to memory cleanup issue, `postSend` is called beforehand to
-        // make sure that `canBeRecycled` result is correct.
-        callPostSend(data);
-        addResult(data);
-      } else {
-        // Otherwise, `postSend` will only be called once all the send network
-        // requests are done. `addResult` is called first to ensure that the
-        // data is transmitted to the current node in priority.
-        addResult(data);
-        task_->comm()->sendData(dests, data, shouldReturnMemory(data, isDataProcessedOnThisRank));
-      }
+    if constexpr (requires { data->preSend(); }) {
+      data->preSend();
+    }
+    auto dests = this->strategy_(data);
+    if (dests.size() == 1 && dests[0] == this->task_->comm()->rank()) {
+      this->task_->addResult(data);
     } else {
-      task_->comm()->sendData(dests, data, shouldReturnMemory(data, isDataProcessedOnThisRank));
+      this->task_->comm()->sendData(dests, data);
     }
   }
 
