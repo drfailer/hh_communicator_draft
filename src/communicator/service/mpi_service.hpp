@@ -220,7 +220,6 @@ public: // requests ////////////////////////////////////////////////////////////
 
 public: // synchronization /////////////////////////////////////////////////////
   void barrier() override {
-    std::lock_guard<std::mutex> mpiLock(this->mutex());
     checkMPI(MPI_Barrier(MPI_COMM_WORLD));
   }
 
