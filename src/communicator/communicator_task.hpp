@@ -112,7 +112,7 @@ public:
   }
 
   template <typename MM>
-  void setMemoryManager(std::shared_ptr<MM> mm) {
+  void setMemoryManager(MM mm) {
     this->coreTask_->setMemoryManager(std::make_shared<comm::tool::MemoryManager<Types...>>(mm));
   }
 
