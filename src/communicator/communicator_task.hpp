@@ -28,6 +28,13 @@ public:
     if constexpr (requires { data->preSend(); }) {
       data->preSend();
     }
+    if (!this->strategy_) {
+        std::cerr << "error: send strategy not set for task "
+                  << hh::tool::typeToStr<TaskType>()
+                  << " (type is `" << hh::tool::typeToStr<Input>() << "')."
+                  << std::endl;
+        return;
+    }
     auto dests = this->strategy_(data);
     if (dests.size() == 1 && dests[0] == this->task_->comm()->rank()) {
       this->task_->addResult(data);
