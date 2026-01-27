@@ -110,7 +110,7 @@ public:
     Header header(this->rank(), 0, storageId.typeId, this->channel_, storageId.packageId, 0);
 
     infog(logh::IG::Comm, "comm", "sendData -> ", " typeId = ", (int)TM::template idOf<T>(),
-          " requestId = ", (int)header.packageId);
+          ", requestId = ", (int)header.packageId, ", dests = ", dests);
 
     this->wh_.mutex.lock();
     this->wh_.sendStorage.insert({storageId, storage});
