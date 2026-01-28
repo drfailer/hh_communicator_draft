@@ -49,14 +49,17 @@ public:
       : mmi_(mmi) {}
 
   std::shared_ptr<T> allocate(MemoryManagerAllocateMode mode, std::source_location loc) {
+    assert(this->mmi_ != nullptr && "error: SingleTypeMemoryManager implementor not set.");
     return this->mmi_->allocate(mode, loc);
   }
 
   void release(std::shared_ptr<T> &&data, std::source_location loc) {
+    assert(this->mmi_ != nullptr && "error: SingleTypeMemoryManager implementor not set.");
     this->mmi_->release(std::move(data), loc);
   }
 
   std::string extraPrintingInformation() const {
+    assert(this->mmi_ != nullptr && "error: SingleTypeMemoryManager implementor not set.");
     return this->mmi_->extraPrintingInformation();
   }
 
