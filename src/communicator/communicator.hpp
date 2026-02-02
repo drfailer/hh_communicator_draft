@@ -200,9 +200,6 @@ private:
 
     switch (this->recverPortState_) {
     case PortState::Opened:
-      // TODO: this function should be named `probeIncommingRequests`, and the
-      // signal should be a request kind, and the actual sigal is retreived
-      // from the request content
       recvSignal(signal, header);
 
       switch (signal) {
