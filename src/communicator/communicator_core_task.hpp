@@ -18,20 +18,6 @@ class CommunicatorTask;
 
 namespace core {
 
-// functors ////////////////////////////////////////////////////////////////////
-
-template <typename TaskType>
-struct ProcessData {
-  TaskType *task;
-
-  template <typename T>
-  void operator()(std::shared_ptr<T> data) {
-    task->addResult(data);
-  }
-};
-
-// communicator core ///////////////////////////////////////////////////////////
-
 template <typename... Types>
 using CommunicatorCoreTaskBase = GenericCoreTask<CommunicatorTask<Types...>, sizeof...(Types), Types..., Types...>;
 
@@ -57,7 +43,7 @@ public:
     this->senderDisconnect_ = false;
     this->deamon_ = std::thread([this]() {
       this->communicator_.run(
-              ProcessData(this->task()),
+              [&](auto data) { this->task()->addResult(std::move(data)); },
               [&]() { return this->senderDisconnect_; });
     });
 
