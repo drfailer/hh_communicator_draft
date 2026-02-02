@@ -142,24 +142,28 @@ public:
     this->connections_[this->rank()].connected = false;
     this->signalBufferMem_ = std::vector<char>(1 + sizeof(size_t) * this->nbProcesses());
     this->sendCountsMap_ = std::vector<size_t>(this->nbProcesses() * this->nbProcesses(), 0);
+    this->fini_ = false;
   }
 
-  void run(auto addResult, auto canTerminate) {
-    init();
+  void run(auto addResult) {
     while (this->senderPortState_ != PortState::Closed || this->recverPortState_ != PortState::Closed) {
-      runSender(addResult, canTerminate);
-      runRecver(addResult);
+      progressSender(addResult);
+      progressRecver(addResult);
     }
+  }
+
+  void fini() {
+      this->fini_ = true;
   }
 
 private:
   enum class PortState { Opened, ClosingMaster, ClosingSlave, Closed };
 
-  void runSender(auto addResult, auto canTerminate) {
+  void progressSender(auto addResult) {
     switch (this->senderPortState_) {
     case PortState::Opened:
       processSendOpsQueue(addResult);
-      if (canTerminate()) {
+      if (this->fini_) {
         this->senderPortState_ = this->rank() == 0
             ? PortState::ClosingMaster
             : PortState::ClosingSlave;
@@ -190,7 +194,7 @@ private:
     }
   }
 
-  void runRecver(auto addResult) {
+  void progressRecver(auto addResult) {
     comm::Signal signal = comm::Signal::None;
     comm::Header header = {0, 0, 0, 0, 0, 0};
 
@@ -671,6 +675,7 @@ private:
   PortState               senderPortState_;
   PortState               recverPortState_;
   std::vector<Connection> connections_;
+  bool                    fini_ = false;
 
   // queues
   std::vector<CommOperation> sendOps_;

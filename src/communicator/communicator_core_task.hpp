@@ -29,8 +29,7 @@ private:
 public:
   CommunicatorCoreTask(CommunicatorTask<Types...> *task, comm::CommService *service, std::string const &name)
       : CommunicatorCoreTaskBase<Types...>(task, name, 1, false),
-        communicator_(service),
-        senderDisconnect_(false) {}
+        communicator_(service) {}
 
   ~CommunicatorCoreTask() {}
 
@@ -40,14 +39,12 @@ public:
     this->nvtxProfiler()->initialize(this->threadId(), this->graphId());
     this->preRun();
 
-    this->senderDisconnect_ = false;
+    this->communicator_.init();
     this->deamon_ = std::thread([this]() {
-      this->communicator_.run(
-              [&](auto data) { this->task()->addResult(std::move(data)); },
-              [&]() { return this->senderDisconnect_; });
+      this->communicator_.run([&](auto data) { this->task()->addResult(std::move(data)); });
     });
-
     taskLoop();
+    this->communicator_.fini(); // fini is called after finishPushingData
 
     if (this->deamon_.joinable()) {
       this->deamon_.join();
@@ -82,7 +79,6 @@ private:
       // Operate the connectedReceivers to get a data and send it to execute
       this->operateReceivers();
     }
-    this->senderDisconnect_ = true;
   }
 
 public:
@@ -123,7 +119,6 @@ private:
   std::thread                                          deamon_;
   std::shared_ptr<comm::tool::MemoryManager<Types...>> mm_;
   comm::Communicator<Types...>                         communicator_;
-  bool                                                 senderDisconnect_;
 };
 
 } // end namespace core
