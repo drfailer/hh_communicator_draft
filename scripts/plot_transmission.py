@@ -29,29 +29,19 @@ def collect_data(filename):
     return data
 
 
-def plot_all(data, nbProcesses):
-    fig, ax = plt.subplots(nbProcesses, nbProcesses, squeeze=False)
-
-    for channel in data:
-        for dest in data[channel]:
-            for type_name in data[channel][dest]:
-                x = list(map(lambda p: p[0], data[channel][dest][type_name]))
-                y = list(map(lambda p: p[1], data[channel][dest][type_name]))
-                ax[channel, dest].plot(x, y, '-+', label=type_name)
-            ax[channel, dest].set_xlabel(f"dest {dest}")
-            ax[channel, dest].legend()
-        ax[channel, 0].set_ylabel(f"channel {channel}")
-
-    plt.show()
-
-
 def plot_one(data, channel, dest):
+    if not channel in data:
+        print("error: the requested channel is not present it the given data.")
+        return
+    if not dest in data[channel]:
+        print("error: the requested destintation is not present it the given data.")
+        return
     fig, ax = plt.subplots(len(data[channel][dest].keys()), squeeze=False)
 
     for idx, type_name in enumerate(data[channel][dest]):
         xmin = [p[0] for p in data[channel][dest][type_name]]
         xmax = [p[0] + p[1] for p in data[channel][dest][type_name]]
-        ax[idx, 0].hlines(y=range(len(xmax)), xmin=xmin, xmax=xmax, linewidth=10)
+        ax[idx, 0].hlines(y=range(len(xmax)), xmin=xmin, xmax=xmax, linewidth=1)
         ax[idx, 0].set_title(type_name)
         ax[idx, 0].set_ylabel("transmissions")
 
@@ -61,14 +51,11 @@ def plot_one(data, channel, dest):
 
 
 def main():
-    argc = len(sys.argv)
-    data = collect_data(sys.argv[1])
-    if argc == 3:
-        plot_all(data, int(sys.argv[2]))
-    elif argc == 4:
+    if len(sys.argv) == 4:
+        data = collect_data(sys.argv[1])
         plot_one(data, int(sys.argv[2]), int(sys.argv[3]))
     else:
-        print("error: invalid number of arguments")
+        print("Usage: prog <data_file> <channel> <destination_rank>")
 
 
 if __name__ == "__main__":
