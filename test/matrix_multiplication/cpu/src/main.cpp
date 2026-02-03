@@ -3,7 +3,6 @@
 #include "../../../common/utest.h"
 #include "graph.hpp"
 #include <openblas/cblas.h>
-#include <communicator/service/clh_service.hpp>
 #include <communicator/service/mpi_service.hpp>
 
 hh::comm::rank_t GLOBAL_RANK = 0;
@@ -105,7 +104,6 @@ UTest(mm_result, std::shared_ptr<Matrix<MT, MatrixId::C>> C, std::shared_ptr<Mat
 }
 
 int main(int argc, char **argv) {
-    // hh::comm::CommService *service = new hh::comm::CLHService(true);
     hh::comm::CommService *service = new hh::comm::MPIService(&argc, &argv, true);
     Config config = parseArgs(argc, argv);
 
