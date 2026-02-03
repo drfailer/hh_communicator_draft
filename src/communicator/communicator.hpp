@@ -38,7 +38,7 @@ public:
   Communicator(CommService *service)
       : service_(service),
         channel_(service->newChannel()),
-        stats_(service->collectStats()),
+        stats_(TM::size, service->nbProcesses(), service->collectStats()),
         packagesCount_(service->nbProcesses(), 0) {}
 
 public:
@@ -528,7 +528,7 @@ private:
     });
 
     this->stats_.registerRecvTimings(
-        storageId, this->service_->rank(),
+        storageId,
         std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart), storage.package.size());
   }
 

@@ -1,6 +1,7 @@
 #ifndef COMMUNICATOR_STATS
 #define COMMUNICATOR_STATS
 #include "package.hpp"
+#include "../log.hpp"
 #include <chrono>
 #include <cmath>
 #include <iomanip>
@@ -75,58 +76,62 @@ inline std::pair<double, double> computeAvg(std::vector<double> const &values) {
 // Stats container /////////////////////////////////////////////////////////////
 
 using time_t = std::chrono::time_point<std::chrono::system_clock>;
+using time_unit_t = std::chrono::nanoseconds;
 using delay_t = std::chrono::duration<long int, std::ratio<1, 1000000000>>;
-
-struct TransmissionInfoId {
-  rank_t       source;
-  rank_t       dest;
-  type_id_t    typeId;
-  package_id_t packageId;
-
-  bool operator<(TransmissionInfoId const &other) const {
-    if (this->source == other.source) {
-      if (this->dest == other.dest) {
-        if (this->typeId == other.typeId) {
-          return this->packageId < other.packageId;
-        }
-        return this->typeId < other.typeId;
-      }
-      return this->dest < other.dest;
-    }
-    return this->source < other.source;
-  }
-};
 
 struct TransmissionInfo {
   time_t  tp;
   delay_t packingTime;
   size_t  dataSize;
+
+  TransmissionInfo() = default;
+
+  TransmissionInfo(delay_t packingTime, size_t dataSize)
+      : tp(std::chrono::system_clock::now()),
+        packingTime(packingTime),
+        dataSize(dataSize) {}
 };
+using TransmissionInfos = std::vector<TransmissionInfo>;
 
 struct TransmissionStats {
-  void addSend(rank_t source, rank_t dest, type_id_t typeId, package_id_t packageId, TransmissionInfo info) {
-    TransmissionInfoId id{source, dest, typeId, packageId};
-    if (!this->sendInfos.contains(id)) {
-      this->sendInfos.insert({id, {}});
-    }
-    this->sendInfos.at(id).push_back(info);
+  TransmissionStats() = default;
+
+  TransmissionStats(size_t nbTypes, size_t nbProcesses)
+    : nbProcesses(nbProcesses),
+      sendInfos(nbTypes * nbProcesses),
+      recvInfos(nbTypes * nbProcesses) {}
+
+  TransmissionInfos &sendInfosAt(type_id_t typeId, rank_t dest) {
+      return this->sendInfos[typeId * nbProcesses + dest];
   }
 
-  void addRecv(rank_t source, rank_t dest, type_id_t typeId, package_id_t packageId, TransmissionInfo info) {
-    TransmissionInfoId id{source, dest, typeId, packageId};
-    if (!this->recvInfos.contains(id)) {
-      this->recvInfos.insert({id, {}});
-    }
-    this->recvInfos.at(id).push_back(info);
+  TransmissionInfos const &sendInfosAt(type_id_t typeId, rank_t dest) const {
+      return this->sendInfos[typeId * nbProcesses + dest];
   }
 
-  std::map<TransmissionInfoId, std::vector<TransmissionInfo>> sendInfos;
-  std::map<TransmissionInfoId, std::vector<TransmissionInfo>> recvInfos;
+  TransmissionInfos &recvInfosAt(type_id_t typeId, rank_t source) {
+      return this->recvInfos[typeId * nbProcesses + source];
+  }
+
+  TransmissionInfos const &recvInfosAt(type_id_t typeId, rank_t source) const {
+      return this->recvInfos[typeId * nbProcesses + source];
+  }
+
+  void addSend(type_id_t typeId, rank_t dest, TransmissionInfo info) {
+    sendInfosAt(typeId, dest).push_back(info);
+  }
+
+  void addRecv(type_id_t typeId, rank_t source, TransmissionInfo info) {
+    recvInfosAt(typeId, source).push_back(info);
+  }
+
+  size_t nbProcesses;
+  std::vector<TransmissionInfos> sendInfos; // [type * dest]
+  std::vector<TransmissionInfos> recvInfos; // [type * source]
 };
 
-// TODO: we may have to define a limit on the size of storageStats
 struct CommTaskStats {
-  TransmissionStats transmissionStats = {};
+  TransmissionStats transmissionStats;
   size_t            maxSendOpsSize = 0;
   size_t            maxRecvOpsSize = 0;
   size_t            maxCreateDataQueueSize = 0;
@@ -135,8 +140,10 @@ struct CommTaskStats {
   std::mutex        mutex;
   bool              enabled = false;
 
-  CommTaskStats(bool enabled = false)
-      : enabled(enabled) {}
+  CommTaskStats() = default;
+
+  CommTaskStats(size_t nbTypes, size_t nbProcesses, bool enabled = false)
+      : transmissionStats(nbTypes, nbProcesses), enabled(enabled) {}
 
   void updateSendQueuesInfos(size_t nbOps, size_t storageSize) {
     if (!enabled) {
@@ -154,12 +161,7 @@ struct CommTaskStats {
     }
     std::lock_guard<std::mutex> lock(this->mutex);
     for (auto dest : dests) {
-      this->transmissionStats.addSend(storageId.source, dest, storageId.typeId, storageId.packageId,
-                                      TransmissionInfo{
-                                          .tp = std::chrono::system_clock::now(),
-                                          .packingTime = packingTime,
-                                          .dataSize = dataSize,
-                                      });
+      this->transmissionStats.addSend(storageId.typeId, dest, TransmissionInfo(packingTime, dataSize));
     }
   }
 
@@ -171,17 +173,13 @@ struct CommTaskStats {
     this->maxCreateDataQueueSize = std::max(this->maxCreateDataQueueSize, nbOps);
   }
 
-  void registerRecvTimings(StorageId storageId, size_t dest, delay_t unpackingTime, size_t dataSize) {
+  void registerRecvTimings(StorageId storageId, delay_t unpackingTime, size_t dataSize) {
     if (!enabled) {
       return;
     }
     std::lock_guard<std::mutex> lock(this->mutex);
-    this->transmissionStats.addRecv(storageId.source, dest, storageId.typeId, storageId.packageId,
-                                    TransmissionInfo{
-                                        .tp = std::chrono::system_clock::now(),
-                                        .packingTime = unpackingTime,
-                                        .dataSize = dataSize,
-                                    });
+    this->transmissionStats.addRecv(storageId.typeId, storageId.source,
+                                    TransmissionInfo(unpackingTime, dataSize));
   }
 
   void updateRecvQueuesInfos(size_t nbOps, size_t storageSize) {
@@ -197,6 +195,7 @@ struct CommTaskStats {
     using Serializer = serializer::Serializer<std::vector<char>>;
     serializer::serialize<Serializer>(buf, 0, this->maxSendOpsSize, this->maxRecvOpsSize, this->maxCreateDataQueueSize,
                                       this->maxSendStorageSize, this->maxRecvStorageSize,
+                                      this->transmissionStats.nbProcesses, this->transmissionStats.nbProcesses,
                                       this->transmissionStats.sendInfos, this->transmissionStats.recvInfos);
   }
 
@@ -204,67 +203,67 @@ struct CommTaskStats {
     using Serializer = serializer::Serializer<std::vector<char>>;
     serializer::deserialize<Serializer>(
         buf, 0, this->maxSendOpsSize, this->maxRecvOpsSize, this->maxCreateDataQueueSize, this->maxSendStorageSize,
-        this->maxRecvStorageSize, this->transmissionStats.sendInfos, this->transmissionStats.recvInfos);
+        this->maxRecvStorageSize, this->transmissionStats.nbProcesses, this->transmissionStats.nbProcesses,
+        this->transmissionStats.sendInfos, this->transmissionStats.recvInfos);
   }
 
   // static function for computing stats summary ///////////////////////////////
 
+  template <typename T>
+  struct Mean {
+      T value;
+      T stddev;
+  };
+
   struct TransmissionPerfs {
-    using time_unit_t = std::chrono::nanoseconds;
     std::vector<time_unit_t>              packingDelay;
     std::vector<time_unit_t>              unpackingDelay;
     std::vector<std::vector<time_unit_t>> transmissionDurations; // 2D array: delay [i] -> [j]
     std::vector<std::vector<time_unit_t>> transmissionTimestamps; // 2D array: delay [i] -> [j]
     std::vector<double>                   bandWidth;
+
+    TransmissionPerfs(size_t nbProcesses)
+        : transmissionDurations(nbProcesses * nbProcesses),
+          transmissionTimestamps(nbProcesses * nbProcesses) {}
   };
-  using TransmissionPerfsPerType = std::map<type_id_t, TransmissionPerfs>; // stats organized per type
+  using TransmissionPerfsPerType = std::vector<TransmissionPerfs>; // stats organized per type
+
+  static time_unit_t computeDuration(time_t const &begin, time_t const &end) {
+      return std::chrono::duration_cast<time_unit_t>(end - begin);
+  }
 
   template <typename TM>
   static TransmissionPerfsPerType computeTransmissionStats(std::vector<comm::CommTaskStats> const &stats,
                                                            time_t startTime, size_t nbProcesses) {
-    TransmissionPerfsPerType transmissionStats;
+    auto transmissionStats = TransmissionPerfsPerType(TM::size, TransmissionPerfs(nbProcesses));
 
-    for (type_id_t tid = 0; tid < TM::size; ++tid) {
-      transmissionStats.insert(
-          {tid, TransmissionPerfs{
-                    .packingDelay = {},
-                    .unpackingDelay = {},
-                    .transmissionDurations = std::vector<std::vector<std::chrono::nanoseconds>>(nbProcesses * nbProcesses),
-                    .transmissionTimestamps = std::vector<std::vector<std::chrono::nanoseconds>>(nbProcesses * nbProcesses),
-                    .bandWidth = {},
-                }});
-    }
+    for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
+        auto &stat = transmissionStats[typeId];
 
-    for (size_t recvRank = 0; recvRank < nbProcesses; ++recvRank) {
-      for (auto ri : stats[recvRank].transmissionStats.recvInfos) {
-        assert(stats[ri.first.source].transmissionStats.sendInfos.contains(ri.first));
-        auto id = ri.first;
-        auto sendRank = id.source;
-        auto sendInfos = stats[sendRank].transmissionStats.sendInfos.at(id);
-        auto recvInfos = ri.second;
+        for (size_t sendRank = 0; sendRank < nbProcesses; ++sendRank) {
+            for (size_t recvRank = 0; recvRank < nbProcesses; ++recvRank) {
+                if (sendRank == recvRank) {
+                    continue;
+                }
+                size_t sendRecvIdx = sendRank * nbProcesses + recvRank;
+                auto sendInfos = stats[sendRank].transmissionStats.sendInfosAt(typeId, recvRank);
+                auto recvInfos = stats[recvRank].transmissionStats.recvInfosAt(typeId, sendRank);
 
-        assert(recvInfos.size() == sendInfos.size());
-        for (size_t i = 0; i < recvInfos.size(); ++i) {
-          auto   recvInfo = recvInfos[i];
-          auto   sendInfo = sendInfos[i];
-          auto   delay_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(recvInfo.tp - sendInfo.tp);
-          auto   timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(sendInfo.tp - startTime);
-          double dataSizeMB = (double)sendInfo.dataSize / (1024. * 1024.);
-          double delay_s = (double)delay_ns.count() / 1'000'000'000.;
+                assert(recvInfos.size() == sendInfos.size());
+                for (size_t i = 0; i < sendInfos.size(); ++i) {
+                    auto   delay_ns = computeDuration(sendInfos[i].tp, recvInfos[i].tp);
+                    auto   timestamp = computeDuration(startTime, sendInfos[i].tp);
+                    double dataSizeMB = (double)sendInfos[i].dataSize / (1024. * 1024.);
+                    double delay_s = (double)delay_ns.count() / 1'000'000'000.;
 
-          transmissionStats.at(id.typeId).packingDelay.push_back(sendInfo.packingTime);
-          transmissionStats.at(id.typeId).unpackingDelay.push_back(recvInfo.packingTime);
-          transmissionStats
-              .at(id.typeId)
-              .transmissionDurations[sendRank * nbProcesses + recvRank]
-              .push_back(delay_ns);
-          transmissionStats
-              .at(id.typeId)
-              .transmissionTimestamps[sendRank * nbProcesses + recvRank]
-              .push_back(timestamp);
-          transmissionStats.at(id.typeId).bandWidth.push_back(dataSizeMB / delay_s);
+                    stat.packingDelay.push_back(sendInfos[i].packingTime);
+                    stat.unpackingDelay.push_back(recvInfos[i].packingTime);
+                    stat.transmissionDurations[sendRecvIdx].push_back(delay_ns);
+                    stat.transmissionTimestamps[sendRecvIdx].push_back(timestamp);
+                    stat.bandWidth.push_back(dataSizeMB / delay_s);
+                }
+            }
         }
-      }
     }
     return transmissionStats;
   }
@@ -315,9 +314,6 @@ struct CommTaskStats {
     // TODO: this is not the correct place for doing this, however, the const methods make things difficult...
     generateTransmissionFile<TM>(transmissionStats, channel, nbProcesses);
     for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
-      if (!transmissionStats.contains(typeId)) {
-        continue;
-      }
       assert(typeId < TM::size);
       TM::apply(typeId,
                 [&]<typename T>() { infos.append("========== " + hh::tool::typeToStr<T>() + " ==========\n"); });
@@ -351,9 +347,6 @@ struct CommTaskStats {
       char sep = ';';
 
       for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
-          if (!stats.contains(typeId)) {
-              continue;
-          }
           for (size_t i = 0; i < nbProcesses; ++i) {
               if (i == channel) {
                   continue;
