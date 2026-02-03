@@ -16,7 +16,6 @@ using time_t = std::chrono::time_point<std::chrono::system_clock>;
 using time_unit_t = std::chrono::nanoseconds;
 using delay_t = std::chrono::duration<long int, std::ratio<1, 1000000000>>;
 
-
 inline std::string durationToString(std::chrono::nanoseconds const &ns) {
   std::ostringstream oss;
 
@@ -37,13 +36,12 @@ inline std::string durationToString(std::chrono::nanoseconds const &ns) {
   return oss.str();
 }
 
-inline std::pair<time_unit_t, time_unit_t>
-computeAvgDuration(std::vector<time_unit_t> nss) {
+inline std::pair<time_unit_t, time_unit_t> computeAvgDuration(std::vector<time_unit_t> nss) {
   if (nss.size() == 0) {
     return {time_unit_t::zero(), time_unit_t::zero()};
   }
   time_unit_t sum = time_unit_t::zero(), mean = time_unit_t::zero();
-  double                   sd = 0;
+  double      sd = 0;
 
   for (auto ns : nss) {
     sum += ns;
@@ -194,9 +192,9 @@ struct CommTaskStats {
   void pack(std::vector<char> &buf) const {
     using Serializer = serializer::Serializer<std::vector<char>>;
     serializer::serialize<Serializer>(buf, 0, this->maxSendOpsSize, this->maxRecvOpsSize, this->maxCreateDataQueueSize,
-                                      this->maxSendStorageSize, this->maxRecvStorageSize, this->transmissionStats.nbProcesses,
-                                      this->transmissionStats.nbProcesses, this->transmissionStats.sendInfos,
-                                      this->transmissionStats.recvInfos);
+                                      this->maxSendStorageSize, this->maxRecvStorageSize,
+                                      this->transmissionStats.nbProcesses, this->transmissionStats.nbProcesses,
+                                      this->transmissionStats.sendInfos, this->transmissionStats.recvInfos);
   }
 
   void unpack(std::vector<char> &buf) {
@@ -298,39 +296,39 @@ struct CommTaskStats {
       maxSendStorageSize = std::max(maxSendStorageSize, stat.maxSendStorageSize);
       maxRecvStorageSize = std::max(maxRecvStorageSize, stat.maxRecvStorageSize);
     }
-    strAppendStat(infos, "maxSendOpsSize = " + std::to_string(maxSendOpsSize));
-    strAppendStat(infos, "maxRecvOpsSize = " + std::to_string(maxRecvOpsSize));
-    strAppendStat(infos, "maxCreateDataQueueSize = " + std::to_string(maxCreateDataQueueSize));
-    strAppendStat(infos, "maxSendStorageSize = " + std::to_string(maxSendStorageSize));
-    strAppendStat(infos, "maxRecvStorageSize = " + std::to_string(maxRecvStorageSize));
+    strAppendStat(infos, "maxSendOpsSize = " + maxSendOpsSize);
+    strAppendStat(infos, "maxRecvOpsSize = " + maxRecvOpsSize);
+    strAppendStat(infos, "maxCreateDataQueueSize = " + maxCreateDataQueueSize);
+    strAppendStat(infos, "maxSendStorageSize = " + maxSendStorageSize);
+    strAppendStat(infos, "maxRecvStorageSize = " + maxRecvStorageSize);
 
     // transmission stats
     auto mergedStats = mergeCommTasksStats<TM>(stats, startTime, nbProcesses);
-    // TODO: this is not the correct place for doing this, however, the const methods make things difficult...
-    generateTransmissionFile<TM>(mergedStats, channel, nbProcesses);
     for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
-      assert(typeId < TM::size);
-      TM::apply(typeId,
-                [&]<typename T>() { infos.append("========== " + hh::tool::typeToStr<T>() + " ==========\n"); });
       auto transmissionDurations = mergedStats.at(typeId).transmissionDurations;
       auto packingDelay = mergedStats.at(typeId).packingDelay;
       auto unpackingDelay = mergedStats.at(typeId).unpackingDelay;
       auto bandWidth = mergedStats.at(typeId).bandWidth;
+
+      TM::apply(typeId,
+                [&]<typename T>() { infos.append("========== " + hh::tool::typeToStr<T>() + " ==========\n"); });
       strAppendStat(infos, "packing: ", packingDelay, ", (count = ", packingDelay.size(), ")");
       strAppendStat(infos, "unpacking: ", unpackingDelay, ", (count = ", unpackingDelay.size(), ")");
       strAppendStat(infos, "bandWidth: ", bandWidth, "MB/s");
-      infos.append("transmission: {\\l");
-      for (size_t sender = 0; sender < nbProcesses; ++sender) {
-        for (size_t receiver = 0; receiver < nbProcesses; ++receiver) {
-          if (sender == receiver || transmissionDurations[sender * nbProcesses + receiver].empty()) {
-            continue;
+      strAppendStat(infos, "transmission: {");
+      for (size_t sendRank = 0; sendRank < nbProcesses; ++sendRank) {
+        for (size_t recvRank = 0; recvRank < nbProcesses; ++recvRank) {
+          auto const &durations = transmissionDurations[sendRank * nbProcesses + recvRank];
+          if (sendRank != recvRank && !durations.empty()) {
+            strAppendStat(infos, "\t[", sendRank, " -> ", recvRank, "] = ", durations);
           }
-          strAppendStat(infos, "    [", sender, " -> ", receiver,
-                        "] = ", transmissionDurations[sender * nbProcesses + receiver]);
         }
       }
       strAppendStat(infos, "}");
     }
+
+    // TODO: this is not the correct place for doing this, however, the const methods make things difficult...
+    generateTransmissionFile<TM>(mergedStats, channel, nbProcesses);
 
     return infos;
   }
