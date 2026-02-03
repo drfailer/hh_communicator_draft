@@ -269,7 +269,7 @@ struct CommTaskStats {
     return transmissionStats;
   }
 
-  static void strAppend(std::string &str, auto const &...args) {
+  static void strAppendStat(std::string &str, auto const &...args) {
     std::ostringstream oss;
     (
         [&] {
@@ -304,11 +304,11 @@ struct CommTaskStats {
       maxSendStorageSize = std::max(maxSendStorageSize, stat.maxSendStorageSize);
       maxRecvStorageSize = std::max(maxRecvStorageSize, stat.maxRecvStorageSize);
     }
-    strAppend(infos, "maxSendOpsSize = " + std::to_string(maxSendOpsSize));
-    strAppend(infos, "maxRecvOpsSize = " + std::to_string(maxRecvOpsSize));
-    strAppend(infos, "maxCreateDataQueueSize = " + std::to_string(maxCreateDataQueueSize));
-    strAppend(infos, "maxSendStorageSize = " + std::to_string(maxSendStorageSize));
-    strAppend(infos, "maxRecvStorageSize = " + std::to_string(maxRecvStorageSize));
+    strAppendStat(infos, "maxSendOpsSize = " + std::to_string(maxSendOpsSize));
+    strAppendStat(infos, "maxRecvOpsSize = " + std::to_string(maxRecvOpsSize));
+    strAppendStat(infos, "maxCreateDataQueueSize = " + std::to_string(maxCreateDataQueueSize));
+    strAppendStat(infos, "maxSendStorageSize = " + std::to_string(maxSendStorageSize));
+    strAppendStat(infos, "maxRecvStorageSize = " + std::to_string(maxRecvStorageSize));
 
     // transmission stats
     auto transmissionStats = computeTransmissionStats<TM>(stats, startTime, nbProcesses);
@@ -325,20 +325,20 @@ struct CommTaskStats {
       auto packingDelay = transmissionStats.at(typeId).packingDelay;
       auto unpackingDelay = transmissionStats.at(typeId).unpackingDelay;
       auto bandWidth = transmissionStats.at(typeId).bandWidth;
-      strAppend(infos, "packing: ", packingDelay, ", (count = ", packingDelay.size(), ")");
-      strAppend(infos, "unpacking: ", unpackingDelay, ", (count = ", unpackingDelay.size(), ")");
-      strAppend(infos, "bandWidth: ", bandWidth, "MB/s");
+      strAppendStat(infos, "packing: ", packingDelay, ", (count = ", packingDelay.size(), ")");
+      strAppendStat(infos, "unpacking: ", unpackingDelay, ", (count = ", unpackingDelay.size(), ")");
+      strAppendStat(infos, "bandWidth: ", bandWidth, "MB/s");
       infos.append("transmission: {\\l");
       for (size_t sender = 0; sender < nbProcesses; ++sender) {
         for (size_t receiver = 0; receiver < nbProcesses; ++receiver) {
           if (sender == receiver || transmissionDurations[sender * nbProcesses + receiver].empty()) {
             continue;
           }
-          strAppend(infos, "    [", sender, " -> ", receiver,
+          strAppendStat(infos, "    [", sender, " -> ", receiver,
                     "] = ", transmissionDurations[sender * nbProcesses + receiver]);
         }
       }
-      strAppend(infos, "}");
+      strAppendStat(infos, "}");
     }
 
     return infos;
