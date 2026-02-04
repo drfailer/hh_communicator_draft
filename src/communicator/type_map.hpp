@@ -6,20 +6,33 @@
 #include <variant>
 #include "protocol.hpp"
 
+// The `TypeMap` is used to relate compile-time type to run-time type id. It's
+// an object that stores a list of types. The position of a type in the list is
+// used as the run-time type id (obtainable using idOf<Type>()). The run-time
+// type id can be used with the `apply` function to execute a template lambda
+// function parametrized with the corresponding compile-time type.
+//
+// This data structure allows writting a fully generic communicator task that
+// supports multiple data types, since the types can be preserved, even when a
+// piece of data goes through the network (MPI).
+
 namespace hh {
 
 namespace comm {
 
-template <typename T>
-using clean_t = typename std::remove_const_t<std::remove_reference_t<T>>;
-
+// we use type_id_t defined in `protocol.hpp`
 using TypeMapIdType = type_id_t;
 
+/// @brief Map that relates run-time type id to compile-time type.
+/// @pparams list of supported types.
 template <typename T, typename... Ts>
 struct TypeMap {
   using id_t = TypeMapIdType;
   static constexpr size_t size = 1 + sizeof...(Ts);
 
+  /// @brief Returns the id of the given type.
+  /// @pparam Target Type for which we want the id.
+  /// @return Run-time id of the given type.
   template <typename Target>
   static constexpr TypeMapIdType idOf() {
     if constexpr (std::is_same_v<Target, T>) {
@@ -30,10 +43,11 @@ struct TypeMap {
     return 0;
   }
 
-  static constexpr bool isIdValid(id_t id) {
-    return id < size;
-  }
 
+  /// @brief Runs the given tempalte lambda function and set its template
+  ///        parameter to the type that correspond to the given id.
+  /// @pparam Function Template lambda function to apply to the type.
+  /// @param id Type id.
   template <typename Function>
   static constexpr void apply(id_t id, Function function) {
     if (id == 0) {
@@ -42,9 +56,7 @@ struct TypeMap {
       if constexpr (sizeof...(Ts) > 0) {
         TypeMap<Ts...>::apply((id_t)(id - 1), function);
       } else {
-        std::ostringstream oss;
-        oss << "error: tried to apply a function on an invalid type map id.";
-        throw std::logic_error(oss.str());
+        throw std::logic_error("error: tried to apply a function on an invalid type map id.");
       }
     }
   }
@@ -58,9 +70,6 @@ static_assert(TypeMap<int, long, float, double>::template idOf<double>() == 3);
 static_assert(TypeMap<int, long, float, double>::size == 4);
 #endif
 
-template <typename Target, typename TM>
-constexpr bool contains_v = TM::template getId<Target>() < TM::size;
-
 template <typename TM>
 struct variant_type;
 
@@ -69,6 +78,8 @@ struct variant_type<TypeMap<Types...>> {
   using type = std::variant<std::shared_ptr<Types>...>;
 };
 
+/// @brief Deduces the variant of all the types contained in a given type map
+/// @pparam Type map
 template <typename TM>
 using variant_type_t = typename variant_type<TM>::type;
 
