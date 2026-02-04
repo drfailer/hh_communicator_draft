@@ -56,7 +56,7 @@ struct TypeMap {
       if constexpr (sizeof...(Ts) > 0) {
         TypeMap<Ts...>::apply((id_t)(id - 1), function);
       } else {
-        throw std::logic_error("error: tried to apply a function on an invalid type map id.");
+        throw std::runtime_error("error: tried to apply a function on an invalid type map id.");
       }
     }
   }
