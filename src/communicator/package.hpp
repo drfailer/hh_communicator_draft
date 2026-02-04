@@ -61,8 +61,7 @@ Package packageMem(std::shared_ptr<T> data) {
 }
 
 /*
- * If the data type is unpackable, call the `unpack` method, otherwise, default
- * to serializer.
+ * If the data type is unpackable, call the `unpack` method.
  */
 template <typename T>
 void unpack(Package &&package, std::shared_ptr<T> data) {

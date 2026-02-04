@@ -5,7 +5,7 @@ CXXFLAGS=\
 		 -std=c++20 \
 		 -O3 \
 		 -ggdb \
-		 -I../../../lib/hedgehog/ -I../../../lib/serializer-cpp/ -I../../../src/ \
+		 -I../../../lib/hedgehog/ -I../../../src/ \
 		 -I$(HOME)/Programming/usr/include/ \
 		 -I$(TRACER_PATH) \
 		 -I/usr/lib/x86_64-linux-gnu/openmpi/include/ \

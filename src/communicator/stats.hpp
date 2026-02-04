@@ -6,7 +6,7 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
-#include <serializer/serializer.hpp>
+#include <cassert>
 
 namespace hh {
 
@@ -74,6 +74,42 @@ inline std::pair<double, double> computeAvg(std::vector<double> const &values) {
   }
   stddev = std::sqrt(stddev / nbElements);
   return {avg, stddev};
+}
+
+template <typename T>
+size_t writeBytes(std::vector<char> &buf, T const &data) {
+    size_t pos = buf.size();
+    buf.resize(pos + sizeof(T));
+    std::memcpy(&buf[pos], &data, sizeof(T));
+    return buf.size();
+}
+
+template <typename T>
+size_t writeVectorBytes(std::vector<char> &buf, std::vector<T> const &data) {
+    size_t dataCount = data.size();
+    size_t pos = buf.size();
+    buf.resize(pos + sizeof(dataCount) + sizeof(T) * dataCount);
+    std::memcpy(&buf[pos], &dataCount, sizeof(dataCount));
+    pos += sizeof(dataCount);
+    std::memcpy(&buf[pos], data.data(), sizeof(T) * dataCount);
+    return buf.size();
+}
+
+template <typename T>
+size_t readBytes(std::vector<char> const &buf, size_t pos, T &data) {
+    assert(pos + sizeof(T) <= buf.size());
+    memcpy(&data, &buf[pos], sizeof(T));
+    return pos + sizeof(T);
+}
+
+template <typename T>
+size_t readVectorBytes(std::vector<char> const &buf, size_t pos, std::vector<T> &data) {
+    size_t dataCount = 0;
+    pos = readBytes(buf, pos, dataCount);
+    data.resize(dataCount);
+    assert(pos + sizeof(T) * dataCount <= buf.size());
+    std::memcpy(data.data(), &buf[pos], sizeof(T) * dataCount);
+    return pos + sizeof(T) * dataCount;
 }
 
 // Stats container /////////////////////////////////////////////////////////////
@@ -190,19 +226,42 @@ struct CommTaskStats {
   }
 
   void pack(std::vector<char> &buf) const {
-    using Serializer = serializer::Serializer<std::vector<char>>;
-    serializer::serialize<Serializer>(buf, 0, this->maxSendOpsSize, this->maxRecvOpsSize, this->maxCreateDataQueueSize,
-                                      this->maxSendStorageSize, this->maxRecvStorageSize,
-                                      this->transmissionStats.nbProcesses, this->transmissionStats.nbProcesses,
-                                      this->transmissionStats.sendInfos, this->transmissionStats.recvInfos);
+    writeBytes(buf, this->maxSendOpsSize);
+    writeBytes(buf, this->maxRecvOpsSize);
+    writeBytes(buf, this->maxCreateDataQueueSize);
+    writeBytes(buf, this->maxSendStorageSize);
+    writeBytes(buf, this->maxRecvStorageSize);
+
+    writeBytes(buf, this->transmissionStats.sendInfos.size());
+    for (auto sendInfo : this->transmissionStats.sendInfos) {
+        writeVectorBytes(buf, sendInfo);
+    }
+    writeBytes(buf, this->transmissionStats.recvInfos.size());
+    for (auto recvInfo : this->transmissionStats.recvInfos) {
+        writeVectorBytes(buf, recvInfo);
+    }
   }
 
-  void unpack(std::vector<char> &buf) {
-    using Serializer = serializer::Serializer<std::vector<char>>;
-    serializer::deserialize<Serializer>(
-        buf, 0, this->maxSendOpsSize, this->maxRecvOpsSize, this->maxCreateDataQueueSize, this->maxSendStorageSize,
-        this->maxRecvStorageSize, this->transmissionStats.nbProcesses, this->transmissionStats.nbProcesses,
-        this->transmissionStats.sendInfos, this->transmissionStats.recvInfos);
+  void unpack(std::vector<char> const &buf) {
+    size_t pos = 0;
+    pos = readBytes(buf, pos, this->maxSendOpsSize);
+    pos = readBytes(buf, pos, this->maxRecvOpsSize);
+    pos = readBytes(buf, pos, this->maxCreateDataQueueSize);
+    pos = readBytes(buf, pos, this->maxSendStorageSize);
+    pos = readBytes(buf, pos, this->maxRecvStorageSize);
+
+    size_t infoCount = 0;
+
+    pos = readBytes(buf, pos, infoCount);
+    this->transmissionStats.sendInfos.resize(infoCount);
+    for (auto &sendInfo : this->transmissionStats.sendInfos) {
+        pos = readVectorBytes(buf, pos, sendInfo);
+    }
+    pos = readBytes(buf, pos, infoCount);
+    this->transmissionStats.recvInfos.resize(infoCount);
+    for (auto &recvInfo : this->transmissionStats.recvInfos) {
+        pos = readVectorBytes(buf, pos, recvInfo);
+    }
   }
 
   // static function for computing stats summary ///////////////////////////////
@@ -296,11 +355,11 @@ struct CommTaskStats {
       maxSendStorageSize = std::max(maxSendStorageSize, stat.maxSendStorageSize);
       maxRecvStorageSize = std::max(maxRecvStorageSize, stat.maxRecvStorageSize);
     }
-    strAppendStat(infos, "maxSendOpsSize = " + maxSendOpsSize);
-    strAppendStat(infos, "maxRecvOpsSize = " + maxRecvOpsSize);
-    strAppendStat(infos, "maxCreateDataQueueSize = " + maxCreateDataQueueSize);
-    strAppendStat(infos, "maxSendStorageSize = " + maxSendStorageSize);
-    strAppendStat(infos, "maxRecvStorageSize = " + maxRecvStorageSize);
+    strAppendStat(infos, "maxSendOpsSize = ", maxSendOpsSize);
+    strAppendStat(infos, "maxRecvOpsSize = ", maxRecvOpsSize);
+    strAppendStat(infos, "maxCreateDataQueueSize = ", maxCreateDataQueueSize);
+    strAppendStat(infos, "maxSendStorageSize = ", maxSendStorageSize);
+    strAppendStat(infos, "maxRecvStorageSize = ", maxRecvStorageSize);
 
     // transmission stats
     auto mergedStats = mergeCommTasksStats<TM>(stats, startTime, nbProcesses);

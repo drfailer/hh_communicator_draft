@@ -4,7 +4,6 @@
 #include <communicator/package.hpp>
 #include "log.hpp"
 #include <cstddef>
-#include <serializer/serializer.hpp>
 
 using MT = double;
 
@@ -50,20 +49,13 @@ struct MatrixTile {
     size_t            matrixCols = 0;
     T                *mem = nullptr;
     size_t            processCount = 0;
-    serializer::Bytes buf;
-
-    size_t bufSize() const {
-        return 8 * 8 // rows, cols, matrixRows, matrixCols, row, col, ld, size
-               + (1 + tileSize * tileSize * sizeof(T)); // v, mem[]
-    }
 
     MatrixTile(size_t tileSize)
         : tileSize(tileSize),
           rows(tileSize),
           cols(tileSize),
           ld(tileSize),
-          mem(new T[tileSize * tileSize]),
-          buf(bufSize()) {}
+          mem(new T[tileSize * tileSize]) {}
 
     ~MatrixTile() {
         delete[] mem;
@@ -81,24 +73,6 @@ struct MatrixTile {
         this->matrixRows = matrixRows;
         this->matrixCols = matrixCols;
     }
-
-    // hh::comm::Package package() {
-    //     return hh::comm::Package{.data = {hh::comm::Buffer{(char *)buf.data(), bufSize()}}};
-    // }
-    // hh::comm::Package pack() {
-    //     namespace ser = serializer;
-    //     using Ser = ser::Serializer<ser::Bytes>;
-    //     ser::serialize<Ser>(buf, 0, tileSize, rows, cols, ld, rowIdx, colIdx, matrixRows, matrixCols,
-    //                         ser::tools::PointerArray(mem, tileSize, tileSize));
-    //     return hh::comm::Package{.data = {hh::comm::Buffer{(char *)buf.data(), bufSize()}}};
-    // }
-    // void unpack(hh::comm::Package &&p) {
-    //     assert(p.data[0].mem == (char *)buf.data());
-    //     namespace ser = serializer;
-    //     using Ser = ser::Serializer<ser::Bytes>;
-    //     ser::deserialize<Ser>(buf, 0, tileSize, rows, cols, ld, rowIdx, colIdx, matrixRows, matrixCols,
-    //                           ser::tools::PointerArray(mem, tileSize, tileSize));
-    // }
 
     hh::comm::Package package() {
         return hh::comm::Package{.data = {

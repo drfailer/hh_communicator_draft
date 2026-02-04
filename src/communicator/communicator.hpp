@@ -626,6 +626,7 @@ public:
       bufSize = (size_t)this->service_->bufferSize(request);
       bufMem.resize(bufSize);
       this->service_->recv(request, Buffer{.mem = bufMem.data(), .len = bufMem.size()});
+      stats[i].transmissionStats.nbProcesses = this->nbProcesses();
       stats[i].unpack(bufMem);
     }
     return stats;

@@ -3,7 +3,7 @@ CXXFLAGS=\
 		 -std=c++20 \
 		 -O3 \
 		 -ggdb \
-		 -I../../../lib/hedgehog/ -I../../../lib/serializer-cpp/ -I../../../src/ \
+		 -I../../../lib/hedgehog/ -I../../../src/ \
 		 -I../../../../tracer-c/tracer/ \
   		 -DOMPI_SKIP_MPICXX \
 		 -Wall -Wextra -Wuninitialized \
