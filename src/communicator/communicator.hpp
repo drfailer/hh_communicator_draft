@@ -1,11 +1,11 @@
 #ifndef COMMUNICATOR_COMMUNICATOR
 #define COMMUNICATOR_COMMUNICATOR
+#include "../log.hpp"
 #include "package.hpp"
 #include "service/comm_service.hpp"
-#include "tool/memory_manager.hpp"
 #include "stats.hpp"
+#include "tool/memory_manager.hpp"
 #include "type_map.hpp"
-#include "../log.hpp"
 #include <cassert>
 #include <map>
 #include <utility>
@@ -30,7 +30,7 @@ namespace hh {
 
 namespace comm {
 
-template <typename ...Types>
+template <typename... Types>
 class Communicator {
   using TM = comm::TypeMap<Types...>;
 
@@ -83,7 +83,7 @@ public:
   }
 
   void memoryManager(std::shared_ptr<tool::MemoryManager<Types...>> mm) {
-      this->mm_ = mm;
+    this->mm_ = mm;
   }
 
   /*
@@ -153,7 +153,7 @@ public:
   }
 
   void fini() {
-      this->fini_ = true;
+    this->fini_ = true;
   }
 
 private:
@@ -164,9 +164,7 @@ private:
     case PortState::Opened:
       processSendOpsQueue(addResult);
       if (this->fini_) {
-        this->senderPortState_ = this->rank() == 0
-            ? PortState::ClosingMaster
-            : PortState::ClosingSlave;
+        this->senderPortState_ = this->rank() == 0 ? PortState::ClosingMaster : PortState::ClosingSlave;
       }
       break;
     case PortState::ClosingMaster:
@@ -249,7 +247,6 @@ private:
     return true;
   }
 
-
   bool isConnectedOrExpectsMorePackages() const {
     for (auto connection : this->connections_) {
       if (connection.connected || connection.recvCount < connection.sendCount) {
@@ -275,13 +272,14 @@ private:
     this->signalBufferMem_[0] = (char)Signal::Disconnect;
     for (size_t dest = 1; dest < this->nbProcesses(); ++dest) {
       this->sendCountsMap_[dest * this->nbProcesses()] = this->packagesCount_[dest];
-      std::memcpy(&this->signalBufferMem_[1], &this->sendCountsMap_[dest * this->nbProcesses()], this->nbProcesses() * sizeof(size_t));
+      std::memcpy(&this->signalBufferMem_[1], &this->sendCountsMap_[dest * this->nbProcesses()],
+                  this->nbProcesses() * sizeof(size_t));
       this->service_->send(header, dest, Buffer{this->signalBufferMem_.data(), this->signalBufferMem_.size()});
     }
   }
 
   void recvDisconnectionSignalFromSlave(Header const &header) {
-    size_t *sendCounts = (size_t*)(&this->signalBufferMem_[1]);
+    size_t *sendCounts = (size_t *)(&this->signalBufferMem_[1]);
 
     assert(this->connections_[header.source].connected == true);
     this->connections_[header.source].connected = false;
@@ -293,7 +291,7 @@ private:
   }
 
   void recvDisconnectionSignalFromMaster() {
-    size_t *sendCounts = (size_t*)(&this->signalBufferMem_[1]);
+    size_t *sendCounts = (size_t *)(&this->signalBufferMem_[1]);
 
     for (size_t source = 0; source < this->nbProcesses(); ++source) {
       if (source == this->rank()) {
@@ -313,9 +311,9 @@ private:
     StorageId    storageId;
   };
 
-/******************************************************************************/
-/*                           send queue operations                            */
-/******************************************************************************/
+  /******************************************************************************/
+  /*                           send queue operations                            */
+  /******************************************************************************/
 
   /*
    * Process the send operation queue.
@@ -370,9 +368,10 @@ private:
   }
 
   template <typename T>
-  std::pair<StorageId, PackageStorage<TM>> createSendStorage(std::vector<rank_t> const &dests, std::shared_ptr<T> data, bool useAddResult) {
+  std::pair<StorageId, PackageStorage<TM>> createSendStorage(std::vector<rank_t> const &dests, std::shared_ptr<T> data,
+                                                             bool useAddResult) {
     package_id_t packageId = this->service_->newPackageId(this->channel_);
-    size_t nbDests = useAddResult ? dests.size() - 1 : dests.size();
+    size_t       nbDests = useAddResult ? dests.size() - 1 : dests.size();
 
     // measure data packing time
     time_t  tpackingStart = std::chrono::system_clock::now();
@@ -397,10 +396,9 @@ private:
     return {storageId, storage};
   }
 
-
-/******************************************************************************/
-/*                           recv queue operations                            */
-/******************************************************************************/
+  /******************************************************************************/
+  /*                           recv queue operations                            */
+  /******************************************************************************/
 
   /*
    * Process the pending recv data queue.
@@ -453,7 +451,7 @@ private:
    * to the queue.
    */
   void recvSignal(Signal &signal, Header &header) {
-    Request request = this->service_->probe(this->channel_);
+    Request request = this->service_->probeAsync(this->channel_);
 
     signal = Signal::None;
 
@@ -487,10 +485,10 @@ private:
    */
   bool recvData(Header header) {
     std::lock_guard<std::mutex> whLock(this->wh_.mutex);
-    StorageId storageId(header.source, header.packageId, header.typeId, 0);
+    StorageId                   storageId(header.source, header.packageId, header.typeId, 0);
 
     if (this->wh_.recvStorage.contains(storageId)) {
-        return true;
+      return true;
     }
 
     if (!createRecvStorage(storageId)) {
@@ -528,8 +526,8 @@ private:
     });
 
     this->stats_.registerRecvTimings(
-        storageId,
-        std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart), storage.package.size());
+        storageId, std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart),
+        storage.package.size());
   }
 
   /*
@@ -594,10 +592,9 @@ private:
     this->wh_.recvStorage.clear();
   }
 
-
-/******************************************************************************/
-/*                                   stats                                    */
-/******************************************************************************/
+  /******************************************************************************/
+  /*                                   stats                                    */
+  /******************************************************************************/
 
 public:
   /*
@@ -607,8 +604,6 @@ public:
     Header            header(this->rank(), 0, 0, this->channel_, 0, 0);
     std::vector<char> bufMem;
     this->stats_.pack(bufMem);
-    infog(logh::IG::Stats, "stats", "sendStats -> ", " buf size = ", bufMem.size(), ", transmissionStats size = ",
-          this->stats_.transmissionStats.sendInfos.size() + this->stats_.transmissionStats.recvInfos.size());
     this->service_->send(header, 0, Buffer{bufMem.data(), bufMem.size()});
   }
 
@@ -616,6 +611,7 @@ public:
    * Gather statistics on the master rank.
    */
   std::vector<CommTaskStats> gatherStats() const {
+    std::vector<char>          bufMem;
     std::vector<CommTaskStats> stats(this->nbProcesses());
     size_t                     bufSize;
 
@@ -627,28 +623,17 @@ public:
     stats[0].maxRecvStorageSize = this->stats_.maxRecvStorageSize;
     for (rank_t i = 1; i < this->nbProcesses(); ++i) {
       Request request = this->service_->probe(this->channel_, i);
-      while (!this->service_->probeSuccess(request)) {
-        this->service_->requestRelease(request);
-        using namespace std::chrono_literals;
-        std::this_thread::sleep_for(1ms);
-        request = this->service_->probe(this->channel_, i);
-      }
       bufSize = (size_t)this->service_->bufferSize(request);
-
-      std::vector<char> bufMem(bufSize);
-      Buffer            buf{.mem = bufMem.data(), .len = bufSize};
-      this->service_->recv(request, buf);
+      bufMem.resize(bufSize);
+      this->service_->recv(request, Buffer{.mem = bufMem.data(), .len = bufMem.size()});
       stats[i].unpack(bufMem);
-      infog(logh::IG::Stats, "stats", "comGather -> ", "target = ", i, " buf size = ", buf.len,
-            ", transmissionStats size = ",
-            stats[i].transmissionStats.sendInfos.size() + stats[i].transmissionStats.recvInfos.size());
     }
     return stats;
   }
 
-/******************************************************************************/
-/*                                    log                                     */
-/******************************************************************************/
+  /******************************************************************************/
+  /*                                    log                                     */
+  /******************************************************************************/
 
 private:
   template <typename... Ts>
@@ -660,9 +645,9 @@ private:
     }
   }
 
-/******************************************************************************/
-/*                                 attributes                                 */
-/******************************************************************************/
+  /******************************************************************************/
+  /*                                 attributes                                 */
+  /******************************************************************************/
 
 private:
   CommService *service_ = nullptr;

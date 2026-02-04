@@ -151,6 +151,14 @@ public: // recv ////////////////////////////////////////////////////////////////
 
 public: // probe ///////////////////////////////////////////////////////////////
   Request probe(channel_t channel) override {
+    return probe(channel, (rank_t)MPI_ANY_SOURCE);
+  }
+
+  Request probeAsync(channel_t channel) override {
+    return probeAsync(channel, (rank_t)MPI_ANY_SOURCE);
+  }
+
+  Request probe(channel_t channel, rank_t source) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPIRequest                  r = {
                          .request = {},
@@ -158,11 +166,11 @@ public: // probe ///////////////////////////////////////////////////////////////
                          .comm = this->comms_[channel],
                          .flag = 0,
     };
-    checkMPI(MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, r.comm, &r.flag, &r.status));
+    checkMPI(MPI_Probe((int)source, MPI_ANY_TAG, r.comm, &r.status));
     return requestPool_.allocate(r);
   }
 
-  Request probe(channel_t channel, rank_t source) override {
+  Request probeAsync(channel_t channel, rank_t source) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPIRequest                  r = {
                          .request = {},

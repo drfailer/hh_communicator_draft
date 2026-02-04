@@ -27,7 +27,10 @@ public:
   virtual Request recvAsync(Request probeRequest, Buffer const &buffer) = 0;
 
   virtual Request probe(channel_t channel) = 0;
+  virtual Request probeAsync(channel_t channel) = 0;
+
   virtual Request probe(channel_t channel, rank_t source) = 0;
+  virtual Request probeAsync(channel_t channel, rank_t source) = 0;
 
   virtual bool requestCompleted(Request request) = 0;
   virtual void requestRelease(Request) {}
