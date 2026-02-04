@@ -1,123 +1,119 @@
-#ifndef COMMUNICATOR_REQUEST
-#define COMMUNICATOR_REQUEST
+#ifndef COMMUNICATOR_SERVICE_REQUEST
+#define COMMUNICATOR_SERVICE_REQUEST
 #include "../../log.hpp"
+#include <hedgehog/hedgehog.h>
+#include <source_location>
 #include <thread>
 #include <type_traits>
 #include <vector>
-#include <source_location>
 
 /*
  * In order to be able to use multiple services that each have their own
  * request type without adding an extra template parameter, we use an opaque
- * type for the request. Only the underlying service knows the real reaquest
- * type and can access the data using the opaque request (in this case, it is
- * an index in a pool array). The other advantage of this is that we can easily
+ * type for the request. The other advantage of this is that we can easily
  * track the memory.
  *
- * QUESTION: is it better to use an index based pool or rawptr?
+ * Why non releasing the memory is considered an error here?
+ * In this case, the pool is only used internally to allocate requests, which
+ * are temporary elements that can be owned by multiple components of the
+ * library. Since the pool is used not only to free the memory automatically,
+ * but also to reduce the number of allocations, we consider that an unused
+ * request should always return to the pool to be reused.
  */
 
 namespace hh {
 
 namespace comm {
 
-using Request = size_t;
+using Request = void*;
 
 template <typename T>
 requires std::is_default_constructible_v<T>
 class RequestPool {
-public:
-  struct DebugInfo {
-    std::source_location loc;
-    bool        free;
-  };
+  struct Node;
 
 public:
-  RequestPool(size_t defaultCapacity = 0)
-      : requests_(defaultCapacity, T{}),
-        freeIndexes_(defaultCapacity, 0),
-        debugInfos_(defaultCapacity, DebugInfo{{}, true}) {
-    for (size_t i = 0; i < requests_.size(); ++i) {
-      freeIndexes_[i] = i;
+  RequestPool(size_t defaultCapacity = 0) {
+    for (size_t i = 0; i < defaultCapacity; ++i) {
+      Node *node = new Node();
+      node->next = this->free_nodes_;
+      this->free_nodes_ = node;
     }
   }
 
   ~RequestPool() {
-    if (freeIndexes_.size() < requests_.size()) {
-      size_t nbNonFree = requests_.size() - freeIndexes_.size();
-      size_t ttl = requests_.size();
-      logh::warn(nbNonFree, "/", ttl, " requests where not released.");
-      for (auto info : debugInfos_) {
-        if (!info.free) {
-          logh::warn("request allocated at (", info.loc.file_name(), ":", info.loc.line(), ") was not released.");
-        }
-      }
+    Node  *cur = nullptr;
+    size_t ttlNodeCount = 0, nonReleasedNodeCount = 0;
+
+    // delete the free list
+    for (cur = this->free_nodes_; cur != nullptr;) {
+      Node *next = cur->next;
+      delete cur;
+      cur = next;
+      ttlNodeCount += 1;
+    }
+
+    // delete the use list + debug
+    for (cur = this->used_nodes_; cur != nullptr;) {
+      logh::error("non released " + hh::tool::typeToStr<T>() + " allocated at (", cur->loc.file_name(), ":",
+                  cur->loc.line(), ").");
+      Node *next = cur->next;
+      delete cur;
+      cur = next;
+      ttlNodeCount += 1;
+      nonReleasedNodeCount += 1;
+    }
+    if (nonReleasedNodeCount > 0) {
+      logh::error(nonReleasedNodeCount, " / ", ttlNodeCount, " released.");
     }
   }
 
-  Request allocate(T value = T{}, std::source_location loc = std::source_location::current()) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    Request                     request;
+  T *allocate(std::source_location loc = std::source_location::current()) {
+    std::lock_guard<std::mutex> lock(this->mutex_);
 
-    if (freeIndexes_.size() == 0) {
-      freeIndexes_.push_back(requests_.size());
-      requests_.emplace_back(T{});
-      debugInfos_.emplace_back(loc, true);
+    if (this->free_nodes_ == nullptr) {
+      this->free_nodes_ = new Node();
     }
-    request = freeIndexes_.back();
-    freeIndexes_.pop_back();
-    requests_[request] = value;
-    debugInfos_[request] = DebugInfo{loc, false};
-    return request;
-  }
-
-  void release(Request request) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (debugInfos_[request].free) {
-      logh::error("request allocated at (", debugInfos_[request].loc.file_name(),
-                  ":", debugInfos_[request].loc.line(), ") was released multiple times.");
+    Node *node = this->free_nodes_;
+    this->free_nodes_ = node->next;
+    node->loc = loc;
+    node->next = this->used_nodes_;
+    if (node->next) {
+      node->next->prev = node;
     }
-    debugInfos_[request].free = true;
-    freeIndexes_.push_back(request);
+    memset(&node->data, 0, sizeof(node->data)); // clear the memory
+    return (T *)node;
   }
 
-  T getDataAndRelease(Request request) {
-    T data = requests_[request];
-    release(request);
-    return data; // returned by copy so it is safe
-  }
+  void release(T *data) {
+    std::lock_guard<std::mutex> lock(this->mutex_);
+    Node                       *node = (Node *)data;
 
-  T getData(Request request) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return requests_[request];
-  }
-
-  void setData(Request request, T const &data) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    requests_[request] = data;
-  }
-
-  // WARN: requires manual locking
-  T &dataRef(Request request) {
-    return requests_[request];
-  }
-
-  void lock() {
-    mutex_.lock();
-  }
-
-  void unlock() {
-    mutex_.unlock();
+    if (node->next) {
+      node->next->prev = node->prev;
+    }
+    if (node->prev) {
+      node->prev->next = node->next;
+    } else {
+      this->used_nodes_ = node->next;
+    }
+    node->next = this->free_nodes_;
+    this->free_nodes_ = node;
   }
 
 private:
-  std::vector<T>         requests_;
-  std::vector<Request>   freeIndexes_;
-  std::vector<DebugInfo> debugInfos_;
-  std::mutex             mutex_;
+  struct Node {
+    T                    data;
+    std::source_location loc = {}; // use for debugging
+    Node                *prev = nullptr;
+    Node                *next = nullptr;
+  };
+  Node      *free_nodes_ = nullptr;
+  Node      *used_nodes_ = nullptr;
+  std::mutex mutex_;
 };
 
-} // end namespace comm
+} // namespace comm
 
 } // end namespace hh
 
