@@ -251,7 +251,7 @@ private:
     char error[100] = {0};
     int  len = 0;
     MPI_Error_string(code, error, &len);
-    logh::error("mpi error: ", std::string(error, error + len));
+    log::error("mpi error: ", std::string(error, error + len));
   }
 
 private:

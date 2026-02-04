@@ -1,6 +1,6 @@
 #ifndef COMMUNICATOR_TOOL_MEMORY_POOL
 #define COMMUNICATOR_TOOL_MEMORY_POOL
-#include "../../log.hpp"
+#include "log.hpp"
 #include "../stats.hpp"
 #include "hedgehog/src/tools/meta_functions.h"
 #include "memory_manager.hpp"
@@ -23,12 +23,12 @@ class SingleTypeMemoryPool : public SingleTypeMemoryManager<T> {
 public:
   virtual ~SingleTypeMemoryPool() {
     if (usedMemory.size() > 0) {
-      logh::error(usedMemory.size(), " elements of type `", std::string(hh::tool::typeToStr<T>()),
-                  "' were not returned to the pool.");
+      log::error(usedMemory.size(), " elements of type `", hh::tool::typeToStr<T>(),
+                 "' were not returned to the pool.");
       for (auto um : usedMemory) {
         auto loc = um.second.loc;
-        logh::error("Memory allocated at (", loc.file_name(), ":", loc.line(),
-                    ") was not returned to the pool (type = `", std::string(hh::tool::typeToStr<T>()), "').");
+        log::error("Memory allocated at (", loc.file_name(), ":", loc.line(),
+                   ") was not returned to the pool (type = `", hh::tool::typeToStr<T>(), "').");
       }
     }
   }
@@ -50,8 +50,8 @@ public:
         if constexpr (std::is_default_constructible_v<T>) {
           memory.push_back(std::make_shared<T>());
         } else {
-          logh::error("dynamically sized pool only support default constructible types (allocated<",
-                      std::string(hh::tool::typeToStr<T>()), ">(Dynamic) failed), defaulting to wait mode.");
+          log::error("dynamically sized pool only support default constructible types (allocated<",
+                     hh::tool::typeToStr<T>(), ">(Dynamic) failed), defaulting to wait mode.");
           return nullptr;
         }
         break;
@@ -72,9 +72,9 @@ public:
     std::lock_guard<std::mutex> poolLock(mutex);
     if (!usedMemory.contains(data)) {
       if (std::find(memory.begin(), memory.end(), data) != memory.end()) {
-        logh::error("data of type '", std::string(hh::tool::typeToStr<T>()),
-                    "` was returned to memory pool multiple time. The memory was returned at (", loc.file_name(), ":",
-                    loc.line(), ").");
+        log::error("data of type '", hh::tool::typeToStr<T>(),
+                   "` was returned to memory pool multiple time. The memory was returned at (",
+                   loc.file_name(), ":", loc.line(), ").");
         return;
       }
       // in that case, we consider that the data has been allocated manually

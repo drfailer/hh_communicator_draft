@@ -15,25 +15,22 @@ using SendStrategy = std::function<std::vector<comm::rank_t>(std::shared_ptr<T>)
 template <typename TaskType, typename TM, typename Input>
 struct CommunicatorSend : tool::BehaviorMultiExecuteTypeDeducer_t<std::tuple<Input>> {
 private:
-  TaskType            *task_ = nullptr;
-  SendStrategy<Input>  strategy_ = nullptr;
+  TaskType           *task_ = nullptr;
+  SendStrategy<Input> strategy_ = nullptr;
 
 public:
   CommunicatorSend(TaskType *task)
       : task_(task) {}
 
   void execute(std::shared_ptr<Input> data) override {
-    logh::infog(logh::IG::CommunicatorTaskExecute, "communicator task execute", "[", (int)task_->comm()->channel(),
-                "]: rank = ", task_->comm()->service()->rank());
     if constexpr (requires { data->preSend(); }) {
       data->preSend();
     }
     if (!this->strategy_) {
-        std::cerr << "error: send strategy not set for task "
-                  << hh::tool::typeToStr<TaskType>()
-                  << " (type is `" << hh::tool::typeToStr<Input>() << "')."
-                  << std::endl;
-        return;
+      std::ostringstream oss;
+      oss << "error: send strategy not set for task " << hh::tool::typeToStr<TaskType>() << " (type is `"
+          << hh::tool::typeToStr<Input>() << "')." << std::endl;
+      throw std::runtime_error(oss.str());
     }
     auto dests = this->strategy_(data);
     if (dests.size() == 1 && dests[0] == this->task_->comm()->rank()) {

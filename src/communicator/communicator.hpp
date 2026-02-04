@@ -1,6 +1,6 @@
 #ifndef COMMUNICATOR_COMMUNICATOR
 #define COMMUNICATOR_COMMUNICATOR
-#include "../log.hpp"
+#include "tool/log.hpp"
 #include "package.hpp"
 #include "service/comm_service.hpp"
 #include "stats.hpp"
@@ -94,7 +94,6 @@ public:
     char   buf[100] = {(char)signal};
     size_t len = 1;
 
-    infog(logh::IG::Comm, "comm", "signal = ", (int)signal);
     for (auto dest : dests) {
       this->service_->send(header, dest, Buffer{buf, len});
     }
@@ -108,9 +107,6 @@ public:
     bool useAddResult = std::find(dests.begin(), dests.end(), this->rank()) != dests.end();
     auto [storageId, storage] = createSendStorage(dests, data, useAddResult);
     Header header(this->rank(), 0, storageId.typeId, this->channel_, storageId.packageId, 0);
-
-    infog(logh::IG::Comm, "comm", "sendData -> ", " typeId = ", (int)TM::template idOf<T>(),
-          ", requestId = ", (int)header.packageId, ", dests = ", dests);
 
     this->wh_.mutex.lock();
     this->wh_.sendStorage.insert({storageId, storage});
@@ -471,7 +467,6 @@ private:
         signal = (Signal)buf.mem[0];
       }
       assert(header.source < this->nbProcesses());
-      infog(logh::IG::Comm, "comm", "recvSignal -> ", " source = ", header.source, " signal = ", (int)signal);
     } else {
       this->service_->requestRelease(request);
     }
@@ -492,7 +487,6 @@ private:
     }
 
     if (!createRecvStorage(storageId)) {
-      infog(logh::IG::Comm, "comm", "createRecvStorage returned false");
       return false;
     }
 
@@ -514,7 +508,6 @@ private:
    * Process data after recv.
    */
   void postRecv(StorageId storageId, PackageStorage<TM> storage, auto addResult) {
-    infog(logh::IG::Comm, "comm", "processCreateDataQueue -> unpacking data");
     time_t tunpackingStart, tunpackingEnd;
     assert(storageId.typeId < TM::size);
     TM::apply(storageId.typeId, [&]<typename T>() {
@@ -564,7 +557,7 @@ private:
    */
   void flushRecvQueueAndWarehouse() {
     if (!this->recvOps_.empty()) {
-      logh::error("Cancelling ", this->recvOps_.size(), " recv operations.");
+      log::error("Cancelling ", this->recvOps_.size(), " recv operations.");
     }
     for (auto &op : this->recvOps_) {
       this->service_->requestCancel(op.request);
@@ -572,12 +565,12 @@ private:
     this->recvOps_.clear();
 
     if (!this->createDataOps_.empty()) {
-      logh::error("Cancelling ", this->createDataOps_.size(), " create data operations.");
+      log::error("Cancelling ", this->createDataOps_.size(), " create data operations.");
     }
     this->createDataOps_.clear();
 
     if (!this->wh_.recvStorage.empty()) {
-      logh::error("Removing ", this->wh_.recvStorage.size(), " from storage.");
+      log::error("Removing ", this->wh_.recvStorage.size(), " from storage.");
     }
     for (auto it : this->wh_.recvStorage) {
       auto storageId = it.first;
@@ -630,20 +623,6 @@ public:
       stats[i].unpack(bufMem);
     }
     return stats;
-  }
-
-  /******************************************************************************/
-  /*                                    log                                     */
-  /******************************************************************************/
-
-private:
-  template <typename... Ts>
-  void infog(logh::IG ig, std::string const &name, Ts &&...args) const {
-    if constexpr (sizeof...(Ts)) {
-      logh::infog(ig, name, "[", (int)this->channel_, "]: rank = ", this->rank(), ", ", std::forward<Ts>(args)...);
-    } else {
-      logh::infog(ig, name, "[", (int)this->channel_, "]: rank = ", this->rank());
-    }
   }
 
   /******************************************************************************/

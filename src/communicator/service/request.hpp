@@ -1,6 +1,6 @@
 #ifndef COMMUNICATOR_SERVICE_REQUEST
 #define COMMUNICATOR_SERVICE_REQUEST
-#include "../../log.hpp"
+#include "../tool/log.hpp"
 #include <hedgehog/hedgehog.h>
 #include <source_location>
 #include <thread>
@@ -55,8 +55,8 @@ public:
 
     // delete the use list + debug
     for (cur = this->used_nodes_; cur != nullptr;) {
-      logh::error("non released " + hh::tool::typeToStr<T>() + " allocated at (", cur->loc.file_name(), ":",
-                  cur->loc.line(), ").");
+      log::error("non released " + hh::tool::typeToStr<T>() + " allocated at (",
+                 cur->loc.file_name(), ":", cur->loc.line(), ").");
       Node *next = cur->next;
       delete cur;
       cur = next;
@@ -64,7 +64,7 @@ public:
       nonReleasedNodeCount += 1;
     }
     if (nonReleasedNodeCount > 0) {
-      logh::error(nonReleasedNodeCount, " / ", ttlNodeCount, " released.");
+      log::error(nonReleasedNodeCount, " / ", ttlNodeCount, " released.");
     }
   }
 
