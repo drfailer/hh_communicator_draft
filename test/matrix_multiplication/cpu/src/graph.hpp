@@ -41,7 +41,7 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         auto splitTask = std::make_shared<SplitTask>(tileSize, mm, SPLIT_TASK_THREADS);
         auto distributeTask
             = std::make_shared<hh::CommunicatorTask<MatrixTile<MT, MatrixId::A>, MatrixTile<MT, MatrixId::B>,
-                                                    MatrixTile<MT, MatrixId::C>>>(service);
+                                                    MatrixTile<MT, MatrixId::C>>>(service, "scatter task");
 
         auto productState = std::make_shared<ProductState>(mm, TM, TN, TK, RANK, NB_PROCESSES);
         auto productStateManager = std::make_shared<hh::StateManager<ProductStateIO>>(productState);
@@ -51,7 +51,7 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         auto sumStateManager = std::make_shared<SumStateManager>(sumState);
         auto sumTask = std::make_shared<SumTask>(SUM_TASK_THREADS);
 
-        auto gatherTask = std::make_shared<hh::CommunicatorTask<MatrixTile<MT, MatrixId::C>>>(service);
+        auto gatherTask = std::make_shared<hh::CommunicatorTask<MatrixTile<MT, MatrixId::C>>>(service, "gather task");
 
         auto copyTileState = std::make_shared<CopyTileStateManager>(std::make_shared<CopyTileState>(mm, TM, TN, RANK));
         auto copyTileTask = std::make_shared<CopyTileTask>(COPY_TILE_TASK_THREADS);
