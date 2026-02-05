@@ -211,7 +211,9 @@ struct MemoryManager final : SingleTypeMemoryManagerAbstraction<Types>... {
 };
 
 } // end namespace tool
+
 } // end namespace comm
+
 } // end namespace hh
 
 #endif

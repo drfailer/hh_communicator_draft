@@ -129,7 +129,7 @@ struct PackageWarehouse {
 };
 
 template <typename TM>
-using PackageStorage = typename PackageWarehouse<TM>::Storage;
+using StorageSlot = typename PackageWarehouse<TM>::Storage;
 
 } // end namespace comm
 

@@ -26,15 +26,23 @@
 // 3. when the data is created, recv all the buffers
 // 4. call addResult
 
+/// @brief Hedgehog namespace
 namespace hh {
-
+/// @brief Communicator namespace
 namespace comm {
 
+/// @brief The communicator handles the communication logic. It uses the comm
+///        service to transfert data. Each communicator instance uses a
+///        different channel.
+/// @tparam Types Types handled by the communicator.
 template <typename... Types>
 class Communicator {
+  /// @param Type map type.
   using TM = comm::TypeMap<Types...>;
 
 public:
+  /// @brief Constructor.
+  /// @param service Pointer to a comm service implementation.
   Communicator(CommService *service)
       : service_(service),
         channel_(service->newChannel()),
@@ -42,66 +50,42 @@ public:
         packagesCount_(service->nbProcesses(), 0) {}
 
 public:
-  channel_t channel() const {
-    return channel_;
-  }
+  /// @brief Channel id accessor.
+  /// @return channel id.
+  channel_t channel() const { return channel_; }
 
-  CommService *service() const {
-    return service_;
-  }
+  /// @brief Service accessor.
+  /// @return service.
+  CommService *service() const { return service_; }
 
-  CommTaskStats const &stats() const {
-    return stats_;
-  }
+  /// @brief Profiling information accessor.
+  /// @return Profiling information container.
+  CommTaskStats const &stats() const { return stats_; }
 
-  std::vector<size_t> const &packagesCount() const {
-    return packagesCount_;
-  }
+  /// @brief rank accessor.
+  /// @return Rank.
+  rank_t rank() const { return this->service_->rank(); }
 
-  rank_t rank() const {
-    return this->service_->rank();
-  }
+  /// @brief Number of processes accessor.
+  /// @return Number of processes.
+  std::uint32_t nbProcesses() const { return this->service_->nbProcesses(); }
 
-  std::uint32_t nbProcesses() const {
-    return this->service_->nbProcesses();
-  }
-
-  bool hasPendingOperations() const {
-    return !this->sendOps_.empty() || !this->recvOps_.empty() || !this->createDataOps_.empty();
-  }
-
-  size_t nbSendOps() const {
-    return this->sendOps_.size();
-  }
-
-  size_t nbRecvOps() const {
-    return this->recvOps_.size();
-  }
-
-  size_t nbCreateDataOps() const {
-    return this->createDataOps_.size();
-  }
-
+  /// @brief Allow to the memory manager.
+  /// @param mm New memory manager.
   void memoryManager(std::shared_ptr<tool::MemoryManager<Types...>> mm) {
     this->mm_ = mm;
   }
 
-  /*
-   * Send a signal to the given destinations.
-   */
-  void sendSignal(std::vector<rank_t> const &dests, Signal signal) {
-    Header header(this->rank(), 1, 0, this->channel_, 0, 0);
-    char   buf[100] = {(char)signal};
-    size_t len = 1;
-
-    for (auto dest : dests) {
-      this->service_->send(header, dest, Buffer{buf, len});
-    }
+  /// @brief Returns if the queues are empty.
+  /// @return True if there are pending information, false otherwise.
+  bool hasPendingOperations() const {
+      return !this->sendOps_.empty() || !this->recvOps_.empty() || !this->createDataOps_.empty();
   }
 
-  /*
-   * Send data to the given destinations.
-   */
+  /// @brief Send `data` to the given `dests`.
+  /// @tparam T Type of the data to send.
+  /// @param dests List of destination ranks.
+  /// @param data  Pointer to the data to send.
   template <typename T>
   void sendData(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
     bool useAddResult = std::find(dests.begin(), dests.end(), this->rank()) != dests.end();
@@ -131,6 +115,7 @@ public:
     }
   }
 
+  /// @brief Initialize the communicator.
   void init() {
     this->senderPortState_ = PortState::Opened;
     this->recverPortState_ = PortState::Opened;
@@ -141,6 +126,9 @@ public:
     this->fini_ = false;
   }
 
+  /// @brief Run the communicator (should be called in a dedicated thread).
+  /// @param addResult Function that gives access to the `task->addResult`
+  ///                  method (this is used when receiving data).
   void run(auto addResult) {
     while (this->senderPortState_ != PortState::Closed || this->recverPortState_ != PortState::Closed) {
       progressSender(addResult);
@@ -148,13 +136,34 @@ public:
     }
   }
 
+  /// @brief This function must be called when the core task terminates to
+  ///        notify the communicator thread that no more data will be sent.
+  ///        When this function is called, the communicator sends a
+  ///        disconnection signal and a list of send counters (number of
+  ///        packages sent to each rank) to the master rank. When all the
+  ///        senders are disconnected, the master sends the disconnection
+  ///        signal to the receivers (with the send counters), and each
+  ///        receiver will wait for the reception of all the packages (using
+  ///        the counters) before terminating (this is when the communicator
+  ///        thread can be joined).
   void fini() {
     this->fini_ = true;
   }
 
 private:
+  /// @brief Enum that represents the states of the sender and receiver ports
+  ///        (both the sender and the receiver are state machines).
   enum class PortState { Opened, ClosingMaster, ClosingSlave, Closed };
 
+  /// @brief Progress the sender state machine.
+  /// @param addResult Function that allow the communicator to call the
+  ///                  `addResult` method of the corresponding task. The
+  ///                  function is used when one of the send destination is the
+  ///                  current rank. The function is only called when all the
+  ///                  network send requests are done (because we don't want
+  ///                  the data to be mutated before the network transfer is
+  ///                  completed, so we wait before sending the data to the
+  ///                  other task on the current rank).
   void progressSender(auto addResult) {
     switch (this->senderPortState_) {
     case PortState::Opened:
@@ -188,6 +197,11 @@ private:
     }
   }
 
+  /// @brief Progress the receiver state machine.
+  /// @param addResult Function that allow the communicator to call the
+  ///                  `addResult` method of the corresponding task. The
+  ///                  function is used to transfer the received data to the
+  ///                  rest of the graph.
   void progressRecver(auto addResult) {
     comm::Signal signal = comm::Signal::None;
     comm::Header header = {0, 0, 0, 0, 0, 0};
@@ -228,12 +242,16 @@ private:
   }
 
 private:
+  /// @brief Structure that contains connection information for a particular
+  ///        rank (used in a list).
   struct Connection {
-    bool   connected;
-    size_t sendCount;
-    size_t recvCount;
+    bool   connected; ///< connection flag.
+    size_t sendCount; ///< number of package sent to the destination.
+    size_t recvCount; ///< number of package received by the sender.
   };
 
+  /// @brief Tests if all disconnection signals are received.
+  /// @return True if all senders are disconnect, false otherwise.
   bool allDisconnectionSignalsReceived() const {
     for (auto connection : this->connections_) {
       if (connection.connected) {
@@ -243,6 +261,10 @@ private:
     return true;
   }
 
+  /// @brief Tests if all disconnection signals are received and all the
+  ///        packages from each sender are received.
+  /// @return True if all senders are disconnect and all packages are received,
+  ///         false otherwise.
   bool isConnectedOrExpectsMorePackages() const {
     for (auto connection : this->connections_) {
       if (connection.connected || connection.recvCount < connection.sendCount) {
@@ -252,6 +274,8 @@ private:
     return false;
   }
 
+  /// @brief Send disconnection signal and package counts to the master process
+  ///        (used by slaves sender).
   void sendDisconnectionSignalToMaster() {
     Header header(this->rank(), 1, 0, this->channel_, 0, 0);
 
@@ -262,6 +286,8 @@ private:
     this->service_->send(header, 0, Buffer{this->signalBufferMem_.data(), this->signalBufferMem_.size()});
   }
 
+  /// @brief Send disconnection signal and package counts to the slaves process
+  ///        (used by master sender).
   void sendDisconnectionSignalToSlaves() {
     Header header(this->rank(), 1, 0, this->channel_, 0, 0);
 
@@ -274,6 +300,9 @@ private:
     }
   }
 
+  /// @brief Receive the disconnection signal from the slaves (used by the
+  ///        master receiver).
+  /// @param header Header of the disconnection request (used to know the source).
   void recvDisconnectionSignalFromSlave(Header const &header) {
     size_t *sendCounts = (size_t *)(&this->signalBufferMem_[1]);
 
@@ -286,6 +315,8 @@ private:
     }
   }
 
+  /// @brief Receive the disconnection signal from the master (used by the
+  ///        slaves receivers).
   void recvDisconnectionSignalFromMaster() {
     size_t *sendCounts = (size_t *)(&this->signalBufferMem_[1]);
 
@@ -300,20 +331,23 @@ private:
   }
 
 private:
+  /// @brief Structure that contains information about the communication requests.
   struct CommOperation {
-    package_id_t packageId;
-    buffer_id_t  bufferId;
-    Request      request;
-    StorageId    storageId;
+    package_id_t packageId; ///< Id of the package.
+    buffer_id_t  bufferId;  ///< Id of the buffer (buffers are sent/received separately).
+    Request      request;   ///< Request.
+    StorageId    storageId; ///< Id of the storage.
   };
 
   /******************************************************************************/
   /*                           send queue operations                            */
   /******************************************************************************/
 
-  /*
-   * Process the send operation queue.
-   */
+  /// @brief Process the send operation queue.
+  /// @param addResult Function that allow transferring data to the result of
+  ///                  the graph.
+  /// @param flush     Boolean flag that is used when the queue needs to be
+  ///                  flushed.
   void processSendOpsQueue(auto addResult, bool flush = false) {
     std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
@@ -324,7 +358,7 @@ private:
         if (this->service_->requestCompleted(it->request)) {
           std::lock_guard<std::mutex> whLock(this->wh_.mutex);
           assert(this->wh_.sendStorage.contains(it->storageId));
-          PackageStorage<TM> &storage = this->wh_.sendStorage.at(it->storageId);
+          StorageSlot<TM> &storage = this->wh_.sendStorage.at(it->storageId);
           ++storage.bufferCount;
 
           if (storage.bufferCount == storage.ttlBufferCount) {
@@ -340,10 +374,12 @@ private:
     } while (flush && !this->sendOps_.empty());
   }
 
-  /*
-   * Manages the data after send.
-   */
-  void postSend(StorageId storageId, PackageStorage<TM> storage, auto addResult) {
+  /// @brief Process the data after it is sent.
+  /// @param storageId Id of the storage in which the sent data is stored.
+  /// @param storage   Package Storage in which the data is stored.
+  /// @param addResult Function that allow transferring the data to the rest of
+  ///                  the graph (if `addResult` is required, it is done here).
+  void postSend(StorageId storageId, StorageSlot<TM> storage, auto addResult) {
     assert(storageId.typeId < TM::size);
     TM::apply(storageId.typeId, [&]<typename T>() {
       std::shared_ptr<T> data = std::get<std::shared_ptr<T>>(storage.data);
@@ -363,8 +399,14 @@ private:
     });
   }
 
+  /// @brief Create a storage slot for a sent package.
+  /// @tparam T Type of the data that is sent.
+  /// @param dests Vector that contains the destinations ranks.
+  /// @param data  Data that requires to be sent.
+  /// @param useAddResult Flag that will be used in  `postSend` to know if
+  ///                     `addResult` should be used.
   template <typename T>
-  std::pair<StorageId, PackageStorage<TM>> createSendStorage(std::vector<rank_t> const &dests, std::shared_ptr<T> data,
+  std::pair<StorageId, StorageSlot<TM>> createSendStorage(std::vector<rank_t> const &dests, std::shared_ptr<T> data,
                                                              bool useAddResult) {
     package_id_t packageId = this->service_->newPackageId(this->channel_);
     size_t       nbDests = useAddResult ? dests.size() - 1 : dests.size();
@@ -375,8 +417,8 @@ private:
     time_t  tpackingEnd = std::chrono::system_clock::now();
     assert(package.data.size() <= 4);
 
-    // create the storage data
-    PackageStorage<TM> storage = {
+    // create the storage slot
+    StorageSlot<TM> storage = {
         .package = package,
         .bufferCount = 0,
         .ttlBufferCount = package.data.size() * nbDests,
@@ -396,9 +438,12 @@ private:
   /*                           recv queue operations                            */
   /******************************************************************************/
 
-  /*
-   * Process the pending recv data queue.
-   */
+  /// @brief Process the `createDataQueue` that stores recv requests before the
+  ///        the data is available for the reception. Here we try to allocate a
+  ///        new data using the memory manager. If the memory manager returns
+  ///        some data, a new storage slot is created to store the data and the
+  ///        request, and we start the reception. Otherwise, the request
+  ///        remains in this queue until some memory is available.
   void processCreateDataQueue() {
     std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
@@ -413,10 +458,10 @@ private:
     }
   }
 
-  /*
-   * Process the recv operations. This operations are to pending MPI requests
-   * that have an associated recv data storage that will store the buffers.
-   */
+  /// @brief Process the recv operations queue. When all the buffers for a
+  ///        particular data have arrived, the storage slot is destroyed and the
+  ///        data is transferred to the result of the graph using `addResult`.
+  /// @param addResult Function that allow to call `task->addResult`
   void processRecvOpsQueue(auto addResult) {
     std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
 
@@ -441,11 +486,13 @@ private:
     }
   }
 
-  /*
-   * Probe the network. When a valid message has arrived, if it contains a
-   * signal, then receive the signal, otherwise, add a pending recv data request
-   * to the queue.
-   */
+  /// @brief Probe the network. When a valid message has arrived: if it
+  ///        contains a signal, then receive the signal directly (blocking),
+  ///        otherwise, add a pending recv data request to the queue.
+  /// @param signal Reference to the signal that allow to the receiver state
+  ///               machine to know if a signal or some data has arrived.
+  /// @param header Reference to a header that is set when the probe is
+  ///               successful.
   void recvSignal(Signal &signal, Header &header) {
     Request request = this->service_->probeAsync(this->channel_);
 
@@ -472,12 +519,10 @@ private:
     }
   }
 
-  /*
-   * Try to create a recv storage and create a recv operation on success.
-   * `createRecvStorage` fails when the memory manager (`createData`) returns
-   * a nullptr (eg the pool is empty). In this case, the pending recv data
-   * requests will remain in the queue util memory is available.
-   */
+  /// @brief Try to create a storage slot for the data. If a storage slot can
+  ///        be created, the reception of all the buffers is started.
+  /// @param header Header of the request fetched by the probe.
+  /// @return True if the reception has started.
   bool recvData(Header header) {
     std::lock_guard<std::mutex> whLock(this->wh_.mutex);
     StorageId                   storageId(header.source, header.packageId, header.typeId, 0);
@@ -504,10 +549,12 @@ private:
     return true;
   }
 
-  /*
-   * Process data after recv.
-   */
-  void postRecv(StorageId storageId, PackageStorage<TM> storage, auto addResult) {
+  /// @brief Process the data after the reception is completed.
+  /// @param storageId Id of the storage slot in the warehouse.
+  /// @param storage   Storage slot.
+  /// @param addResult Function that allow transferring the data to rest of the
+  ///                  graph (calls `task->addResult`).
+  void postRecv(StorageId storageId, StorageSlot<TM> storage, auto addResult) {
     time_t tunpackingStart, tunpackingEnd;
     assert(storageId.typeId < TM::size);
     TM::apply(storageId.typeId, [&]<typename T>() {
@@ -523,10 +570,11 @@ private:
         storage.package.size());
   }
 
-  /*
-   * If the memory manager (createData) returns a valid pointer, creates a new
-   * storage entry in the warehouse.
-   */
+  /// @brief Try to allocated a new data using the memory manager. If the
+  ///        memory manager returns a valid data, creates a new storage slot in
+  ///        the warehouse.
+  /// @param storageId Id for the new storage slot.
+  /// @return True if the storage slot was created, false otherwise.
   bool createRecvStorage(StorageId storageId) {
     bool status = true;
 
@@ -539,7 +587,7 @@ private:
         return;
       }
       auto               package = packageMem(data);
-      PackageStorage<TM> storage{
+      StorageSlot<TM> storage{
           .package = package,
           .bufferCount = 0,
           .ttlBufferCount = package.data.size(),
@@ -552,9 +600,12 @@ private:
     return status;
   }
 
-  /*
-   * Flush operation queue and remove storage entries from the warehouse.
-   */
+  /// @brief Cancel the remaining received requests and clear the queue.
+  ///
+  /// Node: with the current implementation, the receiver is forced to receiver
+  /// all the requests, which means when this function is called, the queues
+  /// are necessarily empty. However, this function may be more useful if this
+  /// behavior changes.
   void flushRecvQueueAndWarehouse() {
     if (!this->recvOps_.empty()) {
       log::error("Cancelling ", this->recvOps_.size(), " recv operations.");
@@ -590,9 +641,7 @@ private:
   /******************************************************************************/
 
 public:
-  /*
-   * Send statistics when generating the dot file.
-   */
+  /// @brief Sends all the profiling information to the master process.
   void sendStats() const {
     Header            header(this->rank(), 0, 0, this->channel_, 0, 0);
     std::vector<char> bufMem;
@@ -600,9 +649,8 @@ public:
     this->service_->send(header, 0, Buffer{bufMem.data(), bufMem.size()});
   }
 
-  /*
-   * Gather statistics on the master rank.
-   */
+  /// @brief Gather all the profiling information.
+  /// @return List of the profiling information of each rank.
   std::vector<CommTaskStats> gatherStats() const {
     std::vector<char>          bufMem;
     std::vector<CommTaskStats> stats(this->nbProcesses());
@@ -630,34 +678,34 @@ public:
   /******************************************************************************/
 
 private:
-  CommService *service_ = nullptr;
-  channel_t    channel_ = 0;
+  CommService *service_ = nullptr; ///< Pointer to the service implementation.
+  channel_t    channel_ = 0;       ///< Channel id.
 
   // progress loop data
-  PortState               senderPortState_;
-  PortState               recverPortState_;
-  std::vector<Connection> connections_;
-  bool                    fini_ = false;
+  PortState               senderPortState_; ///< State of the sender port.
+  PortState               recverPortState_; ///< State of the receiver port.
+  std::vector<Connection> connections_;     ///< List of connection information per rank.
+  bool                    fini_ = false;    ///< Termination flag.
 
   // queues
-  std::vector<CommOperation> sendOps_;
-  std::vector<CommOperation> recvOps_;
-  std::vector<Header>        createDataOps_;
-  std::mutex                 queuesMutex_; // the communicator is shared accross instances of a task
+  std::vector<CommOperation> sendOps_;       ///< Queue of send operations.
+  std::vector<CommOperation> recvOps_;       ///< Queue of recv operations.
+  std::vector<Header>        createDataOps_; ///< Queue of create data operation (wait for available memory).
+  std::mutex                 queuesMutex_;   ///< mutex for the queues.
 
   // packages
-  PackageWarehouse<TM> wh_;
+  PackageWarehouse<TM> wh_; ///< Package warehouse that stores the data during transmission.
 
   // stats
-  CommTaskStats       stats_;
-  std::vector<size_t> packagesCount_ = {};
+  CommTaskStats       stats_;              ///< Profiling informations
+  std::vector<size_t> packagesCount_ = {}; ///< Package counters.
 
   // diconnection buffer
-  std::vector<char>   signalBufferMem_;
-  std::vector<size_t> sendCountsMap_; // this is a 2D array
+  std::vector<char>   signalBufferMem_; ///< Buffer memory used to send the disconnection signal.
+  std::vector<size_t> sendCountsMap_;   ///< 2D array: [send][dest]->packageCount (used by the master process).
 
   // memory manager
-  std::shared_ptr<tool::MemoryManager<Types...>> mm_ = nullptr;
+  std::shared_ptr<tool::MemoryManager<Types...>> mm_ = nullptr; ///< Pointer to the memory manager.
 };
 
 } // end namespace comm
