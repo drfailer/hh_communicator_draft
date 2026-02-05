@@ -21,18 +21,25 @@
  * request should always return to the pool to be reused.
  */
 
+/// @brief Hedgehog namespace
 namespace hh {
-
+/// @brief Communicator namespace
 namespace comm {
 
+/// @brief Generic request type exposed to the other components of the library.
 using Request = void*;
 
+/// @brief Memory pool used for allocating the requests in the communicator
+///        services (this is a standard memory pool implementation).
 template <typename T>
-requires std::is_default_constructible_v<T>
+    requires std::is_default_constructible_v<T>
 class RequestPool {
   struct Node;
 
 public:
+  /// @brief Constructor of the request pool.
+  /// @param defaultCapacity Number of pre-allocated requests (can be 0 since
+  ///                        the pool grows dynamically).
   RequestPool(size_t defaultCapacity = 0) {
     for (size_t i = 0; i < defaultCapacity; ++i) {
       Node *node = new Node();
@@ -41,6 +48,10 @@ public:
     }
   }
 
+  /// @brief Request pool destructor: delete all the allocated requests and
+  ///        print error messages for requests that were not released (giving
+  ///        the source location where the request was allocated and the total
+  ///        number of non released requests).
   ~RequestPool() {
     Node  *cur = nullptr;
     size_t ttlNodeCount = 0, nonReleasedNodeCount = 0;
@@ -68,6 +79,11 @@ public:
     }
   }
 
+  /// @brief Allocate a new requests: if the free list is not empty, the
+  ///        result requests will be taken out of it, otherwise, a new request
+  ///        will be dynamically allocated.
+  /// @param loc Source location of the allocation.
+  /// @return Pointer to the allocated data.
   T *allocate(std::source_location loc = std::source_location::current()) {
     std::lock_guard<std::mutex> lock(this->mutex_);
 
@@ -85,6 +101,10 @@ public:
     return (T *)node;
   }
 
+  /// @brief Return the given request to the pool.
+  ///        WARN: this function is unsafe and the released request must have
+  ///        been allocated using the pool (the request is casted to a pool
+  ///        node).
   void release(T *data) {
     std::lock_guard<std::mutex> lock(this->mutex_);
     Node                       *node = (Node *)data;
@@ -102,15 +122,16 @@ public:
   }
 
 private:
+  /// @brief internal memory pool node.
   struct Node {
-    T                    data;
-    std::source_location loc = {}; // use for debugging
-    Node                *prev = nullptr;
-    Node                *next = nullptr;
+    T                    data;           ///< user data
+    std::source_location loc = {};       ///< allocation location (for debugging).
+    Node                *prev = nullptr; ///< next node
+    Node                *next = nullptr; ///< previous node
   };
-  Node      *free_nodes_ = nullptr;
-  Node      *used_nodes_ = nullptr;
-  std::mutex mutex_;
+  Node      *free_nodes_ = nullptr; ///< List of free nodes.
+  Node      *used_nodes_ = nullptr; ///< List of used nodes.
+  std::mutex mutex_; ///< Mutex used to make the pool thread-safe.
 };
 
 } // namespace comm

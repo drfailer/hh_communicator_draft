@@ -38,7 +38,7 @@ public:
   Communicator(CommService *service)
       : service_(service),
         channel_(service->newChannel()),
-        stats_(TM::size, service->nbProcesses(), service->collectStats()),
+        stats_(TM::size, service->nbProcesses(), service->profilingEnabled()),
         packagesCount_(service->nbProcesses(), 0) {}
 
 public:

@@ -89,7 +89,7 @@ public:
       infos += mm_->extraPrintingInformation();
     }
 
-    if (!communicator_.service()->collectStats() || communicator_.nbProcesses() == 1) {
+    if (!communicator_.service()->profilingEnabled() || communicator_.nbProcesses() == 1) {
       return infos;
     }
 

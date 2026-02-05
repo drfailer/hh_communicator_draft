@@ -12,14 +12,20 @@
 #include <stdexcept>
 #include <thread>
 
+/// @brief Hedgehog namespace
 namespace hh {
-
+/// @brief Communicator namespace
 namespace comm {
 
+/// @brief Implementation of hte MPI service backend.
 class MPIService : public CommService {
 public:
-  MPIService(int *argc, char ***argv, bool collectStats = false)
-      : CommService(collectStats) {
+  /// @brief MPI Service constructor: calls MPI_Init with the program arguments.
+  /// @param argc Pointer to the argument counter.
+  /// @param argv Pointer to the arguments values.
+  /// @param profilingEnabled Profiling flag (true to enable profiling).
+  MPIService(int *argc, char ***argv, bool profilingEnabled = false)
+      : CommService(profilingEnabled) {
     int32_t provided = 0;
     // MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided);
     MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided);
@@ -27,11 +33,13 @@ public:
     MPI_Comm_size(MPI_COMM_WORLD, &this->nbProcesses_);
   }
 
+  /// @brief MPI Service destructor: calls MPI_Finalize.
   ~MPIService() {
     MPI_Finalize();
   }
 
 private:
+  /// @brief header fields infos and offset: used to encode/decode MPI tags to header.
   static constexpr Header::FieldInfo HEADER_FIELDS[]{
       // MPI tags are at least 15 bits
       {.offset = 32, .mask = 0b1111111111111111111111111111111111111111111111111000000000000000}, // source
@@ -43,6 +51,9 @@ private:
       {.offset = 0, .mask = 0b0000000000000000000000000000000000000000000000000000000000000011}, // buffer id
   };
 
+  /// @brief Encode the given header to an MPI tag.
+  /// @param header Header to encode.
+  /// @return MPI tag.
   static int headerToTag(Header const &header) {
     std::uint64_t tag = 0;
     tag |= header.signal << HEADER_FIELDS[Header::SIGNAL].offset;
@@ -53,6 +64,9 @@ private:
     return (int)tag;
   }
 
+  /// @brief Dencode the given MPI tag to a header.
+  /// @param tag MPI tag to decode.
+  /// @return Header.
   static Header tagToHeader(int tag) {
     assert(tag >= 0);
     assert((tag & HEADER_FIELDS[0].mask) == 0);
@@ -71,14 +85,20 @@ private:
   }
 
 private:
+  /// @brief Internal service request.
   struct MPIRequest {
-    MPI_Request request;
-    MPI_Status  status;
-    MPI_Comm    comm;
-    int         flag;
+    MPI_Request request; ///< MPI request.
+    MPI_Status  status;  ///< MPI status.
+    MPI_Comm    comm;    ///< MPI communicator (correspond to the channel id).
+    int         flag;    ///< Flag used with some MPI functions such as `probe`.
   };
 
 public: // send ////////////////////////////////////////////////////////////////
+
+  /// @brief Send a buffer to a given destination synchronously (MPI_Send).
+  /// @param header Header of the request.
+  /// @param dest   Rank of the destination process.
+  /// @param buffer Buffer to send.
   void send(Header const &header, rank_t dest, Buffer const &buffer) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     int                         tag = headerToTag(header);
@@ -92,6 +112,11 @@ public: // send ////////////////////////////////////////////////////////////////
     checkMPI(MPI_Send(buffer.mem, (int)buffer.len, MPI_BYTE, (int)dest, tag, this->comms_[header.channel]));
   }
 
+  /// @brief Send a buffer to a given destination asynchronously (MPI_Isend).
+  /// @param header Header of the request.
+  /// @param dest   Rank of the destination process.
+  /// @param buffer Buffer to send.
+  /// @return Send request.
   Request sendAsync(Header const &header, rank_t dest, Buffer const &buffer) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPIRequest                 *r = requestPool_.allocate();
@@ -111,6 +136,10 @@ public: // send ////////////////////////////////////////////////////////////////
   }
 
 public: // recv ////////////////////////////////////////////////////////////////
+
+  /// @brief Receive a request header and buffer synchronously (MPI_Recv).
+  /// @param header Header of the request.
+  /// @param buffer Buffer to receive the data.
   void recv(Header const &header, Buffer const &buffer) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPI_Status                  status;
@@ -119,6 +148,10 @@ public: // recv ////////////////////////////////////////////////////////////////
                       &status));
   }
 
+  /// @brief Receive a request header and buffer asynchronously (MPI_Irecv).
+  /// @param header Header of the request.
+  /// @param buffer Buffer to receive the data.
+  /// @return Receive request.
   Request recvAsync(Header const &header, Buffer const &buffer) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     int                         tag = headerToTag(header);
@@ -128,6 +161,9 @@ public: // recv ////////////////////////////////////////////////////////////////
     return r;
   }
 
+  /// @brief Receive a request after a successful probe synchronously (MPI_Recv).
+  /// @param probeRequest Request returned by the probe.
+  /// @param buffer       Buffer to receive the data.
   void recv(Request probeRequest, Buffer const &buffer) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPIRequest                 *r = (MPIRequest *)probeRequest;
@@ -135,6 +171,10 @@ public: // recv ////////////////////////////////////////////////////////////////
     requestPool_.release(r);
   }
 
+  /// @brief Receive a request after a successful probe asynchronously (MPI_Irecv).
+  /// @param probeRequest Request returned by the probe.
+  /// @param buffer       Buffer to receive the data.
+  /// @return Receive request.
   Request recvAsync(Request probeRequest, Buffer const &buffer) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPIRequest                 *r = (MPIRequest *)probeRequest;
@@ -144,14 +184,31 @@ public: // recv ////////////////////////////////////////////////////////////////
   }
 
 public: // probe ///////////////////////////////////////////////////////////////
+
+  /// @brief Probe a given channel for incoming requests synchronously
+  ///        (MPI_Probe to MPI_ANY_SOURCE).
+  /// @param channel Channel to probe (each communicator task use a different
+  ///                channel, the channel is create with `newChannel`).
+  /// @return Probe request.
   Request probe(channel_t channel) override {
     return probe(channel, (rank_t)MPI_ANY_SOURCE);
   }
 
+  /// @brief Probe a given channel for incoming requests asynchronously
+  ///        (MPI_Iprobe to MPI_ANY_SOURCE).
+  /// @param channel Channel to probe (each communicator task use a different
+  ///                channel, the channel is create with `newChannel`).
+  /// @return Probe request.
   Request probeAsync(channel_t channel) override {
     return probeAsync(channel, (rank_t)MPI_ANY_SOURCE);
   }
 
+  /// @brief Probe a given channel for incoming requests sent by the given
+  ///        source synchronously (MPI_Probe).
+  /// @param channel Channel to probe (each communicator task use a different
+  ///                channel, the channel is create with `newChannel`).
+  /// @param source  Sender rank.
+  /// @return Probe request.
   Request probe(channel_t channel, rank_t source) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPIRequest                 *r = requestPool_.allocate();
@@ -160,6 +217,12 @@ public: // probe ///////////////////////////////////////////////////////////////
     return r;
   }
 
+  /// @brief Probe a given channel for incoming requests sent by the given
+  ///        source asynchronously (MPI_Iprobe).
+  /// @param channel Channel to probe (each communicator task use a different
+  ///                channel, the channel is create with `newChannel`).
+  /// @param source  Sender rank.
+  /// @return Probe request.
   Request probeAsync(channel_t channel, rank_t source) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPIRequest                 *r = requestPool_.allocate();
@@ -169,6 +232,10 @@ public: // probe ///////////////////////////////////////////////////////////////
   }
 
 public: // requests ////////////////////////////////////////////////////////////
+
+  /// @brief Tells if the given request is completed (MPI_Test).
+  /// @param request Request for which the completion requires to be tested.
+  /// @return True if the request is completed, false otherwise.
   bool requestCompleted(Request request) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPIRequest                 *r = (MPIRequest *)request;
@@ -177,11 +244,15 @@ public: // requests ////////////////////////////////////////////////////////////
     return r->flag != 0;
   }
 
+  /// @brief Release the given request.
+  /// @param request Request to release.
   void requestRelease(Request request) override {
     // MPI_Request_free(&r->request);
     requestPool_.release((MPIRequest *)request);
   }
 
+  /// @brief Cancel the given request (MPI_Cancel).
+  /// @param request Request to cancel.
   void requestCancel(Request request) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPIRequest                 *r = (MPIRequest *)request;
@@ -189,6 +260,9 @@ public: // requests ////////////////////////////////////////////////////////////
     requestPool_.release((MPIRequest *)request);
   }
 
+  /// @brief Get the buffer size of an incoming request (MPI_Get_count).
+  /// @param request Request that contains the buffer size information.
+  /// @return Buffer size.
   size_t bufferSize(Request request) override {
     int         count = -1;
     MPIRequest *r = (MPIRequest *)request;
@@ -198,6 +272,9 @@ public: // requests ////////////////////////////////////////////////////////////
     return (size_t)count;
   }
 
+  /// @brief Get the header of a request (tagToHeader(MPI_Status::MPI_TAG)).
+  /// @param request Request that contains the header information.
+  /// @return Header of the request.
   Header requestHeader(Request request) override {
     MPIRequest *r = (MPIRequest *)request;
     Header      header;
@@ -208,25 +285,35 @@ public: // requests ////////////////////////////////////////////////////////////
     return header;
   }
 
+  /// @brief Used to know if a probe has found a matching request (used with
+  ///        async probe) (check the value of the flag in/out argument of
+  ///        MPI_Test).
+  /// @param request Request returned by `probeAsync`.
+  /// @return True if the probe found a messages, false otherwise.
   bool probeSuccess(Request request) override {
     MPIRequest *r = (MPIRequest *)request;
     return r->flag != 0;
   }
 
 public: // synchronization /////////////////////////////////////////////////////
+
+  /// @brief Synchronize all processes up to a certain point (MPI_Barrier).
   void barrier() override {
     checkMPI(MPI_Barrier(MPI_COMM_WORLD));
   }
 
 public:
-  rank_t rank() const override {
-    return (rank_t)rank_;
-  }
-  std::uint32_t nbProcesses() const override {
-    return (std::uint32_t)nbProcesses_;
-  }
+  /// @brief Rank accessor.
+  /// @return Rank of the current process.
+  rank_t rank() const override { return (rank_t)rank_; }
+
+  /// @brief Number of processes accessor.
+  /// @return Number of processes.
+  std::uint32_t nbProcesses() const override { return (std::uint32_t)nbProcesses_; }
 
 public:
+  /// @brief Create a new channel (creates a new MPI_Comm with MPI_Comm_Split).
+  /// @return Id of the new channel.
   channel_t newChannel() override {
     std::lock_guard<std::mutex> mpiLock(mutex());
     channel_t                   channel = comms_.size();
@@ -236,6 +323,9 @@ public:
     return channel;
   }
 
+  /// @brief Generate a package id for a specific channel.
+  /// @param channel Id of the channel create with `newChannel`.
+  /// @return New package id.
   package_id_t newPackageId(channel_t channel) override {
     package_id_t result = packageCounters_[channel];
     // update the id and make sure it stays on 9 bits
@@ -244,6 +334,8 @@ public:
   }
 
 private:
+  /// @brief Internal mpi check function.
+  /// @brief MPI status code.
   void checkMPI(int code) {
     if (code == 0) {
       return;
@@ -255,11 +347,11 @@ private:
   }
 
 private:
-  int                     rank_ = -1;
-  int                     nbProcesses_ = -1;
-  RequestPool<MPIRequest> requestPool_ = {};
-  std::vector<MPI_Comm>   comms_ = {};
-  std::vector<size_t>     packageCounters_ = {};
+  int                     rank_ = -1;            ///< MPI rank.
+  int                     nbProcesses_ = -1;     ///< MPI comm size.
+  RequestPool<MPIRequest> requestPool_ = {};     ///< Request memory pool to optimize request allocations.
+  std::vector<MPI_Comm>   comms_ = {};           ///< MPI Communicators (comms[channel_id] -> channel communicator)
+  std::vector<size_t>     packageCounters_ = {}; ///< Package counter used to generate package ids.
 };
 
 } // end namespace comm

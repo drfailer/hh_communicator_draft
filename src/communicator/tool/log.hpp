@@ -5,6 +5,8 @@
 #include <sstream>
 #include <source_location>
 
+/// TODO: make the log level configurable
+
 namespace hh {
 
 namespace comm {
