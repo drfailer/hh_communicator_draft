@@ -66,17 +66,19 @@ struct SingleTypeMemoryManager {
 /*                     SingleTypeMemoryManagerAbstraction                     */
 /******************************************************************************/
 
-/// @brief Abstraction for the single type memory manager. This pattern allows
-///        creating a memory manager that supports multiple types from a type
-///        that inherits from multiple `SingleTypeMemoryManager`. The reason
-///        why this abstraction is used instead of having custom memory
-///        managers inherit directly from `MemoryManager<Types...>` is because
-///        this allows generating generic default implementations common to
-///        multiple types. For instance, one can inherit from multiple
-///        "Default_SingleTypeMemoryManager<Types>..." where the default
-///        implementation is the same for all the types, which is not possible
-///        to do when inheriting directly from "MemoryManager<Types...>"
-///        because virtual functions cannot be template.
+/// @brief Abstraction for the single type memory manager.
+///
+/// This pattern allows creating a memory manager that supports multiple types
+/// from a type that inherits from multiple `SingleTypeMemoryManager`. The
+/// reason why this abstraction is used instead of having custom memory
+/// managers inherit directly from `MemoryManager<Types...>` is because this
+/// allows generating generic default implementations common to multiple types.
+/// For instance, one can inherit from multiple
+/// "Default_SingleTypeMemoryManager<Types>..." where the default
+/// implementation is the same for all the types, which is not possible to do
+/// when inheriting directly from "MemoryManager<Types...>" because virtual
+/// functions cannot be template.
+///
 /// @tparam T Type managed by the memory manager.
 template <typename T>
 class SingleTypeMemoryManagerAbstraction {
@@ -140,10 +142,12 @@ private:
 /*                               MemoryManager                                */
 /******************************************************************************/
 
-/// @brief Memory manager that can manage multiple types. Custom memory
-///        managers should implement the `SingleTypeMemoryManager<T>` interface
-///        instead of inheriting from `MemoryManager` (see explanation in
-///        `SingleTypeMemoryManagerAbstraction` documentation).
+/// @brief Memory manager that can manage multiple types.
+///
+/// Custom memory managers should implement the `SingleTypeMemoryManager<T>`
+/// interface instead of inheriting from `MemoryManager` (see explanation in
+/// `SingleTypeMemoryManagerAbstraction` documentation).
+///
 /// @tparam Types List of supported types.
 template <typename... Types>
 struct MemoryManager final : SingleTypeMemoryManagerAbstraction<Types>... {
