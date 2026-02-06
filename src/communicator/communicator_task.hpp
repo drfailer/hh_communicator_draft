@@ -89,6 +89,47 @@ struct CommunicatorMultiSend : CommunicatorSend<TaskType, Inputs>... {
 /******************************************************************************/
 
 /// @brief Communicator task.
+///
+/// The communicator task is a bridge between the different processes. The idea
+/// is that there will be one instance of the program per node, and when data
+/// needs to be transfered from one node to another, we use the communicator.
+///
+/// Example:
+///
+/// @code
+/// // create the service
+/// bool enabledProfiling = true;
+/// hh::comm::MPIService service(&argc, &argv, enabledProfiling);
+///
+/// // create a memory manager (use the memory pool)
+/// auto mm = std::make_shared<hh::comm::tool::MemoryPool<Data1, Data2>>();
+/// mm->template fill<Data1>(100);
+/// mm->template fill<Data2>(100);
+///
+/// // create and setup the communicator
+/// auto ct = std::make_shared<hh::comm::CommunicatorTask<Data1, Data2>>(&service, "example");
+///
+/// // set the memory manager
+/// ct->setMemoryManager(mm);
+///
+/// // set the send strategies for each type
+///
+/// // the send strategy is a function that returns a list of destination
+/// // ranks, we can use a lambda to compute the destination depending on the
+/// // input data
+/// gatherTask->strategy([&](std::shared_ptr<Data1> data) {
+///     hh::comm::rank_t rank = service.rank();
+///     size_t           nbProcesses = service.nbProcesses();
+///     return std::vector<hh::comm::rank_t>({(rank + 1) % nbProcesses});
+/// });
+/// // or use some of the generic strategies provided by the library
+/// gatherTask->strategy(hh::comm::strategy::SendTo<Data2>(1, 2));
+///
+/// // use the communicator like any other tasks:
+/// graph.edges(otherTask, ct);
+/// // ...
+/// @endcode
+///
 /// @tparam Types Types managed by the communicator.
 template <typename... Types>
 class CommunicatorTask
@@ -100,16 +141,19 @@ class CommunicatorTask
       public CommunicatorMultiSend<CommunicatorTask<Types...>, Types...>,
       public tool::BehaviorTaskMultiSendersTypeDeducer_t<std::tuple<Types...>> {
 private:
-  using CoreTaskType = core::CommunicatorCoreTask<Types...>;
-  using SelfType = CommunicatorTask<Types...>;
-  using Inputs = std::tuple<Types...>;
-  using Outputs = std::tuple<Types...>;
+  using CoreTaskType = core::CommunicatorCoreTask<Types...>; ///< alias for the core task type.
+  using SelfType = CommunicatorTask<Types...>;               ///< alias for the self type
+  using Inputs = std::tuple<Types...>;                       ///< tuple of inputs used with hedgehog classes.
+  using Outputs = std::tuple<Types...>;                      ///< tuple of output used with hedgehog classes.
   friend CoreTaskType;
 
 private:
-  std::shared_ptr<CoreTaskType> const coreTask_ = nullptr;
+  std::shared_ptr<CoreTaskType> const coreTask_ = nullptr; ///< Pointer to the core task.
 
 public:
+  /// @brief Constructure from the service and the name
+  /// @param service Pointer to an implementation of the comm service.
+  /// @param name    Name of the task.
   explicit CommunicatorTask(comm::CommService *service, std::string const &name = "CommunicatorTask")
       : behavior::TaskNode(std::make_shared<CoreTaskType>(this, service, name)),
         behavior::Copyable<SelfType>(1),
@@ -123,23 +167,36 @@ public:
     this->coreTask_->printOptions().font({0xff, 0xff, 0xff, 0xff});
   }
 
+  /// @brief Accessor to the communicator.
+  /// @return Pointer to the communicator.
   [[nodiscard]] comm::Communicator<Types...> *comm() const {
     return coreTask_->comm();
   }
 
+  /// @brief Implementation of the `canTerminate` function.
+  /// @return True if the task can terminate.
   [[nodiscard]] bool canTerminate() const override {
     return !coreTask_->hasNotifierConnected() && coreTask_->receiversEmpty();
   }
 
+  /// @brief Implementation of the copy function (the current version of the
+  ///        communicator should not be copied).
+  /// @throws runtime_error
+  /// @return Never returns (always throws an exception).
   std::shared_ptr<CommunicatorTask<Types...>> copy() override final {
     throw std::runtime_error("error: the communicator task should not be copied.");
   }
 
+  /// @brief Set the memory manager.
+  /// @tparam MM Memory manager type: used because the custom memory manager
+  ///            don't inherit from the `MemoryManager` class.
+  /// @param mm Memory manager
   template <typename MM>
   void setMemoryManager(MM mm) {
     this->coreTask_->setMemoryManager(std::make_shared<comm::tool::MemoryManager<Types...>>(mm));
   }
 
+  /// @brief Use addResult from `BehaviorTaskMultiSendersTypeDeducer_t`.
   using tool::BehaviorTaskMultiSendersTypeDeducer_t<std::tuple<Types...>>::addResult;
 };
 } // namespace hh
