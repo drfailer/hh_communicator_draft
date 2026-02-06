@@ -33,9 +33,7 @@ Package pack(std::shared_ptr<T> data) {
   if constexpr (requires { data->pack(); }) {
     package = data->pack();
   } else if constexpr (std::is_trivially_copyable_v<T>) {
-    Buffer buf = Buffer{.mem = new char[sizeof(T)], .len = sizeof(T)};
-    std::memcpy(buf.mem, data.get(), sizeof(T));
-    package.data.push_back(buf);
+    package.data.push_back(Buffer{(char*)data.get(), sizeof(T)});
   } else {
     throw std::invalid_argument("type " + tool::typeToStr<T>()
                                 + " does not implement `pack()` and is not trivially copyable.");
@@ -53,7 +51,7 @@ Package packageMem(std::shared_ptr<T> data) {
   if constexpr (requires { data->package(); }) {
     return data->package();
   } else if constexpr (std::is_trivially_copyable_v<T>) {
-    return Package{.data = std::vector<Buffer>({Buffer{new char[sizeof(T)], sizeof(T)}})};
+    return Package{.data = std::vector<Buffer>({Buffer{(char*)data.get(), sizeof(T)}})};
   } else {
     throw std::invalid_argument("type " + tool::typeToStr<T>()
                                 + " does not implement `package()` and is not trivially copyable.");
@@ -68,8 +66,7 @@ void unpack(Package &&package, std::shared_ptr<T> data) {
   if constexpr (requires { data->unpack(std::move(package)); }) {
     data->unpack(std::move(package));
   } else if constexpr (std::is_trivially_copyable_v<T>) {
-    std::memcpy(data.get(), package.data[0].mem, sizeof(T));
-    delete[] package.data[0].mem;
+    // there is nothing to do
   } else {
     throw std::invalid_argument("type " + tool::typeToStr<T>()
                                 + " does not implement `unpack(Package)` and is not trivially copyable.");

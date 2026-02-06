@@ -386,11 +386,6 @@ private:
       if constexpr (requires { data->postSend(); }) {
         data->postSend();
       }
-      if constexpr (!requires { data->pack(); }) {
-        // the buffer is dynamically allocated when the data type does not
-        // support the 'pack' operation
-        delete[] storage.package.data[0].mem;
-      }
       if (storage.useAddResult) {
         addResult(std::move(data));
       } else {
@@ -627,11 +622,6 @@ private:
       auto storageId = it.first;
       auto storage = it.second;
       assert(storageId.typeId < TM::size);
-      TM::apply(storageId.typeId, [&]<typename T>() {
-        if constexpr (!requires(T * data) { data->pack(); }) {
-          delete[] storage.package.data[0].mem;
-        }
-      });
     }
     this->wh_.recvStorage.clear();
   }
