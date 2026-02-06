@@ -14,6 +14,27 @@ namespace comm {
 
 /// @brief Definition of the `SendStrategy` type. The send strategy is just a
 ///        function that returns a list of destination ranks for a given data.
+///
+/// Strategies are used to determin the destination ranks for a given data:
+///
+/// @code
+/// // create and setup the communicator
+/// auto ct = std::make_shared<hh::comm::CommunicatorTask<Data1, Data2>>(&service, "example");
+///
+/// // set the send strategies for each type
+///
+/// // the send strategy is a function that returns a list of destination
+/// // ranks, we can use a lambda to compute the destination depending on the
+/// // input data
+/// gatherTask->strategy([&](std::shared_ptr<Data1> data) {
+///     hh::comm::rank_t rank = service.rank();
+///     size_t           nbProcesses = service.nbProcesses();
+///     return std::vector<hh::comm::rank_t>({(rank + 1) % nbProcesses});
+/// });
+/// // or use some of the generic strategies provided by the library
+/// gatherTask->strategy(hh::comm::strategy::SendTo<Data2>(1, 2));
+/// @endcode
+///
 /// @tparam T Type of the data that needs to be sent.
 template <typename T>
 using SendStrategy = std::function<std::vector<comm::rank_t>(std::shared_ptr<T>)>;
