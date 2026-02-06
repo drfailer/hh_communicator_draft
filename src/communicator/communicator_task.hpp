@@ -2,21 +2,17 @@
 #define COMMUNICATOR_COMMUNICATOR_TASK
 #include "communicator.hpp"
 #include "communicator_core_task.hpp"
+#include "send_strategies.hpp"
 #include <functional>
 #include <hedgehog/hedgehog.h>
 
 namespace hh {
 
-// /!\ the sender list will not contain ranks that both send and receive
-
-template <typename T>
-using SendStrategy = std::function<std::vector<comm::rank_t>(std::shared_ptr<T>)>;
-
 template <typename TaskType, typename TM, typename Input>
 struct CommunicatorSend : tool::BehaviorMultiExecuteTypeDeducer_t<std::tuple<Input>> {
 private:
   TaskType           *task_ = nullptr;
-  SendStrategy<Input> strategy_ = nullptr;
+  comm::SendStrategy<Input> strategy_ = nullptr;
 
 public:
   CommunicatorSend(TaskType *task)
@@ -42,7 +38,7 @@ public:
 
   void initialize() {}
 
-  void strategy(SendStrategy<Input> cb) {
+  void strategy(comm::SendStrategy<Input> cb) {
     strategy_ = cb;
   }
 };
@@ -56,7 +52,7 @@ struct CommunicatorMultiSend<TaskType, TM, std::tuple<Inputs...>> : Communicator
       : CommunicatorSend<TaskType, TM, Inputs>(task)... {}
 
   template <typename Input>
-  void strategy(SendStrategy<Input> cb) {
+  void strategy(comm::SendStrategy<Input> cb) {
     ((CommunicatorSend<TaskType, TM, Input> *)this)->strategy(cb);
   }
 

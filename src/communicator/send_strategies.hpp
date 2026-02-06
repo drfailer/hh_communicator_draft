@@ -9,6 +9,9 @@ namespace hh {
 
 namespace comm {
 
+template <typename T>
+using SendStrategy = std::function<std::vector<comm::rank_t>(std::shared_ptr<T>)>;
+
 namespace strategy {
 
 template <typename T>
