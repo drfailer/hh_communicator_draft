@@ -12,11 +12,18 @@ namespace hh {
 
 namespace comm {
 
-// Package /////////////////////////////////////////////////////////////////////
+/******************************************************************************/
+/*                                  Package                                   */
+/******************************************************************************/
 
+/// @brief Data structure that represent the packages that are transmitted by
+///        the communicator tark. A package is a list of buffers, and a buffer
+///        is a pointer and an length.
 struct Package {
-  std::vector<Buffer> data;
+  std::vector<Buffer> data; ///< list of buffer
 
+  /// @brief Compute the total size if the package (used to determin the
+  ///         bandwidth in the profiling information).
   size_t size() const {
     size_t result = 0;
     for (auto buffer : this->data) {
@@ -26,6 +33,18 @@ struct Package {
   }
 };
 
+/// @param Utility function that pack the given data.
+///
+/// - If the type `T` implements the `pack` method, we use it (we use static
+///   dispatch to avoid inheritance and virtual functions).
+/// - If `T` does not implement `pack`, but is trivially copiable, the data is
+///   given directly to the buffer.
+/// - Otherwise, an excpetion is thrown.
+///
+/// @tparam T Type of the data to pack.
+/// @param data Data to pack.
+/// @throws invalid_argument
+/// @return The package containing the data to send.
 template <typename T>
 Package pack(std::shared_ptr<T> data) {
   Package package;
@@ -41,11 +60,25 @@ Package pack(std::shared_ptr<T> data) {
   return package;
 }
 
-/*
- * If the data type is packable, it should implement a `package` method that
- * returns the package memory. Otherwise, allocate a buffer on the heap.
- * TODO: rename packageMem
- */
+/// @brief Utility function to get access to the package of a data.
+///
+/// Reception is done in two steps:
+/// 1. We get the package of a data that we use for the receive.
+/// 2. We unpack the data (deserialization): since the package system allows
+///    sending multiple buffers, this step can be skiped in most cases. Instead
+///    of serializing the data into a dedicated buffer, the `pack` and
+///    `package` methods of the data can simply return a pointer to the data
+///    itself (meta-data), plus one or more pointers (extra data, or GPU memory).
+///
+/// - If `T` implements the `package` method, this method is used and returns
+///   the memory for the package reception.
+/// - If `T` is trivially copyable, the data is returned directly.
+/// - Otherwise, an exception is thrown.
+///
+/// @tparam T Type of the data.
+/// @param data Data for which we need the package memory.
+/// @throws invalid_argument
+/// @return The package memory used to receive the data.
 template <typename T>
 Package packageMem(std::shared_ptr<T> data) {
   if constexpr (requires { data->package(); }) {
@@ -58,9 +91,16 @@ Package packageMem(std::shared_ptr<T> data) {
   }
 }
 
-/*
- * If the data type is unpackable, call the `unpack` method.
- */
+/// @brief Utility function use to unpack the data (desirialize if needed).
+///
+/// - If the data implements the `unpack` method, this method is used.
+/// - If the data is trivialy copyable, nothing is done.
+/// - Otherwise, an excpetion is thrown.
+///
+/// @tparam T Type of the data to unpack.
+/// @param package Package to unpack.
+/// @param data    Data that should unpack the package.
+/// @throws invalid_argument
 template <typename T>
 void unpack(Package &&package, std::shared_ptr<T> data) {
   if constexpr (requires { data->unpack(std::move(package)); }) {
@@ -73,25 +113,40 @@ void unpack(Package &&package, std::shared_ptr<T> data) {
   }
 }
 
-// Package Wharehouse //////////////////////////////////////////////////////////
+/******************************************************************************/
+/*                             Package Wharehouse                             */
+/******************************************************************************/
 
+/// @brief Id of a storage slot in the warehouse.
 struct StorageId {
-  rank_t        source;
-  type_id_t     typeId;
-  package_id_t  packageId;
-  std::uint64_t cid;
+  rank_t        source;     ///< source.
+  type_id_t     typeId;     ///< type of the data stored in the storage.
+  package_id_t  packageId;  ///< identifier of the package (tranfered on the network).
+  std::uint64_t cid;        ///< extra identification number used when the profiling is enabled.
 
+  /// @brief Default constructor
   StorageId() = default;
 
+  /// @brief Contructor with all the fileds.
+  /// @param source    Value of the source.
+  /// @param packageId Value of the package id.
+  /// @param typeId    Type of the data stored in the slot.
+  /// @parma cid       Additional generated id.
   StorageId(rank_t source, package_id_t packageId, type_id_t typeId, std::uint64_t cid)
       : source(source),
         typeId(typeId),
         packageId(packageId),
         cid(cid) {}
 
+  /// @brief Contructor with all the fileds excpet the cid (the cid is generated here).
+  /// @param source    Value of the source.
+  /// @param packageId Value of the package id.
+  /// @param typeId    Type of the data stored in the slot.
   StorageId(rank_t source, package_id_t packageId, type_id_t typeId)
       : StorageId(source, packageId, typeId, counter_++) {}
 
+  /// @brief Operator used because `StorageId` is a key type in a std::map.
+  /// @param other Other storage id to compare with.
   bool operator<(StorageId const &other) const {
     if (this->source == other.source) {
       if (this->typeId == other.typeId) {
@@ -106,27 +161,29 @@ struct StorageId {
   }
 
 private:
-  static inline size_t counter_ = 0;
+  static inline size_t counter_ = 0; ///< static counter used to generate the cid.
 };
 
+/// @brief Warehouse storage slot.
+/// @tparam TM Type map type (used in the communicator).
+template <typename TM>
+struct StorageSlot {
+  Package            package;        ///< Package that is beeing sent/received.
+  size_t             bufferCount;    ///< Number of buffers sent/received.
+  size_t             ttlBufferCount; ///< Total number of buffer sent/received (when sending, it is equal to `nbDests * nbBuffers`)
+  variant_type_t<TM> data;           ///< Variant containing the data that is sent (keep the shared_ptr alive).
+  bool               useAddResult;   ///< Flag used to know if the data must be transfered or released after all the buffers are sent on the network.
+  bool               dbgBufferReceived[4]; // TODO: remove
+};
+
+/// @brief Package warehouse type.
+/// @tparam TM Type map type (used in the communicator).
 template <typename TM>
 struct PackageWarehouse {
-  struct Storage {
-    Package            package;
-    size_t             bufferCount;
-    size_t             ttlBufferCount;
-    variant_type_t<TM> data;
-    bool               useAddResult;
-    bool               dbgBufferReceived[4]; // TODO: remove
-  };
-
-  std::map<StorageId, Storage> sendStorage;
-  std::map<StorageId, Storage> recvStorage;
-  std::mutex                   mutex;
+  std::map<StorageId, StorageSlot<TM>> sendStorage; ///< Send queue.
+  std::map<StorageId, StorageSlot<TM>> recvStorage; ///< Recv queue.
+  std::mutex                           mutex;       ///< Mutex for thread safety.
 };
-
-template <typename TM>
-using StorageSlot = typename PackageWarehouse<TM>::Storage;
 
 } // end namespace comm
 
