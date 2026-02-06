@@ -5,8 +5,9 @@
 #include <functional>
 #include <memory>
 
+/// @brief Hedgehog namespace
 namespace hh {
-
+/// @brief Communicator namespace
 namespace comm {
 
 template <typename T>
