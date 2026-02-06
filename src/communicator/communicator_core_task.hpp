@@ -30,10 +30,6 @@ using CommunicatorCoreTaskBase = GenericCoreTask<CommunicatorTask<Types...>, siz
 /// @brief Communicator core task.
 template <typename... Types>
 class CommunicatorCoreTask : public CommunicatorCoreTaskBase<Types...> {
-private:
-  /// @brief Type map type.
-  using TM = typename CommunicatorTask<Types...>::TM;
-
 public:
   /// @brief Constructor that takes the task the service and name.
   /// @param task    Pointer to the communicator task.
@@ -118,10 +114,11 @@ public:
 
     communicator_.service()->barrier();
     if (communicator_.rank() == 0) {
-      infos += comm::CommTaskStats::template extraPrintingInformation<TM>(communicator_.gatherStats(),
-                                                                          communicator_.service()->startTime(),
-                                                                          communicator_.channel(),
-                                                                          communicator_.nbProcesses());
+      infos += comm::CommTaskStats::template extraPrintingInformation<comm::TypeMap<Types...>>(
+              communicator_.gatherStats(),
+              communicator_.service()->startTime(),
+              communicator_.channel(),
+              communicator_.nbProcesses());
     } else {
       communicator_.sendStats();
     }

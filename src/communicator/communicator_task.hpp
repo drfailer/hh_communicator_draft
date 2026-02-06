@@ -8,7 +8,7 @@
 
 namespace hh {
 
-template <typename TaskType, typename TM, typename Input>
+template <typename TaskType, typename Input>
 struct CommunicatorSend : tool::BehaviorMultiExecuteTypeDeducer_t<std::tuple<Input>> {
 private:
   TaskType           *task_ = nullptr;
@@ -43,21 +43,21 @@ public:
   }
 };
 
-template <typename TasType, typename TM, typename... Inputs>
+template <typename TasType, typename... Inputs>
 struct CommunicatorMultiSend;
 
-template <typename TaskType, typename TM, typename... Inputs>
-struct CommunicatorMultiSend<TaskType, TM, std::tuple<Inputs...>> : CommunicatorSend<TaskType, TM, Inputs>... {
+template <typename TaskType, typename... Inputs>
+struct CommunicatorMultiSend<TaskType, std::tuple<Inputs...>> : CommunicatorSend<TaskType, Inputs>... {
   CommunicatorMultiSend(TaskType *task)
-      : CommunicatorSend<TaskType, TM, Inputs>(task)... {}
+      : CommunicatorSend<TaskType, Inputs>(task)... {}
 
   template <typename Input>
   void strategy(comm::SendStrategy<Input> cb) {
-    ((CommunicatorSend<TaskType, TM, Input> *)this)->strategy(cb);
+    ((CommunicatorSend<TaskType, Input> *)this)->strategy(cb);
   }
 
   void initialize() {
-    (((CommunicatorSend<TaskType, TM, Inputs> *)this)->initialize(), ...);
+    (((CommunicatorSend<TaskType, Inputs> *)this)->initialize(), ...);
   }
 };
 
@@ -68,10 +68,9 @@ class CommunicatorTask
       public behavior::Cleanable,
       public behavior::Copyable<CommunicatorTask<Types...>>,
       public tool::BehaviorMultiReceiversTypeDeducer_t<std::tuple<Types...>>,
-      public CommunicatorMultiSend<CommunicatorTask<Types...>, comm::TypeMap<Types...>, std::tuple<Types...>>,
+      public CommunicatorMultiSend<CommunicatorTask<Types...>, std::tuple<Types...>>,
       public tool::BehaviorTaskMultiSendersTypeDeducer_t<std::tuple<Types...>> {
 private:
-  using TM = comm::TypeMap<Types...>;
   using CoreTaskType = core::CommunicatorCoreTask<Types...>;
   using SelfType = CommunicatorTask<Types...>;
   using Inputs = std::tuple<Types...>;
@@ -85,7 +84,7 @@ public:
   explicit CommunicatorTask(comm::CommService *service, std::string const &name = "CommunicatorTask")
       : behavior::TaskNode(std::make_shared<CoreTaskType>(this, service, name)),
         behavior::Copyable<SelfType>(1),
-        CommunicatorMultiSend<CommunicatorTask<Types...>, TM, Inputs>(this),
+        CommunicatorMultiSend<CommunicatorTask<Types...>, Inputs>(this),
         tool::BehaviorTaskMultiSendersTypeDeducer_t<Outputs>((std::dynamic_pointer_cast<CoreTaskType>(this->core()))),
         coreTask_(std::dynamic_pointer_cast<CoreTaskType>(this->core())) {
     if (coreTask_ == nullptr) {
@@ -96,7 +95,7 @@ public:
   }
 
   void initialize() override {
-    CommunicatorMultiSend<CommunicatorTask<Types...>, TM, Inputs>::initialize();
+    CommunicatorMultiSend<CommunicatorTask<Types...>, Inputs>::initialize();
   }
 
   [[nodiscard]] comm::Communicator<Types...> *comm() const {

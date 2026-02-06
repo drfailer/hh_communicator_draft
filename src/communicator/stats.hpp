@@ -2,11 +2,11 @@
 #define COMMUNICATOR_STATS
 #include "../log.hpp"
 #include "package.hpp"
+#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
-#include <cassert>
 
 namespace hh {
 
@@ -78,38 +78,38 @@ inline std::pair<double, double> computeAvg(std::vector<double> const &values) {
 
 template <typename T>
 size_t writeBytes(std::vector<char> &buf, T const &data) {
-    size_t pos = buf.size();
-    buf.resize(pos + sizeof(T));
-    std::memcpy(&buf[pos], &data, sizeof(T));
-    return buf.size();
+  size_t pos = buf.size();
+  buf.resize(pos + sizeof(T));
+  std::memcpy(&buf[pos], &data, sizeof(T));
+  return buf.size();
 }
 
 template <typename T>
 size_t writeVectorBytes(std::vector<char> &buf, std::vector<T> const &data) {
-    size_t dataCount = data.size();
-    size_t pos = buf.size();
-    buf.resize(pos + sizeof(dataCount) + sizeof(T) * dataCount);
-    std::memcpy(&buf[pos], &dataCount, sizeof(dataCount));
-    pos += sizeof(dataCount);
-    std::memcpy(&buf[pos], data.data(), sizeof(T) * dataCount);
-    return buf.size();
+  size_t dataCount = data.size();
+  size_t pos = buf.size();
+  buf.resize(pos + sizeof(dataCount) + sizeof(T) * dataCount);
+  std::memcpy(&buf[pos], &dataCount, sizeof(dataCount));
+  pos += sizeof(dataCount);
+  std::memcpy(&buf[pos], data.data(), sizeof(T) * dataCount);
+  return buf.size();
 }
 
 template <typename T>
 size_t readBytes(std::vector<char> const &buf, size_t pos, T &data) {
-    assert(pos + sizeof(T) <= buf.size());
-    memcpy(&data, &buf[pos], sizeof(T));
-    return pos + sizeof(T);
+  assert(pos + sizeof(T) <= buf.size());
+  memcpy(&data, &buf[pos], sizeof(T));
+  return pos + sizeof(T);
 }
 
 template <typename T>
 size_t readVectorBytes(std::vector<char> const &buf, size_t pos, std::vector<T> &data) {
-    size_t dataCount = 0;
-    pos = readBytes(buf, pos, dataCount);
-    data.resize(dataCount);
-    assert(pos + sizeof(T) * dataCount <= buf.size());
-    std::memcpy(data.data(), &buf[pos], sizeof(T) * dataCount);
-    return pos + sizeof(T) * dataCount;
+  size_t dataCount = 0;
+  pos = readBytes(buf, pos, dataCount);
+  data.resize(dataCount);
+  assert(pos + sizeof(T) * dataCount <= buf.size());
+  std::memcpy(data.data(), &buf[pos], sizeof(T) * dataCount);
+  return pos + sizeof(T) * dataCount;
 }
 
 // Stats container /////////////////////////////////////////////////////////////
@@ -234,11 +234,11 @@ struct CommTaskStats {
 
     writeBytes(buf, this->transmissionStats.sendInfos.size());
     for (auto sendInfo : this->transmissionStats.sendInfos) {
-        writeVectorBytes(buf, sendInfo);
+      writeVectorBytes(buf, sendInfo);
     }
     writeBytes(buf, this->transmissionStats.recvInfos.size());
     for (auto recvInfo : this->transmissionStats.recvInfos) {
-        writeVectorBytes(buf, recvInfo);
+      writeVectorBytes(buf, recvInfo);
     }
   }
 
@@ -255,12 +255,12 @@ struct CommTaskStats {
     pos = readBytes(buf, pos, infoCount);
     this->transmissionStats.sendInfos.resize(infoCount);
     for (auto &sendInfo : this->transmissionStats.sendInfos) {
-        pos = readVectorBytes(buf, pos, sendInfo);
+      pos = readVectorBytes(buf, pos, sendInfo);
     }
     pos = readBytes(buf, pos, infoCount);
     this->transmissionStats.recvInfos.resize(infoCount);
     for (auto &recvInfo : this->transmissionStats.recvInfos) {
-        pos = readVectorBytes(buf, pos, recvInfo);
+      pos = readVectorBytes(buf, pos, recvInfo);
     }
   }
 
@@ -283,12 +283,11 @@ struct CommTaskStats {
     return std::chrono::duration_cast<time_unit_t>(end - begin);
   }
 
-  template <typename TM>
   static MergedStatsPerType mergeCommTasksStats(std::vector<comm::CommTaskStats> const &stats, time_t startTime,
-                                                size_t nbProcesses) {
-    auto mergedStats = MergedStatsPerType(TM::size, MergedStats(nbProcesses));
+                                                size_t nbProcesses, size_t nbTypes) {
+    auto mergedStats = MergedStatsPerType(nbTypes, MergedStats(nbProcesses));
 
-    for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
+    for (type_id_t typeId = 0; typeId < nbTypes; ++typeId) {
       auto &stat = mergedStats[typeId];
 
       for (size_t sendRank = 0; sendRank < nbProcesses; ++sendRank) {
@@ -362,7 +361,7 @@ struct CommTaskStats {
     strAppendStat(infos, "maxRecvStorageSize = ", maxRecvStorageSize);
 
     // transmission stats
-    auto mergedStats = mergeCommTasksStats<TM>(stats, startTime, nbProcesses);
+    auto mergedStats = mergeCommTasksStats(stats, startTime, nbProcesses, TM::size);
     for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
       auto transmissionDurations = mergedStats.at(typeId).transmissionDurations;
       auto packingDelay = mergedStats.at(typeId).packingDelay;
