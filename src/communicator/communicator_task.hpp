@@ -1,6 +1,7 @@
 #ifndef COMMUNICATOR_COMMUNICATOR_TASK
 #define COMMUNICATOR_COMMUNICATOR_TASK
 #include "communicator.hpp"
+#include "hints.hpp"
 #include "communicator_core_task.hpp"
 #include "send_strategies.hpp"
 #include <functional>
@@ -194,6 +195,11 @@ public:
   template <typename MM>
   void setMemoryManager(MM mm) {
     this->coreTask_->setMemoryManager(std::make_shared<comm::tool::MemoryManager<Types...>>(mm));
+  }
+
+  template <typename T>
+  void addHint(comm::hint::Hint const &hint) {
+    this->comm()->template addHint<T>(hint);
   }
 
   /// @brief Use addResult from `BehaviorTaskMultiSendersTypeDeducer_t`.

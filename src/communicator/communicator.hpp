@@ -2,6 +2,7 @@
 #define COMMUNICATOR_COMMUNICATOR
 #include "tool/log.hpp"
 #include "package.hpp"
+#include "hints.hpp"
 #include "service/comm_service.hpp"
 #include "stats.hpp"
 #include "tool/memory_manager.hpp"
@@ -76,11 +77,18 @@ public:
     this->mm_ = mm;
   }
 
+  /// TODO: doc
+  template <typename T>
+  void addHint(hint::Hint const &hint) {
+    this->hints_.push_back(HintTracker{hint, TM::template idOf<T>()});
+  }
+
   /// @brief Returns if the queues are empty.
   /// @return True if there are pending information, false otherwise.
   bool hasPendingOperations() const {
-      // TODO(hints): the recvOps queue will not be empty when using hints
-      return !this->sendOps_.empty() || !this->recvOps_.empty() || !this->createDataOps_.empty();
+      return queueHasPendingOperations(this->sendOps_)
+          || queueHasPendingOperations(this->recvOps_)
+          || !this->createDataOps_.empty();
   }
 
   /// @brief Send `data` to the given `dests`.
@@ -110,6 +118,7 @@ public:
             .bufferId = header.bufferId,
             .request = request,
             .storageId = storageId,
+            .hint = -1,
         });
       }
     }
@@ -125,7 +134,9 @@ public:
     this->sendCountsMap_ = std::vector<size_t>(this->nbProcesses() * this->nbProcesses(), 0);
     this->fini_ = false;
 
-    // TODO(hints): process the hints
+    // TODO: we should post a recv for the disconnection signal here
+
+    initHints();
   }
 
   /// @brief Run the communicator (should be called in a dedicated thread).
@@ -135,6 +146,7 @@ public:
     while (this->senderPortState_ != PortState::Closed || this->recverPortState_ != PortState::Closed) {
       progressSender(addResult);
       progressRecver(addResult);
+      // progressHints();
     }
   }
 
@@ -150,6 +162,7 @@ public:
   ///        thread can be joined).
   void fini() {
     this->fini_ = true;
+    finalizeHints();
   }
 
 private:
@@ -223,7 +236,6 @@ private:
         }
         break;
       case comm::Signal::Data:
-        ++this->connections_[header.source].recvCount;
         break;
       }
       processCreateDataQueue();
@@ -333,12 +345,31 @@ private:
   }
 
 private:
+  /// @brief Forward declaration of HintTracker.
+  struct HintTracker;
+
   /// @brief Structure that contains information about the communication requests.
   struct CommOperation {
     buffer_id_t  bufferId;  ///< Id of the buffer (buffers are sent/received separately).
     Request      request;   ///< Request.
     StorageId    storageId; ///< Id of the storage.
+    int          hint;      ///< Hint tracker pointer.
   };
+
+  /// @brief Returns if the given queue has pending operations (do not count the
+  ///        hinted requests).
+  /// @param queue Queue to test.
+  /// @return True if the queue has non hinted pending operations, false otherwise.
+  bool queueHasPendingOperations(std::vector<CommOperation> const &queue) const {
+    bool result = false;
+
+    for (auto op : queue) {
+      if (op.hint == -1) {
+        return true;
+      }
+    }
+    return result;
+  }
 
   /******************************************************************************/
   /*                           send queue operations                            */
@@ -380,7 +411,7 @@ private:
   /// @param storage   Package Storage in which the data is stored.
   /// @param addResult Function that allow transferring the data to the rest of
   ///                  the graph (if `addResult` is required, it is done here).
-  void postSend(StorageId storageId, StorageSlot<TM> storage, auto addResult) {
+  void postSend(StorageId const &storageId, StorageSlot<TM> const &storage, auto addResult) {
     assert(storageId.typeId < TM::size);
     TM::apply(storageId.typeId, [&]<typename T>() {
       std::shared_ptr<T> data = std::get<std::shared_ptr<T>>(storage.data);
@@ -471,6 +502,9 @@ private:
 
         if (storage.bufferCount == storage.ttlBufferCount) {
           postRecv(it->storageId, storage, addResult);
+          if (it->hint != -1) {
+            hintRequestCompleted(it->hint);
+          }
           this->wh_.recvStorage.erase(it->storageId);
         }
         this->service_->requestRelease(it->request);
@@ -518,13 +552,9 @@ private:
   ///        be created, the reception of all the buffers is started.
   /// @param header Header of the request fetched by the probe.
   /// @return True if the reception has started.
-  bool recvData(Header header) {
+  bool recvData(Header header, int hint = -1) {
     std::lock_guard<std::mutex> whLock(this->wh_.mutex);
     StorageId                   storageId(header.source, header.typeId);
-
-    if (this->wh_.recvStorage.contains(storageId)) {
-      return true;
-    }
 
     if (!createRecvStorage(storageId)) {
       return false;
@@ -538,6 +568,7 @@ private:
           .bufferId = header.bufferId,
           .request = this->service_->recvAsync(header, storage.package.data[header.bufferId]),
           .storageId = storageId,
+          .hint = hint,
       });
     }
     return true;
@@ -548,7 +579,7 @@ private:
   /// @param storage   Storage slot.
   /// @param addResult Function that allow transferring the data to rest of the
   ///                  graph (calls `task->addResult`).
-  void postRecv(StorageId storageId, StorageSlot<TM> storage, auto addResult) {
+  void postRecv(StorageId const &storageId, StorageSlot<TM> &storage, auto addResult) {
     time_t tunpackingStart, tunpackingEnd;
     assert(storageId.typeId < TM::size);
     TM::apply(storageId.typeId, [&]<typename T>() {
@@ -562,6 +593,7 @@ private:
     this->stats_.registerRecvTimings(
         storageId, std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart),
         storage.package.size());
+    ++this->connections_[storageId.source].recvCount;
   }
 
   /// @brief Try to allocated a new data using the memory manager. If the
@@ -621,6 +653,11 @@ private:
       auto storageId = it.first;
       auto storage = it.second;
       assert(storageId.typeId < TM::size);
+
+      TM::apply(storageId.typeId, [&]<typename T>() {
+        auto data = std::get<std::shared_ptr<T>>(storage.data);
+        this->mm_->release(std::move(data));
+      });
     }
     this->wh_.recvStorage.clear();
   }
@@ -630,13 +667,94 @@ private:
 /******************************************************************************/
 
 private:
+  struct HintTracker {
+    hint::Hint hint;
+    type_id_t typeId;
+    size_t activeRequestCount = 0;
+    size_t postedRequestCount = 0;
+  };
 
-  void processHints() {
-      // TODO(hints): process the hint queue
-      // - make sure all the pre-recv are in the queue
-      //   - need to keep track of the requests for a specific hint (hint data?)
-      //   - depending on the hint, we need to be able to cancle the request
+  void hintRequestCompleted(int hintIdx) {
+    assert(hintIdx >= 0);
+    auto &hint = this->hints_[hintIdx];
+    hint.activeRequestCount -= 1;
   }
+
+  void initHints() {
+    for (int hintIdx = 0; hintIdx < (int)this->hints_.size(); ++hintIdx) {
+      switch (this->hints_[hintIdx].hint.type) {
+      case hint::HintType::RecvCountFrom: {
+        auto hint = this->hints_[hintIdx].hint.data.recvCountFrom;
+        auto typeId = this->hints_[hintIdx].typeId;
+
+        if (hint.source == rank()) {
+          continue;
+        }
+
+        for (size_t i = 0; i < hint.count; ++i) {
+          if (recvData(Header(hint.source, 0, typeId, channel(), 0), hintIdx)) {
+            this->hints_[hintIdx].postedRequestCount += 1;
+            this->hints_[hintIdx].activeRequestCount += 1;
+          }
+        }
+      } break;
+      case hint::HintType::ContinuousRecvFrom: {
+        auto hint = this->hints_[hintIdx].hint.data.continuousRecvFrom;
+        auto typeId = this->hints_[hintIdx].typeId;
+
+        if (hint.source == rank()) {
+          continue;
+        }
+
+        for (size_t i = 0; i < hint.poolSize; ++i) {
+          if (recvData(Header(hint.source, 0, typeId, channel(), 0), hintIdx)) {
+            this->hints_[hintIdx].postedRequestCount += 1;
+            this->hints_[hintIdx].activeRequestCount += 1;
+          }
+        }
+      } break;
+      }
+    }
+  }
+
+  void progressHints() {
+    for (int hintIdx = 0; hintIdx < (int)this->hints_.size(); ++hintIdx) {
+      switch (this->hints_[hintIdx].hint.type) {
+      case hint::HintType::RecvCountFrom: {
+        auto hint = this->hints_[hintIdx].hint.data.recvCountFrom;
+        auto typeId = this->hints_[hintIdx].typeId;
+
+        if (hint.source == rank()) {
+          continue;
+        }
+
+        for (size_t i = this->hints_[hintIdx].postedRequestCount; i < hint.count; ++i) {
+          if (recvData(Header(hint.source, 0, typeId, channel(), 0), hintIdx)) {
+            this->hints_[hintIdx].postedRequestCount += 1;
+            this->hints_[hintIdx].activeRequestCount += 1;
+          }
+        }
+      } break;
+      case hint::HintType::ContinuousRecvFrom: {
+        auto hint = this->hints_[hintIdx].hint.data.continuousRecvFrom;
+        auto typeId = this->hints_[hintIdx].typeId;
+
+        if (hint.source == rank()) {
+          continue;
+        }
+
+        for (size_t i = this->hints_[hintIdx].activeRequestCount; i < hint.poolSize; ++i) {
+          if (recvData(Header(hint.source, 0, typeId, channel(), 0), hintIdx)) {
+            this->hints_[hintIdx].postedRequestCount += 1;
+            this->hints_[hintIdx].activeRequestCount += 1;
+          }
+        }
+      } break;
+      }
+    }
+  }
+
+  void finalizeHints() {}
 
   /******************************************************************************/
   /*                                   stats                                    */
@@ -708,6 +826,9 @@ private:
 
   // memory manager
   std::shared_ptr<tool::MemoryManager<Types...>> mm_ = nullptr; ///< Pointer to the memory manager.
+
+  // hints
+  std::vector<HintTracker> hints_;
 };
 
 } // end namespace comm
