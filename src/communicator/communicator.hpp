@@ -634,7 +634,7 @@ private:
   /// behavior changes.
   void flushRecvQueueAndWarehouse() {
     if (!this->recvOps_.empty()) {
-      log::error("Cancelling ", this->recvOps_.size(), " recv operations.");
+      log::error("[", rank(), "][", channel(), "] Cancelling ", this->recvOps_.size(), " recv operations.");
     }
     for (auto &op : this->recvOps_) {
       this->service_->requestCancel(op.request);
@@ -642,12 +642,12 @@ private:
     this->recvOps_.clear();
 
     if (!this->createDataOps_.empty()) {
-      log::error("Cancelling ", this->createDataOps_.size(), " create data operations.");
+      log::error("[", rank(), "][", channel(), "] Cancelling ", this->createDataOps_.size(), " create data operations.");
     }
     this->createDataOps_.clear();
 
     if (!this->wh_.recvStorage.empty()) {
-      log::error("Removing ", this->wh_.recvStorage.size(), " from storage.");
+      log::error("[", rank(), "][", channel(), "] Removing ", this->wh_.recvStorage.size(), " from storage.");
     }
     for (auto it : this->wh_.recvStorage) {
       auto storageId = it.first;
@@ -754,7 +754,13 @@ private:
     }
   }
 
-  void finalizeHints() {}
+  void finalizeHints() {
+    // TODO: add the hint statistics to the com task stats + add info on the canceled requests
+    // size_t hintIdx = 0;
+    // for (auto hint : this->hints_) {
+    //   log::info("[", rank(), "] - hint[", hintIdx++, "]: activeRequestCount = ", hint.activeRequestCount, ", postedRequestCount = ", hint.postedRequestCount);
+    // }
+  }
 
   /******************************************************************************/
   /*                                   stats                                    */

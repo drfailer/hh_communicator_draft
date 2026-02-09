@@ -37,6 +37,13 @@ struct Hint {
   } data;
 };
 
+inline Hint recvCountFrom(rank_t source, size_t count) {
+  return Hint{
+    .type = HintType::RecvCountFrom,
+    .data = { .recvCountFrom = { .source = source, .count = count } },
+  };
+}
+
 } // end namespace hint
 } // end namespace com
 } // end namespace hh

@@ -56,6 +56,15 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         auto copyTileState = std::make_shared<CopyTileStateManager>(std::make_shared<CopyTileState>(mm, TM, TN, RANK));
         auto copyTileTask = std::make_shared<CopyTileTask>(COPY_TILE_TASK_THREADS);
 
+        distributeTask->template addHint<MatrixTile<MT, MatrixId::A>>(hh::comm::hint::recvCountFrom(0, 400));
+        distributeTask->template addHint<MatrixTile<MT, MatrixId::B>>(hh::comm::hint::recvCountFrom(0, 100));
+        distributeTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(0, 100));
+        if (service->rank() == 0) {
+            gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(1, 100));
+            gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(2, 100));
+            gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(3, 100));
+        }
+
         distributeTask->template strategy<MatrixTile<MT, MatrixId::A>>([NB_PROCESSES, TN](auto tile) {
             std::vector<hh::comm::rank_t> dests = {(hh::comm::rank_t)(tile->rowIdx * TN % NB_PROCESSES)};
             for (size_t colIdx = 1; colIdx < TN; ++colIdx) {

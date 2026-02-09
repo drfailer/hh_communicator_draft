@@ -423,6 +423,7 @@ struct CommTaskStats {
             double dataSizeMB = (double)sendInfos[i].dataSize / (1024. * 1024.);
             double delay_s = (double)delay_ns.count() / 1'000'000'000.;
 
+            assert(sendInfos[i].tp < recvInfos[i].tp);
             stat.packingDelay.push_back(sendInfos[i].packingTime);
             stat.unpackingDelay.push_back(recvInfos[i].packingTime);
             stat.transmissionDurations[sendRecvIdx].push_back(delay_ns);
