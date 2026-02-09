@@ -91,8 +91,6 @@ public:
   SingleTypeMemoryManagerAbstraction(SingleTypeMemoryManager<T> *mmi)
       : mmi_(mmi) {}
 
-  // TODO: throw runtime_error insead of assert.
-
   /// @brief Call the `allocate` method of the implementor (throws a runtime
   ///        error when the implementor is nullptr).
   /// @param mode Allocation mode.
