@@ -47,7 +47,6 @@ private:
       // communicator data
       {.offset = 14, .mask = 0b0000000000000000000000000000000000000000000000000100000000000000}, // signal?
       {.offset = 11, .mask = 0b0000000000000000000000000000000000000000000000000011100000000000}, // typeid
-      {.offset = 2, .mask = 0b0000000000000000000000000000000000000000000000000000011111111100}, // package id
       {.offset = 0, .mask = 0b0000000000000000000000000000000000000000000000000000000000000011}, // buffer id
   };
 
@@ -58,7 +57,6 @@ private:
     std::uint64_t tag = 0;
     tag |= header.signal << HEADER_FIELDS[Header::SIGNAL].offset;
     tag |= header.typeId << HEADER_FIELDS[Header::TYPE_ID].offset;
-    tag |= header.packageId << HEADER_FIELDS[Header::PACKAGE_ID].offset;
     tag |= header.bufferId << HEADER_FIELDS[Header::BUFFER_ID].offset;
     assert((tag & HEADER_FIELDS[0].mask) == 0);
     return (int)tag;
@@ -73,12 +71,9 @@ private:
     Header header;
     header.signal = (tag & HEADER_FIELDS[Header::SIGNAL].mask) >> HEADER_FIELDS[Header::SIGNAL].offset;
     header.typeId = (tag & HEADER_FIELDS[Header::TYPE_ID].mask) >> HEADER_FIELDS[Header::TYPE_ID].offset;
-    header.packageId = (tag & HEADER_FIELDS[Header::PACKAGE_ID].mask) >> HEADER_FIELDS[Header::PACKAGE_ID].offset;
     header.bufferId = (tag & HEADER_FIELDS[Header::BUFFER_ID].mask) >> HEADER_FIELDS[Header::BUFFER_ID].offset;
     assert((header.signal & ~(HEADER_FIELDS[Header::SIGNAL].mask >> HEADER_FIELDS[Header::SIGNAL].offset)) == 0);
     assert((header.typeId & ~(HEADER_FIELDS[Header::TYPE_ID].mask >> HEADER_FIELDS[Header::TYPE_ID].offset)) == 0);
-    assert((header.packageId & ~(HEADER_FIELDS[Header::PACKAGE_ID].mask >> HEADER_FIELDS[Header::PACKAGE_ID].offset))
-           == 0);
     assert((header.bufferId & ~(HEADER_FIELDS[Header::BUFFER_ID].mask >> HEADER_FIELDS[Header::BUFFER_ID].offset))
            == 0);
     return header;
@@ -106,7 +101,6 @@ public: // send ////////////////////////////////////////////////////////////////
     Header testHeader = tagToHeader(tag);
     assert(header.signal == testHeader.signal);
     assert(header.typeId == testHeader.typeId);
-    assert(header.packageId == testHeader.packageId);
     assert(header.bufferId == testHeader.bufferId);
 
     checkMPI(MPI_Send(buffer.mem, (int)buffer.len, MPI_BYTE, (int)dest, tag, this->comms_[header.channel]));
@@ -126,7 +120,6 @@ public: // send ////////////////////////////////////////////////////////////////
     Header testHeader = tagToHeader(tag);
     assert(header.signal == testHeader.signal);
     assert(header.typeId == testHeader.typeId);
-    assert(header.packageId == testHeader.packageId);
     assert(header.bufferId == testHeader.bufferId);
     // ^^^ DEBUG ^^^
 
@@ -317,20 +310,9 @@ public:
   channel_t newChannel() override {
     std::lock_guard<std::mutex> mpiLock(mutex());
     channel_t                   channel = comms_.size();
-    packageCounters_.push_back(0);
     comms_.push_back(MPI_Comm{});
     checkMPI(MPI_Comm_split(MPI_COMM_WORLD, (int)channel, (int)rank_, &comms_.back()));
     return channel;
-  }
-
-  /// @brief Generate a package id for a specific channel.
-  /// @param channel Id of the channel create with `newChannel`.
-  /// @return New package id.
-  package_id_t newPackageId(channel_t channel) override {
-    package_id_t result = packageCounters_[channel];
-    // update the id and make sure it stays on 9 bits
-    packageCounters_[channel] = (packageCounters_[channel] + 1) % 512;
-    return result;
   }
 
 private:
@@ -351,7 +333,6 @@ private:
   int                     nbProcesses_ = -1;     ///< MPI comm size.
   RequestPool<MPIRequest> requestPool_ = {};     ///< Request memory pool to optimize request allocations.
   std::vector<MPI_Comm>   comms_ = {};           ///< MPI Communicators (comms[channel_id] -> channel communicator)
-  std::vector<size_t>     packageCounters_ = {}; ///< Package counter used to generate package ids.
 };
 
 } // end namespace comm

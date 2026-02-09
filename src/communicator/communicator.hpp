@@ -79,6 +79,7 @@ public:
   /// @brief Returns if the queues are empty.
   /// @return True if there are pending information, false otherwise.
   bool hasPendingOperations() const {
+      // TODO(hints): the recvOps queue will not be empty when using hints
       return !this->sendOps_.empty() || !this->recvOps_.empty() || !this->createDataOps_.empty();
   }
 
@@ -90,7 +91,7 @@ public:
   void sendData(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
     bool useAddResult = std::find(dests.begin(), dests.end(), this->rank()) != dests.end();
     auto [storageId, storage] = createSendStorage(dests, data, useAddResult);
-    Header header(this->rank(), 0, storageId.typeId, this->channel_, storageId.packageId, 0);
+    Header header(this->rank(), 0, storageId.typeId, this->channel_, 0);
 
     this->wh_.mutex.lock();
     this->wh_.sendStorage.insert({storageId, storage});
@@ -106,7 +107,6 @@ public:
         std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
         Request                     request = this->service_->sendAsync(header, dest, storage.package.data[i]);
         this->sendOps_.push_back(CommOperation{
-            .packageId = storageId.packageId,
             .bufferId = header.bufferId,
             .request = request,
             .storageId = storageId,
@@ -124,6 +124,8 @@ public:
     this->signalBufferMem_ = std::vector<char>(1 + sizeof(size_t) * this->nbProcesses());
     this->sendCountsMap_ = std::vector<size_t>(this->nbProcesses() * this->nbProcesses(), 0);
     this->fini_ = false;
+
+    // TODO(hints): process the hints
   }
 
   /// @brief Run the communicator (should be called in a dedicated thread).
@@ -204,7 +206,7 @@ private:
   ///                  rest of the graph.
   void progressRecver(auto addResult) {
     comm::Signal signal = comm::Signal::None;
-    comm::Header header = {0, 0, 0, 0, 0, 0};
+    comm::Header header = {0, 0, 0, 0, 0};
 
     switch (this->recverPortState_) {
     case PortState::Opened:
@@ -277,7 +279,7 @@ private:
   /// @brief Send disconnection signal and package counts to the master process
   ///        (used by slaves sender).
   void sendDisconnectionSignalToMaster() {
-    Header header(this->rank(), 1, 0, this->channel_, 0, 0);
+    Header header(this->rank(), 1, 0, this->channel_, 0);
 
     assert(this->sendOps_.empty());
 
@@ -289,7 +291,7 @@ private:
   /// @brief Send disconnection signal and package counts to the slaves process
   ///        (used by master sender).
   void sendDisconnectionSignalToSlaves() {
-    Header header(this->rank(), 1, 0, this->channel_, 0, 0);
+    Header header(this->rank(), 1, 0, this->channel_, 0);
 
     this->signalBufferMem_[0] = (char)Signal::Disconnect;
     for (size_t dest = 1; dest < this->nbProcesses(); ++dest) {
@@ -333,7 +335,6 @@ private:
 private:
   /// @brief Structure that contains information about the communication requests.
   struct CommOperation {
-    package_id_t packageId; ///< Id of the package.
     buffer_id_t  bufferId;  ///< Id of the buffer (buffers are sent/received separately).
     Request      request;   ///< Request.
     StorageId    storageId; ///< Id of the storage.
@@ -403,7 +404,6 @@ private:
   template <typename T>
   std::pair<StorageId, StorageSlot<TM>> createSendStorage(std::vector<rank_t> const &dests, std::shared_ptr<T> data,
                                                              bool useAddResult) {
-    package_id_t packageId = this->service_->newPackageId(this->channel_);
     size_t       nbDests = useAddResult ? dests.size() - 1 : dests.size();
 
     // measure data packing time
@@ -421,7 +421,7 @@ private:
         .useAddResult = useAddResult,
         .dbgBufferReceived = {false, false, false, false},
     };
-    StorageId storageId(this->rank(), packageId, TM::template idOf<T>());
+    StorageId storageId(this->rank(), TM::template idOf<T>());
 
     this->stats_.registerSendTimings(storageId, dests,
                                      std::chrono::duration_cast<std::chrono::nanoseconds>(tpackingEnd - tpackingStart),
@@ -520,7 +520,7 @@ private:
   /// @return True if the reception has started.
   bool recvData(Header header) {
     std::lock_guard<std::mutex> whLock(this->wh_.mutex);
-    StorageId                   storageId(header.source, header.packageId, header.typeId, 0);
+    StorageId                   storageId(header.source, header.typeId);
 
     if (this->wh_.recvStorage.contains(storageId)) {
       return true;
@@ -535,7 +535,6 @@ private:
       assert(storage.dbgBufferReceived[header.bufferId] == false);
       storage.dbgBufferReceived[header.bufferId] = true;
       this->recvOps_.push_back(CommOperation{
-          .packageId = header.packageId,
           .bufferId = header.bufferId,
           .request = this->service_->recvAsync(header, storage.package.data[header.bufferId]),
           .storageId = storageId,
@@ -597,7 +596,7 @@ private:
 
   /// @brief Cancel the remaining received requests and clear the queue.
   ///
-  /// Node: with the current implementation, the receiver is forced to receiver
+  /// Note: with the current implementation, the receiver is forced to receiver
   /// all the requests, which means when this function is called, the queues
   /// are necessarily empty. However, this function may be more useful if this
   /// behavior changes.
@@ -626,6 +625,19 @@ private:
     this->wh_.recvStorage.clear();
   }
 
+/******************************************************************************/
+/*                                   hints                                    */
+/******************************************************************************/
+
+private:
+
+  void processHints() {
+      // TODO(hints): process the hint queue
+      // - make sure all the pre-recv are in the queue
+      //   - need to keep track of the requests for a specific hint (hint data?)
+      //   - depending on the hint, we need to be able to cancle the request
+  }
+
   /******************************************************************************/
   /*                                   stats                                    */
   /******************************************************************************/
@@ -633,7 +645,7 @@ private:
 public:
   /// @brief Sends all the profiling information to the master process.
   void sendStats() const {
-    Header            header(this->rank(), 0, 0, this->channel_, 0, 0);
+    Header            header(this->rank(), 0, 0, this->channel_, 0);
     std::vector<char> bufMem;
     this->stats_.pack(bufMem);
     this->service_->send(header, 0, Buffer{bufMem.data(), bufMem.size()});
