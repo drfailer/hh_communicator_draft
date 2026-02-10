@@ -44,6 +44,14 @@ inline Hint recvCountFrom(rank_t source, size_t count) {
   };
 }
 
+inline Hint continuousRecvFrom(rank_t source, size_t poolSize) {
+  return Hint{
+    .type = HintType::ContinuousRecvFrom,
+    .data = { .continuousRecvFrom = { .source = source, .poolSize = poolSize } },
+  };
+}
+
+
 } // end namespace hint
 } // end namespace com
 } // end namespace hh

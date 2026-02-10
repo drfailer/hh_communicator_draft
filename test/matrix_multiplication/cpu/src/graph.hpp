@@ -38,7 +38,7 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         mm->template fill<MatrixTile<MT, MatrixId::C>>(TM * TN, tileSize);
         mm->template fill<MatrixTile<MT, MatrixId::P>>(poolSize, tileSize);
 
-        auto splitTask = std::make_shared<SplitTask>(tileSize, mm, SPLIT_TASK_THREADS);
+        auto splitTask = std::make_shared<SplitTask>(tileSize, mm, SPLIT_TASK_THREADS / 4);
         auto distributeTask
             = std::make_shared<hh::CommunicatorTask<MatrixTile<MT, MatrixId::A>, MatrixTile<MT, MatrixId::B>,
                                                     MatrixTile<MT, MatrixId::C>>>(service, "scatter task");
@@ -56,14 +56,29 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         auto copyTileState = std::make_shared<CopyTileStateManager>(std::make_shared<CopyTileState>(mm, TM, TN, RANK));
         auto copyTileTask = std::make_shared<CopyTileTask>(COPY_TILE_TASK_THREADS);
 
-        distributeTask->template addHint<MatrixTile<MT, MatrixId::A>>(hh::comm::hint::recvCountFrom(0, 400));
-        distributeTask->template addHint<MatrixTile<MT, MatrixId::B>>(hh::comm::hint::recvCountFrom(0, 100));
-        distributeTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(0, 100));
+        // HINTS ///////////////////////////////////////////////////////////////
+
+        // // recv count
+        // distributeTask->template addHint<MatrixTile<MT, MatrixId::A>>(hh::comm::hint::recvCountFrom(0, 400));
+        // distributeTask->template addHint<MatrixTile<MT, MatrixId::B>>(hh::comm::hint::recvCountFrom(0, 100));
+        // distributeTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(0, 100));
+        // if (service->rank() == 0) {
+        //     gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(1, 100));
+        //     gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(2, 100));
+        //     gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(3, 100));
+        // }
+
+        // continuous recv
+        distributeTask->template addHint<MatrixTile<MT, MatrixId::A>>(hh::comm::hint::continuousRecvFrom(0, 6));
+        distributeTask->template addHint<MatrixTile<MT, MatrixId::B>>(hh::comm::hint::continuousRecvFrom(0, 2));
+        distributeTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::continuousRecvFrom(0, 2));
         if (service->rank() == 0) {
-            gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(1, 100));
-            gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(2, 100));
-            gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(3, 100));
+            gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::continuousRecvFrom(1, 1));
+            gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::continuousRecvFrom(2, 1));
+            gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::continuousRecvFrom(3, 1));
         }
+
+        ////////////////////////////////////////////////////////////////////////
 
         distributeTask->template strategy<MatrixTile<MT, MatrixId::A>>([NB_PROCESSES, TN](auto tile) {
             std::vector<hh::comm::rank_t> dests = {(hh::comm::rank_t)(tile->rowIdx * TN % NB_PROCESSES)};

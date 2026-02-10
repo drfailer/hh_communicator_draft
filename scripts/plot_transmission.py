@@ -3,13 +3,28 @@
 import sys
 import matplotlib.pyplot as plt
 
+# TODO: the transmission file misses the sender information, therefore, we
+#       cannot visualize the data for all the senders.
+# TODO: this  script should plot and generate all the images for every type/sender/receiver
+#       In that case, the arguments should be: <data_dir> <output_dir>
+
 
 def parse_time(time_str):
+    """
+    Parse the given time string:
+    Format: "transmission_start_time, transmission_duration"
+    """
     parts = time_str.split(',')
     return (int(parts[0]), int(parts[1]))
 
 
 def collect_data(filename):
+    """
+    Parse the given file and returns a map containing the data:
+
+    Return:
+    data[channel][dest][type] = (transmission_start_time, transmission_duration)
+    """
     data = dict()
 
     with open(filename, "r") as file:

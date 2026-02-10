@@ -146,7 +146,7 @@ public:
     while (this->senderPortState_ != PortState::Closed || this->recverPortState_ != PortState::Closed) {
       progressSender(addResult);
       progressRecver(addResult);
-      // progressHints();
+      progressHints();
     }
   }
 
@@ -580,19 +580,18 @@ private:
   /// @param addResult Function that allow transferring the data to rest of the
   ///                  graph (calls `task->addResult`).
   void postRecv(StorageId const &storageId, StorageSlot<TM> &storage, auto addResult) {
-    time_t tunpackingStart, tunpackingEnd;
     assert(storageId.typeId < TM::size);
     TM::apply(storageId.typeId, [&]<typename T>() {
+      time_t tunpackingStart, tunpackingEnd;
       auto data = std::get<std::shared_ptr<T>>(storage.data);
       tunpackingStart = std::chrono::system_clock::now();
       unpack(std::move(storage.package), data);
       tunpackingEnd = std::chrono::system_clock::now();
+      this->stats_.registerRecvTimings(
+              storageId, std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart),
+              storage.package.size());
       addResult(data);
     });
-
-    this->stats_.registerRecvTimings(
-        storageId, std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart),
-        storage.package.size());
     ++this->connections_[storageId.source].recvCount;
   }
 
