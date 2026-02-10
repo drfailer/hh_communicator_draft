@@ -197,11 +197,16 @@ public:
     this->coreTask_->setMemoryManager(std::make_shared<comm::tool::MemoryManager<Types...>>(mm));
   }
 
+  /// @brief Add a new hint to the communicator.
+  /// @tparam T Type affected by the hint.
+  /// @param hint Hint to add to the list.
   template <typename T>
   void addHint(comm::hint::Hint const &hint) {
     this->comm()->template addHint<T>(hint);
   }
 
+  /// @brief Set the send threshold.
+  /// @param threshold Send threshold value.
   void sendThreshold(size_t threshold) {
     this->comm()->sendThreshold(threshold);
   }

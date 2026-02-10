@@ -750,7 +750,6 @@ private:
       case hint::HintType::RecvCountFrom: {
         auto hint = this->hints_[hintIdx].hint.data.recvCountFrom;
         auto typeId = this->hints_[hintIdx].typeId;
-
         if (hint.source == rank()) {
           continue;
         }
