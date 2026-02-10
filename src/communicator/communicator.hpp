@@ -77,12 +77,24 @@ public:
     this->mm_ = mm;
   }
 
-  /// TODO: doc
+  /// @brief Add a new hint.
+  /// @tparam T Type for which the hint should be used.
+  /// @param hint Hint to add to the list of hints.
   template <typename T>
   void addHint(hint::Hint const &hint) {
     this->hints_.push_back(HintTracker{hint, TM::template idOf<T>()});
   }
 
+  /// @brief Configure the send threshold.
+  ///
+  /// Note: for now, this threshold is more an estimation and not really the
+  /// maximum number of send operations. It is more a maximum number of requests,
+  /// where one request can have multiple destinations and multiple buffers
+  /// which will all correspond to different send operations. These parameters
+  /// should be taken into account when computing the threshold value to get
+  /// the proper "maximum number of send".
+  ///
+  /// @param threshold Threshold value.
   void sendThreshold(size_t threshold) { this->sendThreshold_ = threshold; }
 
   /// @brief Returns if the queues are empty.
@@ -336,11 +348,11 @@ private:
   /// @brief Forward declaration of HintTracker.
   struct HintTracker;
 
-  /// TODO: doc
+  /// @brief Structure used in the send queue when the send threshold is set.
   struct SendRequest {
-    std::vector<rank_t> dests;
-    variant_type_t<TM> data;
-    type_id_t typeId;
+    std::vector<rank_t> dests; ///< List of destination ranks.
+    variant_type_t<TM> data;   ///< Data to send.
+    type_id_t typeId;          ///< Type id of the data to send.
   };
 
   /// @brief Structure that contains information about the communication requests.
@@ -370,6 +382,10 @@ private:
   /*                           send queue operations                            */
   /******************************************************************************/
 
+  /// @brief Package and send `data` to the given destintations.
+  /// @tparam T Type of the data to send.
+  /// @param dests Destination ranks.
+  /// @param data  Data to send.
   template <typename T>
   void processSendRequest(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
     bool useAddResult = std::find(dests.begin(), dests.end(), this->rank()) != dests.end();
@@ -397,6 +413,11 @@ private:
     }
   }
 
+  /// @brief Process the send queue.
+  ///
+  /// The send queue is used as a buffer when the send threshold is set.
+  /// Elements of the queue are actually sent when the number of operations
+  /// does not exceed the threshold.
   void processSendQueue() {
     assert(this->sendQueue_.empty() || this->sendThreshold_ > 0);
     // TODO: if we remove elements one by one, it would be better to pop back,
@@ -704,19 +725,23 @@ private:
 /******************************************************************************/
 
 private:
+  /// @brief Tracks the number of requests for each hint.
   struct HintTracker {
-    hint::Hint hint;
-    type_id_t typeId;
-    size_t activeRequestCount = 0;
-    size_t postedRequestCount = 0;
+    hint::Hint hint;               ///< Hint.
+    type_id_t typeId;              ///< Id of the data affected by the hint.
+    size_t activeRequestCount = 0; ///< Number of requests in the ops queue.
+    size_t postedRequestCount = 0; ///< Total number of posted requests.
   };
 
+  /// @brief Notifies a hint tracker that one of its requests has been completed.
+  /// @param hintIdx Index of the hint tracker in the hint list.
   void hintRequestCompleted(int hintIdx) {
     assert(hintIdx >= 0);
     auto &hint = this->hints_[hintIdx];
     hint.activeRequestCount -= 1;
   }
 
+  /// @brief Initialize the hints.
   void initHints() {
     for (int hintIdx = 0; hintIdx < (int)this->hints_.size(); ++hintIdx) {
       switch (this->hints_[hintIdx].hint.type) {
@@ -754,6 +779,7 @@ private:
     }
   }
 
+  /// @brief Progress the hints.
   void progressHints() {
     for (int hintIdx = 0; hintIdx < (int)this->hints_.size(); ++hintIdx) {
       switch (this->hints_[hintIdx].hint.type) {
@@ -791,6 +817,7 @@ private:
     }
   }
 
+  /// @brief Finalize the hints.
   void finalizeHints() {
     // TODO: add the hint statistics to the com task stats + add info on the canceled requests
     // size_t hintIdx = 0;
@@ -872,8 +899,8 @@ private:
   std::shared_ptr<tool::MemoryManager<Types...>> mm_ = nullptr; ///< Pointer to the memory manager.
 
   // hints
-  std::vector<HintTracker> hints_;
-  size_t sendThreshold_ = 0;
+  std::vector<HintTracker> hints_; ///< Hint tracker list (hint data).
+  size_t sendThreshold_ = 0;       ///< Send threshold.
 };
 
 } // end namespace comm
