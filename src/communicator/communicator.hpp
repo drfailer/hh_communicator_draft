@@ -83,11 +83,14 @@ public:
     this->hints_.push_back(HintTracker{hint, TM::template idOf<T>()});
   }
 
+  void sendThreshold(size_t threshold) { this->sendThreshold_ = threshold; }
+
   /// @brief Returns if the queues are empty.
   /// @return True if there are pending information, false otherwise.
   bool hasPendingOperations() const {
       return queueHasPendingOperations(this->sendOps_)
           || queueHasPendingOperations(this->recvOps_)
+          || !this->sendQueue_.empty()
           || !this->createDataOps_.empty();
   }
 
@@ -97,30 +100,15 @@ public:
   /// @param data  Pointer to the data to send.
   template <typename T>
   void sendData(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
-    bool useAddResult = std::find(dests.begin(), dests.end(), this->rank()) != dests.end();
-    auto [storageId, storage] = createSendStorage(dests, data, useAddResult);
-    Header header(this->rank(), 0, storageId.typeId, this->channel_, 0);
-
-    this->wh_.mutex.lock();
-    this->wh_.sendStorage.insert({storageId, storage});
-    this->wh_.mutex.unlock();
-
-    for (auto dest : dests) {
-      if (dest == this->rank()) {
-        continue;
-      }
-      this->packagesCount_[dest] += 1;
-      for (size_t i = 0; i < storage.package.data.size(); ++i) {
-        header.bufferId = (buffer_id_t)i;
-        std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
-        Request                     request = this->service_->sendAsync(header, dest, storage.package.data[i]);
-        this->sendOps_.push_back(CommOperation{
-            .bufferId = header.bufferId,
-            .request = request,
-            .storageId = storageId,
-            .hint = -1,
-        });
-      }
+    std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
+    if (this->sendThreshold_ > 0 && this->sendOps_.size() >= this->sendThreshold_) {
+      this->sendQueue_.push_back(SendRequest{
+          .dests = dests,
+          .data = data,
+          .typeId = TM::template idOf<T>(),
+      });
+    } else {
+      processSendRequest(dests, data);
     }
   }
 
@@ -348,6 +336,13 @@ private:
   /// @brief Forward declaration of HintTracker.
   struct HintTracker;
 
+  /// TODO: doc
+  struct SendRequest {
+    std::vector<rank_t> dests;
+    variant_type_t<TM> data;
+    type_id_t typeId;
+  };
+
   /// @brief Structure that contains information about the communication requests.
   struct CommOperation {
     buffer_id_t  bufferId;  ///< Id of the buffer (buffers are sent/received separately).
@@ -375,6 +370,48 @@ private:
   /*                           send queue operations                            */
   /******************************************************************************/
 
+  template <typename T>
+  void processSendRequest(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
+    bool useAddResult = std::find(dests.begin(), dests.end(), this->rank()) != dests.end();
+    auto [storageId, storage] = createSendStorage(dests, data, useAddResult);
+    Header header(this->rank(), 0, storageId.typeId, this->channel_, 0);
+
+    this->wh_.mutex.lock();
+    this->wh_.sendStorage.insert({storageId, storage});
+    this->wh_.mutex.unlock();
+
+    for (auto dest : dests) {
+      if (dest == this->rank()) {
+        continue;
+      }
+      this->packagesCount_[dest] += 1;
+      for (size_t i = 0; i < storage.package.data.size(); ++i) {
+        header.bufferId = (buffer_id_t)i;
+        this->sendOps_.push_back(CommOperation{
+            .bufferId = header.bufferId,
+            .request = this->service_->sendAsync(header, dest, storage.package.data[i]),
+            .storageId = storageId,
+            .hint = -1,
+        });
+      }
+    }
+  }
+
+  void processSendQueue() {
+    assert(this->sendQueue_.empty() || this->sendThreshold_ > 0);
+    // TODO: if we remove elements one by one, it would be better to pop back,
+    //       but this would alter the send order...
+    for (auto it = this->sendQueue_.begin(); it != this->sendQueue_.end();) {
+      if (this->sendOps_.size() >= this->sendThreshold_) {
+        break;
+      }
+      TM::apply(it->typeId, [&]<typename T>() {
+        processSendRequest(it->dests, std::get<std::shared_ptr<T>>(it->data));
+      });
+      it = this->sendQueue_.erase(it);
+    }
+  }
+
   /// @brief Process the send operation queue.
   /// @param addResult Function that allow transferring data to the result of
   ///                  the graph.
@@ -386,6 +423,7 @@ private:
     this->stats_.updateSendQueuesInfos(this->sendOps_.size(), this->wh_.sendStorage.size());
 
     do {
+      processSendQueue();
       for (auto it = this->sendOps_.begin(); it != this->sendOps_.end();) {
         if (this->service_->requestCompleted(it->request)) {
           std::lock_guard<std::mutex> whLock(this->wh_.mutex);
@@ -813,9 +851,10 @@ private:
   bool                    fini_ = false;    ///< Termination flag.
 
   // queues
+  std::vector<SendRequest>   sendQueue_;     ///< Queue used to limit the number of send operations.
   std::vector<CommOperation> sendOps_;       ///< Queue of send operations.
-  std::vector<CommOperation> recvOps_;       ///< Queue of recv operations.
   std::vector<Header>        createDataOps_; ///< Queue of create data operation (wait for available memory).
+  std::vector<CommOperation> recvOps_;       ///< Queue of recv operations.
   std::mutex                 queuesMutex_;   ///< mutex for the queues.
 
   // packages
@@ -834,6 +873,7 @@ private:
 
   // hints
   std::vector<HintTracker> hints_;
+  size_t sendThreshold_ = 0;
 };
 
 } // end namespace comm

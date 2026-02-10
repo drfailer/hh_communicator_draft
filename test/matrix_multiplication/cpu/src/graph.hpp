@@ -78,6 +78,8 @@ struct MMGraph : hh::Graph<MMGraphIO> {
             gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::continuousRecvFrom(3, 1));
         }
 
+        distributeTask->sendThreshold(100);
+
         ////////////////////////////////////////////////////////////////////////
 
         distributeTask->template strategy<MatrixTile<MT, MatrixId::A>>([NB_PROCESSES, TN](auto tile) {

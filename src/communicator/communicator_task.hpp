@@ -202,6 +202,10 @@ public:
     this->comm()->template addHint<T>(hint);
   }
 
+  void sendThreshold(size_t threshold) {
+    this->comm()->sendThreshold(threshold);
+  }
+
   /// @brief Use addResult from `BehaviorTaskMultiSendersTypeDeducer_t`.
   using tool::BehaviorTaskMultiSendersTypeDeducer_t<std::tuple<Types...>>::addResult;
 };
