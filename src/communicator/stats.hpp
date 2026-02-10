@@ -533,7 +533,7 @@ struct CommTaskStats {
   /// @param nbProcesses Number of processes.
   template <typename TM>
   static void generateTransmissionFile(MergedStatsPerType const &stats, channel_t channel, size_t nbProcesses) {
-    std::ofstream file("transmissions_" + std::to_string(channel) + ".data", std::ios_base::app);
+    std::ofstream file("channel_" + std::to_string(channel) + ".transmission", std::ios_base::app);
     char          sep = ';';
 
     for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
