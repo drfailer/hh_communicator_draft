@@ -38,7 +38,7 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         mm->template fill<MatrixTile<MT, MatrixId::C>>(TM * TN, tileSize);
         mm->template fill<MatrixTile<MT, MatrixId::P>>(poolSize, tileSize);
 
-        auto splitTask = std::make_shared<SplitTask>(tileSize, mm, SPLIT_TASK_THREADS / 4);
+        auto splitTask = std::make_shared<SplitTask>(tileSize, mm, SPLIT_TASK_THREADS);
         auto distributeTask
             = std::make_shared<hh::CommunicatorTask<MatrixTile<MT, MatrixId::A>, MatrixTile<MT, MatrixId::B>,
                                                     MatrixTile<MT, MatrixId::C>>>(service, "scatter task");

@@ -250,6 +250,9 @@ struct CommTaskStats {
   size_t            maxCreateDataQueueSize = 0; ///< Max data creation queue size.
   size_t            maxSendStorageSize = 0;     ///< Max send storage size.
   size_t            maxRecvStorageSize = 0;     ///< Max recv storage size.
+  size_t            maxSendQueueSize = 0;       ///< Max send queue size.
+  size_t            probeRequestCount = 0;      ///< Number of successful probe.
+  size_t            hintedRequestCount = 0;     ///< Number of hint requests.
   std::mutex        mutex;                      ///< Mutex for thread-safety.
   bool              enabled = false;            ///< Statistic collection enabled flag.
 
@@ -291,7 +294,7 @@ struct CommTaskStats {
     }
   }
 
-  /// @brief Update the statistic for the create data queue.
+  /// @brief Updcoate the statistic for the create data queue.
   /// @param nbOps Number of operation in the queue.
   void updateCreateDataQueueInfos(size_t nbOps) {
     if (!enabled) {
@@ -333,6 +336,9 @@ struct CommTaskStats {
     writeBytes(buf, this->maxCreateDataQueueSize);
     writeBytes(buf, this->maxSendStorageSize);
     writeBytes(buf, this->maxRecvStorageSize);
+    writeBytes(buf, this->maxSendQueueSize);
+    writeBytes(buf, this->probeRequestCount);
+    writeBytes(buf, this->hintedRequestCount);
 
     writeBytes(buf, this->transmissionStats.sendInfos.size());
     for (auto sendInfo : this->transmissionStats.sendInfos) {
@@ -353,6 +359,9 @@ struct CommTaskStats {
     pos = readBytes(buf, pos, this->maxCreateDataQueueSize);
     pos = readBytes(buf, pos, this->maxSendStorageSize);
     pos = readBytes(buf, pos, this->maxRecvStorageSize);
+    pos = readBytes(buf, pos, this->maxSendQueueSize);
+    pos = readBytes(buf, pos, this->probeRequestCount);
+    pos = readBytes(buf, pos, this->hintedRequestCount);
 
     size_t infoCount = 0;
 
@@ -477,18 +486,27 @@ struct CommTaskStats {
     size_t maxCreateDataQueueSize = 0;
     size_t maxSendStorageSize = 0;
     size_t maxRecvStorageSize = 0;
+    size_t maxSendQueueSize = 0;
+    size_t probeRequestCount = 0;
+    size_t hintedRequestCount = 0;
     for (auto const &stat : stats) {
       maxSendOpsSize = std::max(maxSendOpsSize, stat.maxSendOpsSize);
       maxRecvOpsSize = std::max(maxRecvOpsSize, stat.maxRecvOpsSize);
       maxCreateDataQueueSize = std::max(maxCreateDataQueueSize, stat.maxCreateDataQueueSize);
       maxSendStorageSize = std::max(maxSendStorageSize, stat.maxSendStorageSize);
       maxRecvStorageSize = std::max(maxRecvStorageSize, stat.maxRecvStorageSize);
+      maxSendQueueSize = std::max(maxSendQueueSize, stat.maxSendQueueSize);
+      probeRequestCount += stat.probeRequestCount;
+      hintedRequestCount += stat.hintedRequestCount;
     }
     strAppendStat(infos, "maxSendOpsSize = ", maxSendOpsSize);
     strAppendStat(infos, "maxRecvOpsSize = ", maxRecvOpsSize);
     strAppendStat(infos, "maxCreateDataQueueSize = ", maxCreateDataQueueSize);
     strAppendStat(infos, "maxSendStorageSize = ", maxSendStorageSize);
     strAppendStat(infos, "maxRecvStorageSize = ", maxRecvStorageSize);
+    strAppendStat(infos, "maxSendQueueSize = ", maxSendQueueSize);
+    strAppendStat(infos, "probeRequestCount = ", probeRequestCount);
+    strAppendStat(infos, "hintedRequestCount = ", hintedRequestCount);
 
     // transmission stats
     auto mergedStats = mergeCommTasksStats(stats, startTime, nbProcesses, TM::size);

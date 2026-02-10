@@ -593,6 +593,7 @@ private:
 
       if (header.signal == 0) {
         std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
+        this->stats_.probeRequestCount += 1;
         this->createDataOps_.push_back(header);
         signal = Signal::Data;
         this->service_->requestRelease(request);
@@ -692,7 +693,7 @@ private:
   /// behavior changes.
   void flushRecvQueueAndWarehouse() {
     if (!this->recvOps_.empty()) {
-      log::error("[", rank(), "][", channel(), "] Cancelling ", this->recvOps_.size(), " recv operations.");
+      log::info("[", rank(), "][", channel(), "] Cancelling ", this->recvOps_.size(), " recv operations.");
     }
     for (auto &op : this->recvOps_) {
       this->service_->requestCancel(op.request);
@@ -700,12 +701,12 @@ private:
     this->recvOps_.clear();
 
     if (!this->createDataOps_.empty()) {
-      log::error("[", rank(), "][", channel(), "] Cancelling ", this->createDataOps_.size(), " create data operations.");
+      log::info("[", rank(), "][", channel(), "] Cancelling ", this->createDataOps_.size(), " create data operations.");
     }
     this->createDataOps_.clear();
 
     if (!this->wh_.recvStorage.empty()) {
-      log::error("[", rank(), "][", channel(), "] Removing ", this->wh_.recvStorage.size(), " from storage.");
+      log::info("[", rank(), "][", channel(), "] Removing ", this->wh_.recvStorage.size(), " from storage.");
     }
     for (auto it : this->wh_.recvStorage) {
       auto storageId = it.first;
@@ -739,6 +740,7 @@ private:
     assert(hintIdx >= 0);
     auto &hint = this->hints_[hintIdx];
     hint.activeRequestCount -= 1;
+    this->stats_.hintedRequestCount += 1;
   }
 
   /// @brief Initialize the hints.
@@ -818,13 +820,7 @@ private:
   }
 
   /// @brief Finalize the hints.
-  void finalizeHints() {
-    // TODO: add the hint statistics to the com task stats + add info on the canceled requests
-    // size_t hintIdx = 0;
-    // for (auto hint : this->hints_) {
-    //   log::info("[", rank(), "] - hint[", hintIdx++, "]: activeRequestCount = ", hint.activeRequestCount, ", postedRequestCount = ", hint.postedRequestCount);
-    // }
-  }
+  void finalizeHints() {}
 
   /******************************************************************************/
   /*                                   stats                                    */
@@ -852,6 +848,9 @@ public:
     stats[0].maxCreateDataQueueSize = this->stats_.maxCreateDataQueueSize;
     stats[0].maxSendStorageSize = this->stats_.maxSendStorageSize;
     stats[0].maxRecvStorageSize = this->stats_.maxRecvStorageSize;
+    stats[0].maxSendQueueSize = this->stats_.maxSendQueueSize;
+    stats[0].probeRequestCount = this->stats_.probeRequestCount;
+    stats[0].hintedRequestCount = this->stats_.hintedRequestCount;
     for (rank_t i = 1; i < this->nbProcesses(); ++i) {
       Request request = this->service_->probe(this->channel_, i);
       bufSize = (size_t)this->service_->bufferSize(request);
