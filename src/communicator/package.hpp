@@ -121,7 +121,6 @@ void unpack(Package &&package, std::shared_ptr<T> data) {
 struct StorageId {
   rank_t        source;     ///< source.
   type_id_t     typeId;     ///< type of the data stored in the storage.
-  package_id_t  packageId;  ///< identifier of the package (tranfered on the network).
   std::uint64_t cid;        ///< extra identification number used when the profiling is enabled.
 
   /// @brief Default constructor
@@ -129,31 +128,19 @@ struct StorageId {
 
   /// @brief Contructor with all the fileds.
   /// @param source    Value of the source.
-  /// @param packageId Value of the package id.
   /// @param typeId    Type of the data stored in the slot.
   /// @parma cid       Additional generated id.
-  StorageId(rank_t source, package_id_t packageId, type_id_t typeId, std::uint64_t cid)
+  StorageId(rank_t source, type_id_t typeId)
       : source(source),
         typeId(typeId),
-        packageId(packageId),
-        cid(cid) {}
-
-  /// @brief Contructor with all the fileds excpet the cid (the cid is generated here).
-  /// @param source    Value of the source.
-  /// @param packageId Value of the package id.
-  /// @param typeId    Type of the data stored in the slot.
-  StorageId(rank_t source, package_id_t packageId, type_id_t typeId)
-      : StorageId(source, packageId, typeId, counter_++) {}
+        cid(counter_++) {}
 
   /// @brief Operator used because `StorageId` is a key type in a std::map.
   /// @param other Other storage id to compare with.
   bool operator<(StorageId const &other) const {
     if (this->source == other.source) {
       if (this->typeId == other.typeId) {
-        if (this->packageId == other.packageId) {
-          return this->cid < other.cid;
-        }
-        return this->packageId < other.packageId;
+        return this->cid < other.cid;
       }
       return this->typeId < other.typeId;
     }
@@ -182,7 +169,6 @@ template <typename TM>
 struct PackageWarehouse {
   std::map<StorageId, StorageSlot<TM>> sendStorage; ///< Send queue.
   std::map<StorageId, StorageSlot<TM>> recvStorage; ///< Recv queue.
-  std::mutex                           mutex;       ///< Mutex for thread safety.
 };
 
 } // end namespace comm

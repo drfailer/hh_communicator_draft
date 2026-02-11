@@ -5,6 +5,7 @@
 #SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
+#SBATCH --mem-per-cpu=1G
 #SBATCH --time=01:00:00
 #SBATCH -o logs/log-%N.%J.out
 
@@ -28,7 +29,7 @@ srun --ntasks-per-node=1 ls -al $EXE_DIR
 
 # program
 MATRIX_SIZE=10000
-TILE_SIZE=1024
+TILE_SIZE=512
 POOL_SIZE=2000
 mpirun -n $SLURM_NNODES --map-by node \
 	$EXE_DIR/matmul \

@@ -65,6 +65,16 @@ struct TestGraph1 : hh::Graph<1, int, int> {
       self.addResult(data);
     });
 
+    // hints
+    if (service->rank() == 1) {
+        b01->template addHint<int>(hh::comm::hint::Hint{
+            .type = hh::comm::hint::HintType::RecvCountFrom,
+            .data = {
+                .recvCountFrom = { .source = 0, .count = 1 },
+            },
+        });
+    }
+
     this->inputs(in);
     this->edges(in, b01);
     this->edges(in, b02);

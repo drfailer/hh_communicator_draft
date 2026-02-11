@@ -136,11 +136,6 @@ public:
   /// @return Id of the new channel.
   virtual channel_t newChannel() = 0;
 
-  /// @brief Generate a package id for a specific channel.
-  /// @param channel Id of the channel create with `newChannel`.
-  /// @return New package id.
-  virtual package_id_t newPackageId(channel_t channel) = 0;
-
   /// @brief Give access to the mutex to the implementation.
   /// @return mutex.
   std::mutex &mutex() { return mutex_; }
