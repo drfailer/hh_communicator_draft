@@ -112,16 +112,12 @@ public:
   /// @param data  Pointer to the data to send.
   template <typename T>
   void sendData(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
-    std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
-    if (this->sendThreshold_ > 0 && this->sendOps_.size() >= this->sendThreshold_) {
-      this->sendQueue_.push_back(SendRequest{
-          .dests = dests,
-          .data = data,
-          .typeId = TM::template idOf<T>(),
-      });
-    } else {
-      processSendRequest(dests, data);
-    }
+    std::lock_guard<std::mutex> queuesLock(this->sendQueueMutex_);
+    this->sendQueue_.push_back(SendRequest{
+        .dests = dests,
+        .data = data,
+        .typeId = TM::template idOf<T>(),
+    });
   }
 
   /// @brief Initialize the communicator.
@@ -419,11 +415,12 @@ private:
   /// Elements of the queue are actually sent when the number of operations
   /// does not exceed the threshold.
   void processSendQueue() {
-    assert(this->sendQueue_.empty() || this->sendThreshold_ > 0);
+    std::lock_guard<std::mutex> queuesLock(this->sendQueueMutex_);
+
     // TODO: if we remove elements one by one, it would be better to pop back,
     //       but this would alter the send order...
     for (auto it = this->sendQueue_.begin(); it != this->sendQueue_.end();) {
-      if (this->sendOps_.size() >= this->sendThreshold_) {
+      if (this->sendThreshold_ > 0 && this->sendOps_.size() >= this->sendThreshold_) {
         break;
       }
       TM::apply(it->typeId, [&]<typename T>() {
@@ -439,8 +436,6 @@ private:
   /// @param flush     Boolean flag that is used when the queue needs to be
   ///                  flushed.
   void processSendOpsQueue(auto addResult, bool flush = false) {
-    std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
-
     this->stats_.updateSendQueuesInfos(this->sendOps_.size(), this->wh_.sendStorage.size());
 
     do {
@@ -530,8 +525,6 @@ private:
   ///        request, and we start the reception. Otherwise, the request
   ///        remains in this queue until some memory is available.
   void processCreateDataQueue() {
-    std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
-
     this->stats_.updateCreateDataQueueInfos(this->createDataOps_.size());
 
     for (auto it = this->createDataOps_.begin(); it != this->createDataOps_.end();) {
@@ -548,8 +541,6 @@ private:
   ///        data is transferred to the result of the graph using `addResult`.
   /// @param addResult Function that allow to call `task->addResult`
   void processRecvOpsQueue(auto addResult) {
-    std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
-
     this->stats_.updateRecvQueuesInfos(this->recvOps_.size(), this->wh_.recvStorage.size());
 
     for (auto it = this->recvOps_.begin(); it != this->recvOps_.end();) {
@@ -592,7 +583,6 @@ private:
       assert(header.source != this->rank());
 
       if (header.signal == 0) {
-        std::lock_guard<std::mutex> queuesLock(this->queuesMutex_);
         this->stats_.probeRequestCount += 1;
         this->createDataOps_.push_back(header);
         signal = Signal::Data;
@@ -876,11 +866,11 @@ private:
   bool                    fini_ = false;    ///< Termination flag.
 
   // queues
-  std::vector<SendRequest>   sendQueue_;     ///< Queue used to limit the number of send operations.
-  std::vector<CommOperation> sendOps_;       ///< Queue of send operations.
-  std::vector<Header>        createDataOps_; ///< Queue of create data operation (wait for available memory).
-  std::vector<CommOperation> recvOps_;       ///< Queue of recv operations.
-  std::mutex                 queuesMutex_;   ///< mutex for the queues.
+  std::mutex                 sendQueueMutex_; ///< mutex for the send queue.
+  std::vector<SendRequest>   sendQueue_;      ///< Queue used to limit the number of send operations.
+  std::vector<CommOperation> sendOps_;        ///< Queue of send operations.
+  std::vector<Header>        createDataOps_;  ///< Queue of create data operation (wait for available memory).
+  std::vector<CommOperation> recvOps_;        ///< Queue of recv operations.
 
   // packages
   PackageWarehouse<TM> wh_; ///< Package warehouse that stores the data during transmission.
