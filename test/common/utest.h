@@ -17,11 +17,19 @@
 
 #define UTEST_STATUS __utest_nb_test_failed__
 
-#define UTest(name, ...)                                                       \
+#define UTest(name)                                                            \
+    void test_function_##name(                                                 \
+        [[maybe_unused]] utest::test_status_t &__test_status__)
+#define UTestArgs(name, ...)                                                   \
     void test_function_##name(                                                 \
         [[maybe_unused]] utest::test_status_t &__test_status__, __VA_ARGS__)
 
-#define urun_test(name, ...)                                                   \
+#define urun_test(name)                                                        \
+    ++__utest_nb_test__;                                                       \
+    if (utest::run(test_function_##name, #name)) {                             \
+        ++__utest_nb_test_failed__;                                            \
+    }
+#define urun_test_args(name, ...)                                              \
     ++__utest_nb_test__;                                                       \
     if (utest::run(test_function_##name, #name, __VA_ARGS__)) {                \
         ++__utest_nb_test_failed__;                                            \
@@ -101,8 +109,12 @@ inline int assert_equal_(std::string const &group, auto const &found,
                          std::string const &filename, size_t line) {
     if (found != expect) {
         std::ostringstream oss;
-        oss << lhs_str << " != " << rhs_str << " -> " << found
-            << " != " << expect << ".";
+        if constexpr (requires { oss << found; }) {
+            oss << lhs_str << " != " << rhs_str << " -> " << found
+                << " != " << expect << ".";
+        } else {
+            oss << lhs_str << " != " << rhs_str << ".";
+        }
         error(group, filename, line, oss.str());
         return 1;
     }
