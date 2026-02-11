@@ -2,14 +2,15 @@
 #define COMMUNICATOR_PACKAGE
 #include "protocol.hpp"
 #include "type_map.hpp"
+#include "tool/queue.hpp"
 #include <cstring>
-#include <map>
 #include <memory>
 #include <set>
 #include <vector>
 
+/// @brief Hedgehog namespace
 namespace hh {
-
+/// @brief Comm namespace
 namespace comm {
 
 /******************************************************************************/
@@ -117,48 +118,16 @@ void unpack(Package &&package, std::shared_ptr<T> data) {
 /*                             Package Wharehouse                             */
 /******************************************************************************/
 
-/// @brief Id of a storage slot in the warehouse.
-struct StorageId {
-  rank_t        source;     ///< source.
-  type_id_t     typeId;     ///< type of the data stored in the storage.
-  std::uint64_t cid;        ///< extra identification number used when the profiling is enabled.
-
-  /// @brief Default constructor
-  StorageId() = default;
-
-  /// @brief Contructor with all the fileds.
-  /// @param source    Value of the source.
-  /// @param typeId    Type of the data stored in the slot.
-  /// @parma cid       Additional generated id.
-  StorageId(rank_t source, type_id_t typeId)
-      : source(source),
-        typeId(typeId),
-        cid(counter_++) {}
-
-  /// @brief Operator used because `StorageId` is a key type in a std::map.
-  /// @param other Other storage id to compare with.
-  bool operator<(StorageId const &other) const {
-    if (this->source == other.source) {
-      if (this->typeId == other.typeId) {
-        return this->cid < other.cid;
-      }
-      return this->typeId < other.typeId;
-    }
-    return this->source < other.source;
-  }
-
-private:
-  static inline size_t counter_ = 0; ///< static counter used to generate the cid.
-};
-
 /// @brief Warehouse storage slot.
 /// @tparam TM Type map type (used in the communicator).
 template <typename TM>
 struct StorageSlot {
+  rank_t             source;         ///< source.
   Package            package;        ///< Package that is beeing sent/received.
   size_t             bufferCount;    ///< Number of buffers sent/received.
   size_t             ttlBufferCount; ///< Total number of buffer sent/received (when sending, it is equal to `nbDests * nbBuffers`)
   variant_type_t<TM> data;           ///< Variant containing the data that is sent (keep the shared_ptr alive).
+  type_id_t          typeId;         ///< type of the data stored in the storage.
   bool               useAddResult;   ///< Flag used to know if the data must be transfered or released after all the buffers are sent on the network.
   bool               dbgBufferReceived[4]; // TODO: remove
 };
@@ -167,8 +136,8 @@ struct StorageSlot {
 /// @tparam TM Type map type (used in the communicator).
 template <typename TM>
 struct PackageWarehouse {
-  std::map<StorageId, StorageSlot<TM>> sendStorage; ///< Send queue.
-  std::map<StorageId, StorageSlot<TM>> recvStorage; ///< Recv queue.
+  Queue<StorageSlot<TM>> sendStorage; ///< Send queue.
+  Queue<StorageSlot<TM>> recvStorage; ///< Recv queue.
 };
 
 } // end namespace comm

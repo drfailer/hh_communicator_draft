@@ -50,31 +50,6 @@ public:
     return queue;
   }
 
-  /// @brief Add an element to the queue (append).
-  /// @param data Data to add to the queue.
-  void add(T const &data) {
-    size_t newIdx = this->freeList_;
-
-    if (newIdx == 0) {
-      newIdx = this->memory_.size();
-      this->memory_.push_back(Node{});
-    }
-
-    this->freeList_ = this->memory_[newIdx].next;
-    if (this->usedList_ != 0) {
-      size_t lastIdx = this->memory_[this->usedList_].prev;
-      this->memory_[lastIdx].next = newIdx;
-      this->memory_[newIdx].prev = lastIdx;
-      this->memory_[this->usedList_].prev = newIdx;
-    } else {
-      this->usedList_ = newIdx;
-      this->memory_[newIdx].prev = newIdx;
-    }
-    this->memory_[newIdx].next = 0;
-    this->memory_[newIdx].data = data;
-    this->size_ += 1;
-  }
-
   /// @brief Iterator type.
   /// @tparam Q Queue type.
   /// @tparam V Value type.
@@ -136,17 +111,46 @@ public:
   /// @return Const iterator to the end of the queue.
   const_iterator end() const { return const_iterator{0, this}; }
 
-  /// @brief Remove the element pointed by the iterator.
-  ///
-  /// Note: if the given element is 0, nothing happens.
-  ///
-  /// @param it Iterator to remove.
-  /// @return Iterator to the next element.
-  iterator remove(iterator it) {
-    if (it.idx == 0) {
-      return it;
+  /// @brief Add an element to the queue (append).
+  /// @param data Data to add to the queue.
+  /// @return Index of the element in the queue memory (address).
+  size_t add(T const &data) {
+    size_t newIdx = this->freeList_;
+
+    if (newIdx == 0) {
+      newIdx = this->memory_.size();
+      this->memory_.push_back(Node{});
     }
-    Node    &node = this->memory_[it.idx];
+
+    this->freeList_ = this->memory_[newIdx].next;
+    if (this->usedList_ != 0) {
+      size_t lastIdx = this->memory_[this->usedList_].prev;
+      this->memory_[lastIdx].next = newIdx;
+      this->memory_[newIdx].prev = lastIdx;
+      this->memory_[this->usedList_].prev = newIdx;
+    } else {
+      this->usedList_ = newIdx;
+      this->memory_[newIdx].prev = newIdx;
+    }
+    this->memory_[newIdx].next = 0;
+    this->memory_[newIdx].data = data;
+    this->size_ += 1;
+    return newIdx;
+  }
+
+  /// @brief Remove the element based on the index.
+  ///
+  /// Note: this is not the index of the element within the queue, this is the
+  /// address of the element withing the queue memory. This index is returned
+  /// by `add`.
+  ///
+  /// @param idx Index of the element to remove.
+  /// @return Iterator to the next element.
+  iterator remove(size_t idx) {
+    if (idx == 0) {
+      return iterator{idx, this};
+    }
+    Node    &node = this->memory_[idx];
     iterator next{node.next, this};
 
     if (node.next != 0) {
@@ -155,7 +159,7 @@ public:
       this->memory_[this->usedList_].prev = node.prev;
     }
 
-    if (it.idx != this->usedList_) {
+    if (idx != this->usedList_) {
       assert(node.prev != 0);
       this->memory_[node.prev].next = node.next;
     } else {
@@ -164,10 +168,30 @@ public:
 
     node.next = this->freeList_;
     node.prev = 0;
-    this->freeList_ = it.idx;
+    this->freeList_ = idx;
     this->size_ -= 1;
     return next;
   }
+
+  /// @brief Remove the element pointed by the iterator.
+  ///
+  /// Note: if the given element is 0, nothing happens.
+  ///
+  /// @param it Iterator to remove.
+  /// @return Iterator to the next element.
+  iterator remove(iterator it) {
+    return remove(it.idx);
+  }
+
+  /// @brief Access a element based on its index.
+  /// @param idx Index of the element (index returned by `add`).
+  /// @return Reference to the element.
+  T &at(size_t idx) { return this->memory_[idx].data; }
+
+  /// @brief Access a element based on its index.
+  /// @param idx Index of the element (index returned by `add`).
+  /// @return Const reference to the element.
+  T const &at(size_t idx) const { return this->memory_[idx].data; }
 
   /// @brief Get the size of the queue.
   /// @return Size of the queue.
