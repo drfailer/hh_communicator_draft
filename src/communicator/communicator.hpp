@@ -1,6 +1,7 @@
 #ifndef COMMUNICATOR_COMMUNICATOR
 #define COMMUNICATOR_COMMUNICATOR
 #include "tool/log.hpp"
+#include "tool/queue.hpp"
 #include "package.hpp"
 #include "hints.hpp"
 #include "service/comm_service.hpp"
@@ -113,7 +114,7 @@ public:
   template <typename T>
   void sendData(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
     std::lock_guard<std::mutex> queuesLock(this->sendQueueMutex_);
-    this->sendQueue_.push_back(SendRequest{
+    this->sendQueue_.add(SendRequest{
         .dests = dests,
         .data = data,
         .typeId = TM::template idOf<T>(),
@@ -363,7 +364,7 @@ private:
   ///        hinted requests).
   /// @param queue Queue to test.
   /// @return True if the queue has non hinted pending operations, false otherwise.
-  bool queueHasPendingOperations(std::vector<CommOperation> const &queue) const {
+  bool queueHasPendingOperations(Queue<CommOperation> const &queue) const {
     bool result = false;
 
     for (auto op : queue) {
@@ -397,7 +398,7 @@ private:
       this->packagesCount_[dest] += 1;
       for (size_t i = 0; i < storage.package.data.size(); ++i) {
         header.bufferId = (buffer_id_t)i;
-        this->sendOps_.push_back(CommOperation{
+        this->sendOps_.add(CommOperation{
             .bufferId = header.bufferId,
             .request = this->service_->sendAsync(header, dest, storage.package.data[i]),
             .storageId = storageId,
@@ -416,9 +417,6 @@ private:
     std::lock_guard<std::mutex> queuesLock(this->sendQueueMutex_);
 
     this->stats_.maxSendQueueSize = std::max(this->stats_.maxSendQueueSize, this->sendQueue_.size());
-
-    // TODO: if we remove elements one by one, it would be better to pop back,
-    //       but this would alter the send order...
     for (auto it = this->sendQueue_.begin(); it != this->sendQueue_.end();) {
       if (this->sendThreshold_ > 0 && this->sendOps_.size() >= this->sendThreshold_) {
         break;
@@ -426,7 +424,7 @@ private:
       TM::apply(it->typeId, [&]<typename T>() {
         processSendRequest(it->dests, std::get<std::shared_ptr<T>>(it->data));
       });
-      it = this->sendQueue_.erase(it);
+      it = this->sendQueue_.remove(it);
     }
   }
 
@@ -451,7 +449,7 @@ private:
             this->wh_.sendStorage.erase(it->storageId);
           }
           this->service_->requestRelease(it->request);
-          it = this->sendOps_.erase(it);
+          it = this->sendOps_.remove(it);
         } else {
           it++;
         }
@@ -528,7 +526,7 @@ private:
 
     for (auto it = this->createDataOps_.begin(); it != this->createDataOps_.end();) {
       if (recvData(*it)) {
-        it = this->createDataOps_.erase(it);
+        it = this->createDataOps_.remove(it);
       } else {
         it++;
       }
@@ -556,7 +554,7 @@ private:
           this->wh_.recvStorage.erase(it->storageId);
         }
         this->service_->requestRelease(it->request);
-        it = this->recvOps_.erase(it);
+        it = this->recvOps_.remove(it);
       } else {
         it++;
       }
@@ -582,7 +580,7 @@ private:
 
       if (header.signal == 0) {
         this->stats_.probeRequestCount += 1;
-        this->createDataOps_.push_back(header);
+        this->createDataOps_.add(header);
         signal = Signal::Data;
         this->service_->requestRelease(request);
       } else {
@@ -611,7 +609,7 @@ private:
     for (header.bufferId = 0; header.bufferId < storage.package.data.size(); ++header.bufferId) {
       assert(storage.dbgBufferReceived[header.bufferId] == false);
       storage.dbgBufferReceived[header.bufferId] = true;
-      this->recvOps_.push_back(CommOperation{
+      this->recvOps_.add(CommOperation{
           .bufferId = header.bufferId,
           .request = this->service_->recvAsync(header, storage.package.data[header.bufferId]),
           .storageId = storageId,
@@ -864,10 +862,10 @@ private:
 
   // queues
   std::mutex                 sendQueueMutex_; ///< mutex for the send queue.
-  std::vector<SendRequest>   sendQueue_;      ///< Queue used to limit the number of send operations.
-  std::vector<CommOperation> sendOps_;        ///< Queue of send operations.
-  std::vector<Header>        createDataOps_;  ///< Queue of create data operation (wait for available memory).
-  std::vector<CommOperation> recvOps_;        ///< Queue of recv operations.
+  Queue<SendRequest>   sendQueue_;      ///< Queue used to limit the number of send operations.
+  Queue<CommOperation> sendOps_;        ///< Queue of send operations.
+  Queue<Header>        createDataOps_;  ///< Queue of create data operation (wait for available memory).
+  Queue<CommOperation> recvOps_;        ///< Queue of recv operations.
 
   // packages
   PackageWarehouse<TM> wh_; ///< Package warehouse that stores the data during transmission.
