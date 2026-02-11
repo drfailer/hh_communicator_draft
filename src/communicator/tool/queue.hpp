@@ -6,6 +6,11 @@
 
 #define DEFAULT_QUEUE_CAPACITY 32
 
+/// @brief Hedgehog namespace
+namespace hh {
+/// @brief Communicator namespace
+namespace comm {
+
 /// @brief Cache friendly queue that supports fast insert/delete.
 /// @tparam T Type of the element stored in the queue.
 template <typename T>
@@ -195,5 +200,9 @@ private:
   size_t            size_ = 0;     ///< Size of the queue.
   std::vector<Node> memory_ = {};  ///< Memory of the queue.
 };
+
+} // end namespace comm
+
+} // end namespace hh
 
 #endif

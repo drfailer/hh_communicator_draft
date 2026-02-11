@@ -3,7 +3,7 @@
 
 
 UTest(add) {
-    Queue<int> queue1(0);
+    hh::comm::Queue<int> queue1(0);
     uassert_equal(queue1.size(), (size_t)0);
     for (int j = 1; j <= 5; ++j) queue1.add(j);
     uassert_equal(queue1.size(), (size_t)5);
@@ -13,7 +13,7 @@ UTest(add) {
         uassert_equal(elt, i++);
     }
 
-    Queue<int> queue2(3);
+    hh::comm::Queue<int> queue2(3);
     uassert_equal(queue2.size(), (size_t)0);
     for (int j = 1; j <= 5; ++j) queue2.add(j);
     uassert_equal(queue2.size(), (size_t)5);
@@ -25,7 +25,7 @@ UTest(add) {
 }
 
 UTest(remove) {
-    Queue<int> queue;
+    hh::comm::Queue<int> queue;
     int i;
 
     // test remove the beginning and the end
@@ -69,7 +69,7 @@ UTest(remove) {
 }
 
 UTest(remove_and_clear) {
-    Queue<int> queue;
+    hh::comm::Queue<int> queue;
 
     for (int i = 0; i < 10; ++i) queue.add(i);
     uassert_equal(queue.size(), (size_t)10);
@@ -93,11 +93,11 @@ UTest(remove_and_clear) {
 }
 
 UTest(copy_method) {
-    Queue<int> original;
+    hh::comm::Queue<int> original;
     for (int i = 0; i < 5; ++i) original.add(i);
 
     // Test the custom copy method
-    Queue<int> copied = original.copy();
+    hh::comm::Queue<int> copied = original.copy();
     uassert_equal(copied.size(), (size_t)5);
 
     auto it_orig = original.begin();
@@ -115,29 +115,29 @@ UTest(copy_method) {
 }
 
 UTest(move_semantics) {
-    Queue<int> source;
+    hh::comm::Queue<int> source;
     for (int i = 0; i < 3; ++i) source.add(i);
 
     // Move constructor
-    Queue<int> moved_to(std::move(source));
+    hh::comm::Queue<int> moved_to(std::move(source));
     uassert_equal(moved_to.size(), (size_t)3);
 
     // Move assignment
-    Queue<int> move_assign;
+    hh::comm::Queue<int> move_assign;
     move_assign = std::move(moved_to);
     uassert_equal(move_assign.size(), (size_t)3);
 }
 
 UTest(const_iterator) {
-    Queue<int> queue;
+    hh::comm::Queue<int> queue;
     queue.add(10);
     queue.add(20);
 
-    const Queue<int>& c_queue = queue;
+    const hh::comm::Queue<int>& c_queue = queue;
 
     // Testing const_iterator compilation and basic traversal
     int sum = 0;
-    for (Queue<int>::const_iterator it = c_queue.begin(); it != c_queue.end(); ++it) {
+    for (hh::comm::Queue<int>::const_iterator it = c_queue.begin(); it != c_queue.end(); ++it) {
         sum += *it;
     }
     uassert_equal(sum, 30);
