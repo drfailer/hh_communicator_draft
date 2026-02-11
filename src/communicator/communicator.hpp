@@ -417,6 +417,8 @@ private:
   void processSendQueue() {
     std::lock_guard<std::mutex> queuesLock(this->sendQueueMutex_);
 
+    this->stats_.maxSendQueueSize = std::max(this->stats_.maxSendQueueSize, this->sendQueue_.size());
+
     // TODO: if we remove elements one by one, it would be better to pop back,
     //       but this would alter the send order...
     for (auto it = this->sendQueue_.begin(); it != this->sendQueue_.end();) {
