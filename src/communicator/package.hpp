@@ -169,7 +169,6 @@ template <typename TM>
 struct PackageWarehouse {
   std::map<StorageId, StorageSlot<TM>> sendStorage; ///< Send queue.
   std::map<StorageId, StorageSlot<TM>> recvStorage; ///< Recv queue.
-  std::mutex                           mutex;       ///< Mutex for thread safety.
 };
 
 } // end namespace comm

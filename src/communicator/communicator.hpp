@@ -388,9 +388,7 @@ private:
     auto [storageId, storage] = createSendStorage(dests, data, useAddResult);
     Header header(this->rank(), 0, storageId.typeId, this->channel_, 0);
 
-    this->wh_.mutex.lock();
     this->wh_.sendStorage.insert({storageId, storage});
-    this->wh_.mutex.unlock();
 
     for (auto dest : dests) {
       if (dest == this->rank()) {
@@ -444,7 +442,6 @@ private:
       processSendQueue();
       for (auto it = this->sendOps_.begin(); it != this->sendOps_.end();) {
         if (this->service_->requestCompleted(it->request)) {
-          std::lock_guard<std::mutex> whLock(this->wh_.mutex);
           assert(this->wh_.sendStorage.contains(it->storageId));
           StorageSlot<TM> &storage = this->wh_.sendStorage.at(it->storageId);
           ++storage.bufferCount;
@@ -547,7 +544,6 @@ private:
 
     for (auto it = this->recvOps_.begin(); it != this->recvOps_.end();) {
       if (this->service_->requestCompleted(it->request)) {
-        std::lock_guard<std::mutex> whLock(this->wh_.mutex);
         assert(this->wh_.recvStorage.contains(it->storageId));
         auto &storage = this->wh_.recvStorage.at(it->storageId);
         ++storage.bufferCount;
@@ -605,8 +601,7 @@ private:
   /// @param header Header of the request fetched by the probe.
   /// @return True if the reception has started.
   bool recvData(Header header, int hint = -1) {
-    std::lock_guard<std::mutex> whLock(this->wh_.mutex);
-    StorageId                   storageId(header.source, header.typeId);
+    StorageId storageId(header.source, header.typeId);
 
     if (!createRecvStorage(storageId)) {
       return false;
