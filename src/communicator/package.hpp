@@ -140,6 +140,9 @@ struct PackageWarehouse {
   Queue<StorageSlot<TM>> recvStorage; ///< Recv queue.
 };
 
+/// @brief Type alias for the storage id.
+using StorageId = size_t;
+
 } // end namespace comm
 
 } // end namespace hh

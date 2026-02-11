@@ -356,7 +356,7 @@ private:
   struct CommOperation {
     buffer_id_t  bufferId;  ///< Id of the buffer (buffers are sent/received separately).
     Request      request;   ///< Request.
-    size_t       storageId; ///< Id of the storage.
+    StorageId    storageId; ///< Id of the storage.
     int          hint;      ///< Hint tracker pointer.
   };
 
@@ -387,7 +387,7 @@ private:
   void processSendRequest(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
     StorageSlot<TM> storage = createSendStorage(dests, data);
     Header          header(this->rank(), 0, storage.typeId, this->channel_, 0);
-    size_t          storageId = this->wh_.sendStorage.add(storage);
+    StorageId       storageId = this->wh_.sendStorage.add(storage);
 
     for (auto dest : dests) {
       if (dest == this->rank()) {
@@ -615,7 +615,6 @@ private:
   }
 
   /// @brief Process the data after the reception is completed.
-  /// @param storageId Id of the storage slot in the warehouse.
   /// @param storage   Storage slot.
   /// @param addResult Function that allow transferring the data to rest of the
   ///                  graph (calls `task->addResult`).
@@ -641,9 +640,9 @@ private:
   ///        the warehouse.
   /// @return True and the storage id if the storage slot was created, false
   ///         and 0 otherwise.
-  std::pair<size_t, bool> createRecvStorage(Header const &header) {
+  std::pair<StorageId, bool> createRecvStorage(Header const &header) {
     bool status = true;
-    size_t storageId = 0;
+    StorageId storageId = 0;
 
     assert(header.typeId < TM::size);
     TM::apply(header.typeId, [&]<typename T>() {
