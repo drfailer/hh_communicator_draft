@@ -59,23 +59,23 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         // HINTS ///////////////////////////////////////////////////////////////
 
         // // recv count
-        // distributeTask->template addHint<MatrixTile<MT, MatrixId::A>>(hh::comm::hint::recvCountFrom(0, 400));
-        // distributeTask->template addHint<MatrixTile<MT, MatrixId::B>>(hh::comm::hint::recvCountFrom(0, 100));
-        // distributeTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(0, 100));
+        // distributeTask->addHint<MatrixTile<MT, MatrixId::A>>(hh::comm::hint::recvCountFrom(0, 400));
+        // distributeTask->addHint<MatrixTile<MT, MatrixId::B>>(hh::comm::hint::recvCountFrom(0, 100));
+        // distributeTask->addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(0, 100));
         // if (service->rank() == 0) {
-        //     gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(1, 100));
-        //     gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(2, 100));
-        //     gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(3, 100));
+        //     gatherTask->addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(1, 100));
+        //     gatherTask->addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(2, 100));
+        //     gatherTask->addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(3, 100));
         // }
 
         // continuous recv
-        distributeTask->template addHint<MatrixTile<MT, MatrixId::A>>(hh::comm::hint::continuousRecvFrom(0, 6));
-        distributeTask->template addHint<MatrixTile<MT, MatrixId::B>>(hh::comm::hint::continuousRecvFrom(0, 2));
-        distributeTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::continuousRecvFrom(0, 2));
+        distributeTask->addHint<MatrixTile<MT, MatrixId::A>>(hh::comm::hint::continuousRecvFrom(0, 6));
+        distributeTask->addHint<MatrixTile<MT, MatrixId::B>>(hh::comm::hint::continuousRecvFrom(0, 2));
+        distributeTask->addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::continuousRecvFrom(0, 2));
         if (service->rank() == 0) {
-            gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::continuousRecvFrom(1, 1));
-            gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::continuousRecvFrom(2, 1));
-            gatherTask->template addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::continuousRecvFrom(3, 1));
+            gatherTask->addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::continuousRecvFrom(1, 1));
+            gatherTask->addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::continuousRecvFrom(2, 1));
+            gatherTask->addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::continuousRecvFrom(3, 1));
         }
 
         distributeTask->sendThreshold(100);

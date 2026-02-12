@@ -17,8 +17,8 @@ auto ct = std::make_shared<hh::comm::CommunicatorTask<Data1, Data2>>(&service, "
 
 // create a memory manager (use the memory pool)
 auto mm = std::make_shared<hh::comm::tool::MemoryPool<Data1, Data2>>();
-mm->template fill<Data1>(100);
-mm->template fill<Data2>(100);
+mm->fill<Data1>(100);
+mm->fill<Data2>(100);
 ct->setMemoryManager(mm); // set the memory manager
 
 // set the send strategies for each type
@@ -38,11 +38,11 @@ gatherTask->strategy<Data2>(hh::comm::strategy::SendTo(1, 2));
 
 // the communicator will pre-comminit 10 receive requests for the Data1 and the
 // rank 0 (source)
-ct->template addHint<Data1>(hh::comm::hint::RecvCountFrom(0, 10));
+ct->addHint<Data1>(hh::comm::hint::RecvCountFrom(0, 10));
 
 // the communicator will make sure that there are always 2 pre-committed
 // receive requests in the queue for the Data2 and the rank 1 (source).
-ct->template addHint<Data2>(hh::comm::hint::continuousRecvFrom(1, 2));
+ct->addHint<Data2>(hh::comm::hint::continuousRecvFrom(1, 2));
 
 // send threshold (optional): do not send more that 100 packages at a time.
 ct->sendThreshold(100);

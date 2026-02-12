@@ -177,9 +177,9 @@ private:
 ///
 /// @code
 /// hh::comm::tool::MemoryPool<char, int, double> pool;
-/// pool.template fill<char>(10);
-/// pool.template fill<int>(10, 42); // with constructor argument
-/// pool.template fill<double>(10);
+/// pool.fill<char>(10);
+/// pool.fill<int>(10, 42); // with constructor argument
+/// pool.fill<double>(10);
 ///
 /// auto comm = hh::comm::CommunicatorTask<char, int, double>(commService);
 /// comm->setMemoryManager(pool);

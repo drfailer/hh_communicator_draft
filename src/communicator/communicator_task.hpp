@@ -104,8 +104,8 @@ struct CommunicatorMultiSend : CommunicatorSend<TaskType, Inputs>... {
 ///
 /// // create a memory manager (use the memory pool)
 /// auto mm = std::make_shared<hh::comm::tool::MemoryPool<Data1, Data2>>();
-/// mm->template fill<Data1>(100);
-/// mm->template fill<Data2>(100);
+/// mm->fill<Data1>(100);
+/// mm->fill<Data2>(100);
 ///
 /// // create and setup the communicator
 /// auto ct = std::make_shared<hh::comm::CommunicatorTask<Data1, Data2>>(&service, "example");

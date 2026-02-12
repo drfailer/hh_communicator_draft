@@ -67,7 +67,7 @@ struct TestGraph1 : hh::Graph<1, int, int> {
 
     // hints
     if (service->rank() == 1) {
-        b01->template addHint<int>(hh::comm::hint::Hint{
+        b01->addHint<int>(hh::comm::hint::Hint{
             .type = hh::comm::hint::HintType::RecvCountFrom,
             .data = {
                 .recvCountFrom = { .source = 0, .count = 1 },
@@ -108,7 +108,7 @@ int main(int argc, char **argv) {
 
   graph.executeGraph(true);
   if (service->rank() == 0) {
-      auto data = mm->template allocate<int>();
+      auto data = mm->allocate<int>();
       *data = 4;
       graph.pushData(data);
   }
@@ -119,7 +119,7 @@ int main(int argc, char **argv) {
     while (auto result = graph.getBlockingResult()) {
       auto resultPtr = std::get<std::shared_ptr<int>>(*result);
       results.push_back(*resultPtr);
-      mm->template release<int>(std::move(resultPtr));
+      mm->release<int>(std::move(resultPtr));
     }
   }
 
