@@ -31,9 +31,9 @@ struct TestGraph1 : hh::Graph<1, int, int> {
     auto bn0 = std::make_shared<hh::CommunicatorTask<int>>(service);
     auto out = std::make_shared<hh::LambdaTask<1, int, int>>("output", 1);
 
-    b01->template strategy<int>(hh::comm::strategy::SendTo<int>(1));
-    b02->template strategy<int>(hh::comm::strategy::SendTo<int>(2));
-    bn0->template strategy<int>(hh::comm::strategy::SendTo<int>(0));
+    b01->strategy<int>(hh::comm::strategy::SendTo(1));
+    b02->strategy<int>(hh::comm::strategy::SendTo(2));
+    bn0->strategy<int>(hh::comm::strategy::SendTo(0));
 
     // FIXME: the data returns to the memory pool too early
     b01->setMemoryManager(mm);

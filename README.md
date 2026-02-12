@@ -26,13 +26,13 @@ ct->setMemoryManager(mm); // set the memory manager
 // the send strategy is a function that returns a list of destination
 // ranks, we can use a lambda to compute the destination depending on the
 // input data
-gatherTask->strategy([&](std::shared_ptr<Data1> data) {
+gatherTask->strategy<Data1>([&](auto data) {
     hh::comm::rank_t rank = service.rank();
     size_t           nbProcesses = service.nbProcesses();
     return std::vector<hh::comm::rank_t>({(rank + 1) % nbProcesses});
 });
 // or use some of the generic strategies provided by the library (send to rank 1 and 2)
-gatherTask->strategy(hh::comm::strategy::SendTo<Data2>(1, 2));
+gatherTask->strategy<Data2>(hh::comm::strategy::SendTo(1, 2));
 
 // hints (optional)
 

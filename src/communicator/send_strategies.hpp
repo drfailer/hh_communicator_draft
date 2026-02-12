@@ -26,13 +26,13 @@ namespace comm {
 /// // the send strategy is a function that returns a list of destination
 /// // ranks, we can use a lambda to compute the destination depending on the
 /// // input data
-/// gatherTask->strategy([&](std::shared_ptr<Data1> data) {
+/// gatherTask->strategy<Data1>([&](auto data) {
 ///     hh::comm::rank_t rank = service.rank();
 ///     size_t           nbProcesses = service.nbProcesses();
 ///     return std::vector<hh::comm::rank_t>({(rank + 1) % nbProcesses});
 /// });
 /// // or use some of the generic strategies provided by the library
-/// gatherTask->strategy(hh::comm::strategy::SendTo<Data2>(1, 2));
+/// gatherTask->strategy<Data2>(hh::comm::strategy::SendTo(1, 2));
 /// @endcode
 ///
 /// @tparam T Type of the data that needs to be sent.
@@ -44,7 +44,6 @@ namespace strategy {
 
 /// @brief Send the data to specific destination.
 /// @tparam Type of the data.
-template <typename T>
 struct SendTo {
   std::vector<rank_t> dests; ///< Vector of destinations .
 
@@ -67,14 +66,12 @@ struct SendTo {
   /// @brief Function that returns the destination vector.
   /// @param data Unused.
   /// @result Destination ranks.
-  std::vector<rank_t> operator()(std::shared_ptr<T>) {
+  std::vector<rank_t> operator()(auto) {
     return dests;
   }
 };
 
 /// @brief Scatter strategy (distributes evenly the data between the given destinations).
-/// @tparam T Type of the data to scatter.
-template <typename T>
 struct Scatter {
   std::vector<rank_t> dests;          ///< vector of destination
   size_t              processIdx = 0; ///< index used to distributes the data.
@@ -101,7 +98,7 @@ struct Scatter {
   /// @brief Functions that returns the destination rank.
   /// @param data Unused.
   /// @return Vector containing the rank of the destination.
-  std::vector<rank_t> operator()(std::shared_ptr<T>) {
+  std::vector<rank_t> operator()(auto) {
     rank_t idx = processIdx;
     processIdx = (processIdx + 1) % dests.size();
     return std::vector<rank_t>({dests[idx]});
@@ -109,8 +106,6 @@ struct Scatter {
 };
 
 /// @brief Gather strategy.
-/// @tparam T Type of the data to gather.
-template <typename T>
 struct Gather {
   rank_t base; ///< Rank of the process that gathers the data.
 
@@ -122,7 +117,7 @@ struct Gather {
   /// @brief Function that returns the vector of destination rank.
   /// @param data Unused
   /// @return Vector containing the base rank.
-  std::vector<rank_t> operator()(std::shared_ptr<T>) {
+  std::vector<rank_t> operator()(auto) {
     return std::vector<rank_t>({base});
   }
 };

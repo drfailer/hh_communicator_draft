@@ -33,10 +33,10 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         openblas_set_num_threads(1);
 
         mm = std::make_shared<MMType>();
-        mm->template fill<MatrixTile<MT, MatrixId::A>>(TM * TK, tileSize);
-        mm->template fill<MatrixTile<MT, MatrixId::B>>(TK * TN, tileSize);
-        mm->template fill<MatrixTile<MT, MatrixId::C>>(TM * TN, tileSize);
-        mm->template fill<MatrixTile<MT, MatrixId::P>>(poolSize, tileSize);
+        mm->fill<MatrixTile<MT, MatrixId::A>>(TM * TK, tileSize);
+        mm->fill<MatrixTile<MT, MatrixId::B>>(TK * TN, tileSize);
+        mm->fill<MatrixTile<MT, MatrixId::C>>(TM * TN, tileSize);
+        mm->fill<MatrixTile<MT, MatrixId::P>>(poolSize, tileSize);
 
         auto splitTask = std::make_shared<SplitTask>(tileSize, mm, SPLIT_TASK_THREADS);
         auto distributeTask
@@ -82,7 +82,7 @@ struct MMGraph : hh::Graph<MMGraphIO> {
 
         ////////////////////////////////////////////////////////////////////////
 
-        distributeTask->template strategy<MatrixTile<MT, MatrixId::A>>([NB_PROCESSES, TN](auto tile) {
+        distributeTask->strategy<MatrixTile<MT, MatrixId::A>>([NB_PROCESSES, TN](auto tile) {
             std::vector<hh::comm::rank_t> dests = {(hh::comm::rank_t)(tile->rowIdx * TN % NB_PROCESSES)};
             for (size_t colIdx = 1; colIdx < TN; ++colIdx) {
                 hh::comm::rank_t rank = (colIdx + tile->rowIdx * TN) % NB_PROCESSES;
@@ -94,7 +94,7 @@ struct MMGraph : hh::Graph<MMGraphIO> {
             logh::infog(logh::IG::DestDB, "DestCB", "A[", tile->rowIdx, ",", tile->colIdx, "] => ", dests);
             return dests;
         });
-        distributeTask->template strategy<MatrixTile<MT, MatrixId::B>>([NB_PROCESSES, TM, TN](auto tile) {
+        distributeTask->strategy<MatrixTile<MT, MatrixId::B>>([NB_PROCESSES, TM, TN](auto tile) {
             std::vector<hh::comm::rank_t> dests = {(hh::comm::rank_t)(tile->colIdx % NB_PROCESSES)};
             for (size_t rowIdx = 1; rowIdx < TM; ++rowIdx) {
                 hh::comm::rank_t rank = (tile->colIdx + rowIdx * TN) % NB_PROCESSES;
@@ -106,7 +106,7 @@ struct MMGraph : hh::Graph<MMGraphIO> {
             logh::infog(logh::IG::DestDB, "DestCB", "B[", tile->rowIdx, ",", tile->colIdx, "] => ", dests);
             return dests;
         });
-        distributeTask->template strategy<MatrixTile<MT, MatrixId::C>>([NB_PROCESSES, TN](auto tile) {
+        distributeTask->strategy<MatrixTile<MT, MatrixId::C>>([NB_PROCESSES, TN](auto tile) {
             size_t                        idx = tile->colIdx + tile->rowIdx * TN;
             std::vector<hh::comm::rank_t> dests = {(hh::comm::rank_t)(idx % NB_PROCESSES)};
             logh::infog(logh::IG::DestDB, "DestCB", "C[", tile->rowIdx, ",", tile->colIdx, "] => ", dests);
@@ -114,8 +114,7 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         });
         distributeTask->setMemoryManager(mm);
 
-        gatherTask->template strategy<MatrixTile<MT, MatrixId::C>>(
-            hh::comm::strategy::Gather<MatrixTile<MT, MatrixId::C>>(0));
+        gatherTask->strategy<MatrixTile<MT, MatrixId::C>>(hh::comm::strategy::Gather(0));
         gatherTask->setMemoryManager(mm);
 
         this->inputs(splitTask);
