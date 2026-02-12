@@ -12,7 +12,7 @@ CXXFLAGS=\
   		 $(shell pkg-config /usr/lib/x86_64-linux-gnu/openmpi/lib/pkgconfig/ompi-c.pc --cflags) -DOMPI_SKIP_MPICXX \
 		 -Wall -Wextra -Wuninitialized -Wconversion \
 		 -MMD \
-		 -fdiagnostics-color=auto
+		 -fdiagnostics-color=auto # -DHH_COMM_LOG_INFO -DHH_COMM_LOG_WARN
 LDFLAGS=\
 		-L$(HOME)/Programming/usr/lib/ \
 		$(shell pkg-config /usr/lib/x86_64-linux-gnu/openmpi/lib/pkgconfig/ompi-c.pc --libs) -DOMPI_SKIP_MPICXX \

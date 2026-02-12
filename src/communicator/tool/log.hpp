@@ -5,28 +5,40 @@
 #include <sstream>
 #include <source_location>
 
-/// TODO: make the log level configurable
-
+/// @brief Hedgehog namespace
 namespace hh {
-
+/// @brief Communicator namespace
 namespace comm {
-
+/// @brief Tools namespace
 namespace log {
 
-void info(auto ...args) {
+/// @brief Print a log message (info level).
+/// Requires defining HH_COMM_LOG_INFO.
+/// @param args Elements to print.
+void info([[maybe_unused]] auto ...args) {
+#ifdef HH_COMM_LOG_INFO
     std::ostringstream oss;
-    oss << "HH  INFO  ";
+    oss << "HH  INFO   ";
     (oss << ... << args);
     printf("%s\n", oss.str().c_str());
+#endif
 }
 
-void warn(auto ...args) {
+/// @brief Print a log message (warning level).
+/// Requires defining HH_COMM_LOG_WARN.
+/// @param args Elements to print.
+void warn([[maybe_unused]] auto ...args) {
+#ifdef HH_COMM_LOG_WARN
     std::ostringstream oss;
-    oss << "HH  WARN  ";
+    oss << "HH  WARN   ";
     (oss << ... << args);
     fprintf(stderr, "%s\n", oss.str().c_str());
+#endif
 }
 
+/// @brief Print an error log.
+/// Always printed.
+/// @param args Elements to print.
 void error(auto ...args) {
     std::ostringstream oss;
     oss << "HH  ERROR  ";
