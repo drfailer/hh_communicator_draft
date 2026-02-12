@@ -1,6 +1,7 @@
 #ifndef COMMUNICATOR_COMMUNICATOR
 #define COMMUNICATOR_COMMUNICATOR
 #include "tool/log.hpp"
+#include "tool/queue.hpp"
 #include "package.hpp"
 #include "hints.hpp"
 #include "service/comm_service.hpp"
@@ -113,7 +114,7 @@ public:
   template <typename T>
   void sendData(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
     std::lock_guard<std::mutex> queuesLock(this->sendQueueMutex_);
-    this->sendQueue_.push_back(SendRequest{
+    this->sendQueue_.add(SendRequest{
         .dests = dests,
         .data = data,
         .typeId = TM::template idOf<T>(),
@@ -363,7 +364,7 @@ private:
   ///        hinted requests).
   /// @param queue Queue to test.
   /// @return True if the queue has non hinted pending operations, false otherwise.
-  bool queueHasPendingOperations(std::vector<CommOperation> const &queue) const {
+  bool queueHasPendingOperations(Queue<CommOperation> const &queue) const {
     bool result = false;
 
     for (auto op : queue) {
@@ -384,11 +385,9 @@ private:
   /// @param data  Data to send.
   template <typename T>
   void processSendRequest(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
-    bool useAddResult = std::find(dests.begin(), dests.end(), this->rank()) != dests.end();
-    auto [storageId, storage] = createSendStorage(dests, data, useAddResult);
-    Header header(this->rank(), 0, storageId.typeId, this->channel_, 0);
-
-    this->wh_.sendStorage.insert({storageId, storage});
+    StorageSlot<TM> storage = createSendStorage(dests, data);
+    Header          header(this->rank(), 0, storage.typeId, this->channel_, 0);
+    StorageId       storageId = this->wh_.sendStorage.add(storage);
 
     for (auto dest : dests) {
       if (dest == this->rank()) {
@@ -397,7 +396,7 @@ private:
       this->packagesCount_[dest] += 1;
       for (size_t i = 0; i < storage.package.data.size(); ++i) {
         header.bufferId = (buffer_id_t)i;
-        this->sendOps_.push_back(CommOperation{
+        this->sendOps_.add(CommOperation{
             .bufferId = header.bufferId,
             .request = this->service_->sendAsync(header, dest, storage.package.data[i]),
             .storageId = storageId,
@@ -416,9 +415,6 @@ private:
     std::lock_guard<std::mutex> queuesLock(this->sendQueueMutex_);
 
     this->stats_.maxSendQueueSize = std::max(this->stats_.maxSendQueueSize, this->sendQueue_.size());
-
-    // TODO: if we remove elements one by one, it would be better to pop back,
-    //       but this would alter the send order...
     for (auto it = this->sendQueue_.begin(); it != this->sendQueue_.end();) {
       if (this->sendThreshold_ > 0 && this->sendOps_.size() >= this->sendThreshold_) {
         break;
@@ -426,7 +422,7 @@ private:
       TM::apply(it->typeId, [&]<typename T>() {
         processSendRequest(it->dests, std::get<std::shared_ptr<T>>(it->data));
       });
-      it = this->sendQueue_.erase(it);
+      it = this->sendQueue_.remove(it);
     }
   }
 
@@ -442,16 +438,15 @@ private:
       processSendQueue();
       for (auto it = this->sendOps_.begin(); it != this->sendOps_.end();) {
         if (this->service_->requestCompleted(it->request)) {
-          assert(this->wh_.sendStorage.contains(it->storageId));
           StorageSlot<TM> &storage = this->wh_.sendStorage.at(it->storageId);
           ++storage.bufferCount;
 
           if (storage.bufferCount == storage.ttlBufferCount) {
-            postSend(it->storageId, storage, addResult);
-            this->wh_.sendStorage.erase(it->storageId);
+            postSend(storage, addResult);
+            this->wh_.sendStorage.remove(it->storageId);
           }
           this->service_->requestRelease(it->request);
-          it = this->sendOps_.erase(it);
+          it = this->sendOps_.remove(it);
         } else {
           it++;
         }
@@ -460,13 +455,12 @@ private:
   }
 
   /// @brief Process the data after it is sent.
-  /// @param storageId Id of the storage in which the sent data is stored.
   /// @param storage   Package Storage in which the data is stored.
   /// @param addResult Function that allow transferring the data to the rest of
   ///                  the graph (if `addResult` is required, it is done here).
-  void postSend(StorageId const &storageId, StorageSlot<TM> const &storage, auto addResult) {
-    assert(storageId.typeId < TM::size);
-    TM::apply(storageId.typeId, [&]<typename T>() {
+  void postSend(StorageSlot<TM> const &storage, auto addResult) {
+    assert(storage.typeId < TM::size);
+    TM::apply(storage.typeId, [&]<typename T>() {
       std::shared_ptr<T> data = std::get<std::shared_ptr<T>>(storage.data);
       if constexpr (requires { data->postSend(); }) {
         data->postSend();
@@ -486,9 +480,9 @@ private:
   /// @param useAddResult Flag that will be used in  `postSend` to know if
   ///                     `addResult` should be used.
   template <typename T>
-  std::pair<StorageId, StorageSlot<TM>> createSendStorage(std::vector<rank_t> const &dests, std::shared_ptr<T> data,
-                                                             bool useAddResult) {
-    size_t       nbDests = useAddResult ? dests.size() - 1 : dests.size();
+  StorageSlot<TM> createSendStorage(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
+    bool   useAddResult = std::find(dests.begin(), dests.end(), this->rank()) != dests.end();
+    size_t nbDests = useAddResult ? dests.size() - 1 : dests.size();
 
     // measure data packing time
     time_t  tpackingStart = std::chrono::system_clock::now();
@@ -498,19 +492,19 @@ private:
 
     // create the storage slot
     StorageSlot<TM> storage = {
+        .source = this->rank(),
         .package = package,
         .bufferCount = 0,
         .ttlBufferCount = package.data.size() * nbDests,
         .data = data,
+        .typeId = TM::template idOf<T>(),
         .useAddResult = useAddResult,
         .dbgBufferReceived = {false, false, false, false},
     };
-    StorageId storageId(this->rank(), TM::template idOf<T>());
-
-    this->stats_.registerSendTimings(storageId, dests,
+    this->stats_.registerSendTimings(storage.typeId, dests,
                                      std::chrono::duration_cast<std::chrono::nanoseconds>(tpackingEnd - tpackingStart),
                                      package.size());
-    return {storageId, storage};
+    return storage;
   }
 
   /******************************************************************************/
@@ -528,7 +522,7 @@ private:
 
     for (auto it = this->createDataOps_.begin(); it != this->createDataOps_.end();) {
       if (recvData(*it)) {
-        it = this->createDataOps_.erase(it);
+        it = this->createDataOps_.remove(it);
       } else {
         it++;
       }
@@ -544,19 +538,18 @@ private:
 
     for (auto it = this->recvOps_.begin(); it != this->recvOps_.end();) {
       if (this->service_->requestCompleted(it->request)) {
-        assert(this->wh_.recvStorage.contains(it->storageId));
-        auto &storage = this->wh_.recvStorage.at(it->storageId);
+        StorageSlot<TM> &storage = this->wh_.recvStorage.at(it->storageId);
         ++storage.bufferCount;
 
         if (storage.bufferCount == storage.ttlBufferCount) {
-          postRecv(it->storageId, storage, addResult);
+          postRecv(storage, addResult);
           if (it->hint != -1) {
             hintRequestCompleted(it->hint);
           }
-          this->wh_.recvStorage.erase(it->storageId);
+          this->wh_.recvStorage.remove(it->storageId);
         }
         this->service_->requestRelease(it->request);
-        it = this->recvOps_.erase(it);
+        it = this->recvOps_.remove(it);
       } else {
         it++;
       }
@@ -582,7 +575,7 @@ private:
 
       if (header.signal == 0) {
         this->stats_.probeRequestCount += 1;
-        this->createDataOps_.push_back(header);
+        this->createDataOps_.add(header);
         signal = Signal::Data;
         this->service_->requestRelease(request);
       } else {
@@ -601,17 +594,17 @@ private:
   /// @param header Header of the request fetched by the probe.
   /// @return True if the reception has started.
   bool recvData(Header header, int hint = -1) {
-    StorageId storageId(header.source, header.typeId);
+    auto [storageId, ok] = createRecvStorage(header);
 
-    if (!createRecvStorage(storageId)) {
+    if (!ok) {
       return false;
     }
 
-    auto &storage = this->wh_.recvStorage.at(storageId);
+    StorageSlot<TM> &storage = this->wh_.recvStorage.at(storageId);
     for (header.bufferId = 0; header.bufferId < storage.package.data.size(); ++header.bufferId) {
       assert(storage.dbgBufferReceived[header.bufferId] == false);
       storage.dbgBufferReceived[header.bufferId] = true;
-      this->recvOps_.push_back(CommOperation{
+      this->recvOps_.add(CommOperation{
           .bufferId = header.bufferId,
           .request = this->service_->recvAsync(header, storage.package.data[header.bufferId]),
           .storageId = storageId,
@@ -622,36 +615,37 @@ private:
   }
 
   /// @brief Process the data after the reception is completed.
-  /// @param storageId Id of the storage slot in the warehouse.
   /// @param storage   Storage slot.
   /// @param addResult Function that allow transferring the data to rest of the
   ///                  graph (calls `task->addResult`).
-  void postRecv(StorageId const &storageId, StorageSlot<TM> &storage, auto addResult) {
-    assert(storageId.typeId < TM::size);
-    TM::apply(storageId.typeId, [&]<typename T>() {
+  void postRecv(StorageSlot<TM> &storage, auto addResult) {
+    assert(storage.typeId < TM::size);
+    TM::apply(storage.typeId, [&]<typename T>() {
       time_t tunpackingStart, tunpackingEnd;
       auto data = std::get<std::shared_ptr<T>>(storage.data);
       tunpackingStart = std::chrono::system_clock::now();
       unpack(std::move(storage.package), data);
       tunpackingEnd = std::chrono::system_clock::now();
       this->stats_.registerRecvTimings(
-              storageId, std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart),
+              storage.typeId, storage.source,
+              std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart),
               storage.package.size());
       addResult(data);
     });
-    ++this->connections_[storageId.source].recvCount;
+    ++this->connections_[storage.source].recvCount;
   }
 
   /// @brief Try to allocated a new data using the memory manager. If the
   ///        memory manager returns a valid data, creates a new storage slot in
   ///        the warehouse.
-  /// @param storageId Id for the new storage slot.
-  /// @return True if the storage slot was created, false otherwise.
-  bool createRecvStorage(StorageId storageId) {
+  /// @return True and the storage id if the storage slot was created, false
+  ///         and 0 otherwise.
+  std::pair<StorageId, bool> createRecvStorage(Header const &header) {
     bool status = true;
+    StorageId storageId = 0;
 
-    assert(storageId.typeId < TM::size);
-    TM::apply(storageId.typeId, [&]<typename T>() {
+    assert(header.typeId < TM::size);
+    TM::apply(header.typeId, [&]<typename T>() {
       auto data = this->mm_->template allocate<T>();
 
       if (data == nullptr) {
@@ -660,16 +654,18 @@ private:
       }
       auto               package = packageMem(data);
       StorageSlot<TM> storage{
+          .source = header.source,
           .package = package,
           .bufferCount = 0,
           .ttlBufferCount = package.data.size(),
           .data = data,
+          .typeId = header.typeId,
           .useAddResult = false,
           .dbgBufferReceived = {false, false, false, false},
       };
-      this->wh_.recvStorage.insert({storageId, storage});
+      storageId = this->wh_.recvStorage.add(storage);
     });
-    return status;
+    return {storageId, status};
   }
 
   /// @brief Cancel the remaining received requests and clear the queue.
@@ -695,12 +691,9 @@ private:
     if (!this->wh_.recvStorage.empty()) {
       log::info("[", rank(), "][", channel(), "] Removing ", this->wh_.recvStorage.size(), " from storage.");
     }
-    for (auto it : this->wh_.recvStorage) {
-      auto storageId = it.first;
-      auto storage = it.second;
-      assert(storageId.typeId < TM::size);
-
-      TM::apply(storageId.typeId, [&]<typename T>() {
+    for (auto storage : this->wh_.recvStorage) {
+      assert(storage.typeId < TM::size);
+      TM::apply(storage.typeId, [&]<typename T>() {
         auto data = std::get<std::shared_ptr<T>>(storage.data);
         this->mm_->release(std::move(data));
       });
@@ -864,10 +857,10 @@ private:
 
   // queues
   std::mutex                 sendQueueMutex_; ///< mutex for the send queue.
-  std::vector<SendRequest>   sendQueue_;      ///< Queue used to limit the number of send operations.
-  std::vector<CommOperation> sendOps_;        ///< Queue of send operations.
-  std::vector<Header>        createDataOps_;  ///< Queue of create data operation (wait for available memory).
-  std::vector<CommOperation> recvOps_;        ///< Queue of recv operations.
+  Queue<SendRequest>   sendQueue_;      ///< Queue used to limit the number of send operations.
+  Queue<CommOperation> sendOps_;        ///< Queue of send operations.
+  Queue<Header>        createDataOps_;  ///< Queue of create data operation (wait for available memory).
+  Queue<CommOperation> recvOps_;        ///< Queue of recv operations.
 
   // packages
   PackageWarehouse<TM> wh_; ///< Package warehouse that stores the data during transmission.

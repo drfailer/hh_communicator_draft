@@ -88,7 +88,7 @@ void matmul(std::shared_ptr<Matrix<MT, MatrixId::A>> A, std::shared_ptr<Matrix<M
     }
 }
 
-UTest(mm_result, std::shared_ptr<Matrix<MT, MatrixId::C>> C, std::shared_ptr<Matrix<MT, MatrixId::C>> E) {
+UTestArgs(mm_result, std::shared_ptr<Matrix<MT, MatrixId::C>> C, std::shared_ptr<Matrix<MT, MatrixId::C>> E) {
     for (size_t row = 0; row < C->rows; ++row) {
         for (size_t col = 0; col < C->cols; ++col) {
             MT eval = E->mem[col + row * C->ld];
@@ -169,7 +169,7 @@ int main(int argc, char **argv) {
     std::cout << "test" << graph.mm->extraPrintingInformation("\n") << std::endl;
 
     utest_start();
-    urun_test(mm_result, C, E);
+    urun_test_args(mm_result, C, E);
     utest_end();
 
     return 0;

@@ -280,17 +280,17 @@ struct CommTaskStats {
   }
 
   /// @brief Register the send timings.
-  /// @param storageId   Storage id.
+  /// @param typeId      Type id of the data in the storage.
   /// @param dests       Vector of destinations.
   /// @param packingTime Data packing time.
   /// @param dataSize    Size (in bytes) of the transferred data.
-  void registerSendTimings(StorageId storageId, std::vector<rank_t> dests, delay_t packingTime, size_t dataSize) {
+  void registerSendTimings(type_id_t typeId, std::vector<rank_t> dests, delay_t packingTime, size_t dataSize) {
     if (!enabled) {
       return;
     }
     std::lock_guard<std::mutex> lock(this->mutex);
     for (auto dest : dests) {
-      this->transmissionStats.addSend(storageId.typeId, dest, TransmissionInfo(packingTime, dataSize));
+      this->transmissionStats.addSend(typeId, dest, TransmissionInfo(packingTime, dataSize));
     }
   }
 
@@ -305,15 +305,16 @@ struct CommTaskStats {
   }
 
   /// @brief Register the timings when receiving a package.
-  /// @param StorageId     Storage id.
+  /// @param typeId        Type id of the data in the storage.
+  /// @param source        Package sender.
   /// @param unpackingTime Data unpacking time.
   /// @parma dataSize      Size of the transferred data.
-  void registerRecvTimings(StorageId storageId, delay_t unpackingTime, size_t dataSize) {
+  void registerRecvTimings(type_id_t typeId, rank_t source, delay_t unpackingTime, size_t dataSize) {
     if (!enabled) {
       return;
     }
     std::lock_guard<std::mutex> lock(this->mutex);
-    this->transmissionStats.addRecv(storageId.typeId, storageId.source, TransmissionInfo(unpackingTime, dataSize));
+    this->transmissionStats.addRecv(typeId, source, TransmissionInfo(unpackingTime, dataSize));
   }
 
   /// @brief Update the information about the recv queue.
