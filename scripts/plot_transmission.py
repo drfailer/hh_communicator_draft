@@ -21,7 +21,7 @@ def collect_data(filename):
     Parse the given file and returns a map containing the data:
 
     Return:
-    data[channel][dest][type] = (transmission_start_time, transmission_duration)
+    data[channel][source][dest][type] = (transmission_start_time, transmission_duration)
     """
     data = dict()
 
@@ -30,14 +30,20 @@ def collect_data(filename):
             parts = line.split(';')
             type_name = parts[0]
             channel = int(parts[1])
-            dest = int(parts[2])
-            times = list(map(parse_time, parts[3:]))
+            source = int(parts[2])
+            dest = int(parts[3])
+            times = list(map(parse_time, parts[4:]))
+
+            if len(times) == 0:
+                continue
 
             if not channel in data:
                 data[channel] = dict()
-            if not dest in data[channel]:
-                data[channel][dest] = dict()
-            data[channel][dest][type_name] = times
+            if not source in data[channel]:
+                data[channel][source] = dict()
+            if not dest in data[channel][source]:
+                data[channel][source][dest] = dict()
+            data[channel][source][dest][type_name] = times
 
     return data
 
@@ -76,6 +82,7 @@ def plot_one(data, title, output_file):
     ax[len(data.keys()) - 1, 0].set_xlabel("time (ns)")
     fig.suptitle(title)
     plt.savefig(output_file)
+    plt.close()
 
 
 def plot_all(data, output_path):
@@ -84,10 +91,11 @@ def plot_all(data, output_path):
     resulting figures in the given directory.
     """
     for channel in data:
-        for dest in data[channel]:
-            plot_one(data[channel][dest],
-                     f"transmissions: channel = {channel}, rank = {dest}",
-                     output_path / f"channel_{channel}_dest_{dest}.svg")
+        for source in data[channel]:
+            for dest in data[channel][source]:
+                plot_one(data[channel][source][dest],
+                         f"transmissions: channel = {channel}, source = {source}, dest = {dest}",
+                         output_path / f"channel_{channel}_source_{source}_dest_{dest}.svg")
 
 
 def main():

@@ -545,30 +545,29 @@ struct CommTaskStats {
   ///        using the `plot_transmission.py` script. The result is text for
   ///        now.
   ///
-  /// Format of the file: typename;channel(sender);rank(receiver);(timestamp,duration)...
+  /// Format of the file: typename;channel;sender;receiver;(timestamp,duration)...
   ///
   /// @param stats       List of the statistics of all the processes.
   /// @param channel     Channel id.
   /// @param nbProcesses Number of processes.
   template <typename TM>
   static void generateTransmissionFile(MergedStatsPerType const &stats, channel_t channel, size_t nbProcesses) {
-    std::ofstream file("channel_" + std::to_string(channel) + ".transmission", std::ios_base::app);
+    std::ofstream file("channel_" + std::to_string(channel) + ".transmission");
     char          sep = ';';
 
     for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
-      for (size_t i = 0; i < nbProcesses; ++i) {
-        if (i == channel) {
-          continue;
+      for (size_t sendRank = 0; sendRank < nbProcesses; ++sendRank) {
+        for (size_t recvRank = 0; recvRank < nbProcesses; ++recvRank) {
+          TM::apply(typeId, [&]<typename T>() { file << hh::tool::typeToStr<T>() << sep; });
+          file << channel << sep << sendRank << sep << recvRank;
+          auto const &durations = stats.at(typeId).transmissionDurations[sendRank * nbProcesses + recvRank];
+          auto const &timestamps = stats.at(typeId).transmissionTimestamps[sendRank * nbProcesses + recvRank];
+          assert(durations.size() == timestamps.size());
+          for (size_t i = 0; i < durations.size(); ++i) {
+            file << sep << timestamps[i].count() << ',' << durations[i].count();
+          }
+          file << '\n';
         }
-        TM::apply(typeId, [&]<typename T>() { file << hh::tool::typeToStr<T>() << sep; });
-        file << channel << sep << i;
-        auto const &durations = stats.at(typeId).transmissionDurations[channel * nbProcesses + i];
-        auto const &timestamps = stats.at(typeId).transmissionTimestamps[channel * nbProcesses + i];
-        assert(durations.size() == timestamps.size());
-        for (size_t i = 0; i < durations.size(); ++i) {
-          file << sep << timestamps[i].count() << ',' << durations[i].count();
-        }
-        file << '\n';
       }
     }
   }
