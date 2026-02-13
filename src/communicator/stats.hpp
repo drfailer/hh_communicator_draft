@@ -342,11 +342,11 @@ struct CommTaskStats {
     writeBytes(buf, this->hintedRequestCount);
 
     writeBytes(buf, this->transmissionStats.sendInfos.size());
-    for (auto sendInfo : this->transmissionStats.sendInfos) {
+    for (auto const &sendInfo : this->transmissionStats.sendInfos) {
       writeVectorBytes(buf, sendInfo);
     }
     writeBytes(buf, this->transmissionStats.recvInfos.size());
-    for (auto recvInfo : this->transmissionStats.recvInfos) {
+    for (auto const &recvInfo : this->transmissionStats.recvInfos) {
       writeVectorBytes(buf, recvInfo);
     }
   }
@@ -423,8 +423,8 @@ struct CommTaskStats {
             continue;
           }
           size_t sendRecvIdx = sendRank * nbProcesses + recvRank;
-          auto   sendInfos = stats[sendRank].transmissionStats.sendInfosAt(typeId, recvRank);
-          auto   recvInfos = stats[recvRank].transmissionStats.recvInfosAt(typeId, sendRank);
+          auto  &sendInfos = stats[sendRank].transmissionStats.sendInfosAt(typeId, recvRank);
+          auto  &recvInfos = stats[recvRank].transmissionStats.recvInfosAt(typeId, sendRank);
 
           assert(recvInfos.size() == sendInfos.size());
           for (size_t i = 0; i < sendInfos.size(); ++i) {
@@ -512,10 +512,10 @@ struct CommTaskStats {
     // transmission stats
     auto mergedStats = mergeCommTasksStats(stats, startTime, nbProcesses, TM::size);
     for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
-      auto transmissionDurations = mergedStats.at(typeId).transmissionDurations;
-      auto packingDelay = mergedStats.at(typeId).packingDelay;
-      auto unpackingDelay = mergedStats.at(typeId).unpackingDelay;
-      auto bandWidth = mergedStats.at(typeId).bandWidth;
+      auto &transmissionDurations = mergedStats.at(typeId).transmissionDurations;
+      auto &packingDelay = mergedStats.at(typeId).packingDelay;
+      auto &unpackingDelay = mergedStats.at(typeId).unpackingDelay;
+      auto &bandWidth = mergedStats.at(typeId).bandWidth;
 
       TM::apply(typeId,
                 [&]<typename T>() { infos.append("========== " + hh::tool::typeToStr<T>() + " ==========\n"); });
@@ -562,8 +562,8 @@ struct CommTaskStats {
         }
         TM::apply(typeId, [&]<typename T>() { file << hh::tool::typeToStr<T>() << sep; });
         file << channel << sep << i;
-        auto durations = stats.at(typeId).transmissionDurations[channel * nbProcesses + i];
-        auto timestamps = stats.at(typeId).transmissionTimestamps[channel * nbProcesses + i];
+        auto const &durations = stats.at(typeId).transmissionDurations[channel * nbProcesses + i];
+        auto const &timestamps = stats.at(typeId).transmissionTimestamps[channel * nbProcesses + i];
         assert(durations.size() == timestamps.size());
         for (size_t i = 0; i < durations.size(); ++i) {
           file << sep << timestamps[i].count() << ',' << durations[i].count();

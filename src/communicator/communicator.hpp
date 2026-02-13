@@ -264,7 +264,7 @@ private:
   /// @brief Tests if all disconnection signals are received.
   /// @return True if all senders are disconnect, false otherwise.
   bool allDisconnectionSignalsReceived() const {
-    for (auto connection : this->connections_) {
+    for (auto const &connection : this->connections_) {
       if (connection.connected) {
         return false;
       }
@@ -277,7 +277,7 @@ private:
   /// @return True if all senders are disconnect and all packages are received,
   ///         false otherwise.
   bool isConnectedOrExpectsMorePackages() const {
-    for (auto connection : this->connections_) {
+    for (auto const &connection : this->connections_) {
       if (connection.connected || connection.recvCount < connection.sendCount) {
         return true;
       }
@@ -367,7 +367,7 @@ private:
   bool queueHasPendingOperations(Queue<CommOperation> const &queue) const {
     bool result = false;
 
-    for (auto op : queue) {
+    for (auto const &op : queue) {
       if (op.hint == -1) {
         return true;
       }
@@ -652,7 +652,7 @@ private:
         status = false;
         return;
       }
-      auto               package = packageMem(data);
+      Package         package = packageMem(data);
       StorageSlot<TM> storage{
           .source = header.source,
           .package = package,
@@ -691,7 +691,7 @@ private:
     if (!this->wh_.recvStorage.empty()) {
       log::info("[", rank(), "][", channel(), "] Removing ", this->wh_.recvStorage.size(), " from storage.");
     }
-    for (auto storage : this->wh_.recvStorage) {
+    for (auto &storage : this->wh_.recvStorage) {
       assert(storage.typeId < TM::size);
       TM::apply(storage.typeId, [&]<typename T>() {
         auto data = std::get<std::shared_ptr<T>>(storage.data);
@@ -728,7 +728,7 @@ private:
     for (int hintIdx = 0; hintIdx < (int)this->hints_.size(); ++hintIdx) {
       switch (this->hints_[hintIdx].hint.type) {
       case hint::HintType::RecvCountFrom: {
-        auto hint = this->hints_[hintIdx].hint.data.recvCountFrom;
+        auto &hint = this->hints_[hintIdx].hint.data.recvCountFrom;
         auto typeId = this->hints_[hintIdx].typeId;
         if (hint.source == rank()) {
           continue;
@@ -742,7 +742,7 @@ private:
         }
       } break;
       case hint::HintType::ContinuousRecvFrom: {
-        auto hint = this->hints_[hintIdx].hint.data.continuousRecvFrom;
+        auto &hint = this->hints_[hintIdx].hint.data.continuousRecvFrom;
         auto typeId = this->hints_[hintIdx].typeId;
 
         if (hint.source == rank()) {
@@ -765,7 +765,7 @@ private:
     for (int hintIdx = 0; hintIdx < (int)this->hints_.size(); ++hintIdx) {
       switch (this->hints_[hintIdx].hint.type) {
       case hint::HintType::RecvCountFrom: {
-        auto hint = this->hints_[hintIdx].hint.data.recvCountFrom;
+        auto &hint = this->hints_[hintIdx].hint.data.recvCountFrom;
         auto typeId = this->hints_[hintIdx].typeId;
 
         if (hint.source == rank()) {
@@ -780,7 +780,7 @@ private:
         }
       } break;
       case hint::HintType::ContinuousRecvFrom: {
-        auto hint = this->hints_[hintIdx].hint.data.continuousRecvFrom;
+        auto &hint = this->hints_[hintIdx].hint.data.continuousRecvFrom;
         auto typeId = this->hints_[hintIdx].typeId;
 
         if (hint.source == rank()) {

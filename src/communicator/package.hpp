@@ -27,7 +27,7 @@ struct Package {
   ///         bandwidth in the profiling information).
   size_t size() const {
     size_t result = 0;
-    for (auto buffer : this->data) {
+    for (auto const &buffer : this->data) {
       result += buffer.len;
     }
     return result;
@@ -81,7 +81,7 @@ Package pack(std::shared_ptr<T> data) {
 /// @throws invalid_argument
 /// @return The package memory used to receive the data.
 template <typename T>
-Package packageMem(std::shared_ptr<T> data) {
+Package packageMem(std::shared_ptr<T> data) { // TODO: how to avoid sneaky copies here???
   if constexpr (requires { data->package(); }) {
     return data->package();
   } else if constexpr (std::is_trivially_copyable_v<T>) {
