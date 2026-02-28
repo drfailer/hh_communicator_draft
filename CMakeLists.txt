@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 
+option(BUILD_COMM_MAIN "Compiles main function for testing changes to API" OFF)
+
 include(FetchContent)
 FetchContent_Declare(
     hedgehog
@@ -28,5 +30,7 @@ target_link_libraries(hh_communicator INTERFACE hedgehog::hedgehog MPI::MPI_CXX)
 add_library(hedgehog::comm ALIAS hh_communicator)
 
 # executable
-add_executable(hh_communicator_main src/main.cpp)
-target_link_libraries(hh_communicator_main PUBLIC hedgehog::comm)
+if(BUILD_COMM_MAIN)
+    add_executable(hh_communicator_main src/main.cpp)
+    target_link_libraries(hh_communicator_main PUBLIC hedgehog::comm)
+endif(BUILD_COMM_MAIN)
