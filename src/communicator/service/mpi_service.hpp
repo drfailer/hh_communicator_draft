@@ -27,14 +27,33 @@ public:
   MPIService(int *argc, char ***argv, bool profilingEnabled = false)
       : CommService(profilingEnabled) {
     int32_t provided = 0;
-    // MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided);
-    MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided);
-    MPI_Comm_rank(MPI_COMM_WORLD, &this->rank_);
-    MPI_Comm_size(MPI_COMM_WORLD, &this->nbProcesses_);
+    int32_t isInitialized = false;
+    if(checkMPI(MPI_Initialized(&isInitialized)); !isInitialized) {
+      isInitializer_ = true;
+      checkMPI(MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided));
+    }
+    else {
+      checkMPI(MPI_Query_thread(&provided));
+    }
+
+    if(provided != MPI_THREAD_MULTIPLE and provided != MPI_THREAD_SERIALIZED) {
+      std::unordered_map<int32_t, std::string> threadMap = {
+        {MPI_THREAD_SINGLE, "MPI_THREAD_SINGLE"},
+        {MPI_THREAD_FUNNELED, "MPI_THREAD_FUNNELED"},
+        // {MPI_THREAD_SERIALIZED, "MPI_THREAD_SERIALIZED"},
+        // {MPI_THREAD_MULTIPLE, "MPI_THREAD_MULTIPLE"},
+      };
+      log::error("MPIService requires [MPI_THREAD_MULTIPLE|MPI_THREAD_SERIALIZED] but [", threadMap[provided], "] was provided!");
+      checkMPI(MPI_Abort(MPI_COMM_WORLD, 0));
+    }
+
+    checkMPI(MPI_Comm_rank(MPI_COMM_WORLD, &this->rank_));
+    checkMPI(MPI_Comm_size(MPI_COMM_WORLD, &this->nbProcesses_));
   }
 
   /// @brief MPI Service destructor: calls MPI_Finalize.
-  ~MPIService() {
+  ~MPIService() override {
+    if(!isInitializer_) return;
     MPI_Finalize();
   }
 
@@ -329,6 +348,7 @@ private:
   }
 
 private:
+  bool                    isInitializer_ = false;///< MPI initialized by MPIService?
   int                     rank_ = -1;            ///< MPI rank.
   int                     nbProcesses_ = -1;     ///< MPI comm size.
   RequestPool<MPIRequest> requestPool_ = {};     ///< Request memory pool to optimize request allocations.
