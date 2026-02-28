@@ -1,8 +1,4 @@
-#include "communicator/service/mpi_service.hpp"
-#include "communicator/communicator_task.hpp"
-#include "communicator/send_strategies.hpp"
-#include "communicator/tool/memory_pool.hpp"
-#include "log.hpp"
+#include <hedgehog_comm.h>
 #include <hedgehog.h>
 #include <iostream>
 #include <mutex>
