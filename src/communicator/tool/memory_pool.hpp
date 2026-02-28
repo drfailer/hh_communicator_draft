@@ -2,7 +2,7 @@
 #define COMMUNICATOR_TOOL_MEMORY_POOL
 #include "log.hpp"
 #include "../stats.hpp"
-#include "hedgehog/src/tools/meta_functions.h"
+#include <hedgehog.h>
 #include "memory_manager.hpp"
 #include <cassert>
 #include <chrono>

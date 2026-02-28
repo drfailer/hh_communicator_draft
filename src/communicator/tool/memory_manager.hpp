@@ -5,7 +5,7 @@
 #include <source_location>
 #include <type_traits>
 #include <sstream>
-#include <hedgehog/hedgehog.h>
+#include <hedgehog.h>
 
 /// The memory manager is used to allocated memory on the receiver end of the
 /// communicator. It can also be used freely to control the amount of memory

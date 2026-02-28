@@ -1,6 +1,6 @@
 #ifndef COMMUNICATOR_PROTOCOL
 #define COMMUNICATOR_PROTOCOL
-#include "hedgehog/src/tools/meta_functions.h"
+#include <hedgehog.h>
 #include <memory>
 
 /// @brief Hedgehog namespace

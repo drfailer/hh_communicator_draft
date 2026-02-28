@@ -5,7 +5,7 @@
 #include "communicator_core_task.hpp"
 #include "send_strategies.hpp"
 #include <functional>
-#include <hedgehog/hedgehog.h>
+#include <hedgehog.h>
 
 /// @brief Hedgehog namespace
 namespace hh {

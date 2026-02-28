@@ -3,7 +3,7 @@
 #include "communicator/send_strategies.hpp"
 #include "communicator/tool/memory_pool.hpp"
 #include "log.hpp"
-#include <hedgehog/hedgehog.h>
+#include <hedgehog.h>
 #include <iostream>
 #include <mutex>
 

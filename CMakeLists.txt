@@ -7,10 +7,18 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/lib/hedgehog/cmake_modules")
 
-set(Hedgehog_INCLUDE_DIR lib/hedgehog/)
+#set(Hedgehog_INCLUDE_DIR lib/hedgehog/)
 
 # Need to defined variable Hedgehog_INCLUDE_DIR to the hedgehog path hedgehog
-find_package(Hedgehog REQUIRED)
+include(FetchContent)
+FetchContent_Declare(
+    hedgehog
+    GIT_REPOSITORY https://github.com/usnistgov/hedgehog.git
+    GIT_TAG        master
+    FIND_PACKAGE_ARGS NAMES hedgehog
+)
+FetchContent_MakeAvailable(hedgehog)
+
 find_package(MPI REQUIRED)
 
 set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} ${Hedgehog_CXX_FLAGS})
@@ -20,29 +28,11 @@ if (NOT MSVC)
 	# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Werror -Wuninitialized -Wno-sign-compare -pedantic -O3")
 endif (NOT MSVC)
 
-# files
-set(source_files src/main.cpp)
-
 # executable
-add_executable(hh_communicator ${source_files})
+add_executable(hh_communicator src/main.cpp)
 add_definitions(-DOMPI_SKIP_MPICXX)
-target_include_directories(hh_communicator
-    PUBLIC
-    lib/serializer-cpp/
-    lib/hedgehog/
-    /home/rvc1/Programming/usr/include
-    /home/rvc1/Programming/projects/clh.git/master/
-    /home/rvc1/Programming/projects/tracer-c/tracer/
-    ${MPI_INCLUDE_PATH}
-)
-target_link_directories(hh_communicator
-    PRIVATE
-    /home/rvc1/Programming/projects/clh.git/master/build/lib/
-    /home/rvc1/Programming/projects/tracer-c/build/lib/
-)
 target_link_libraries(hh_communicator
-    PRIVATE
-    clh
-    tracer
-    ${MPI_C_LIBRARIES}
+    PUBLIC
+        hedgehog::hedgehog
+        MPI::MPI_CXX
 )

@@ -3,7 +3,7 @@
 #include "../log.hpp"
 #include "communicator.hpp"
 #include "tool/memory_manager.hpp"
-#include <hedgehog/hedgehog.h>
+#include <hedgehog.h>
 #include "stats.hpp"
 #include <algorithm>
 #include <condition_variable>
