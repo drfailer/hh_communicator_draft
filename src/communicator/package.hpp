@@ -28,7 +28,7 @@ struct Package {
   size_t size() const {
     size_t result = 0;
     for (auto const &buffer : this->data) {
-      result += buffer.len;
+      result += buffer.size();
     }
     return result;
   }

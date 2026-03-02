@@ -581,7 +581,7 @@ private:
       } else {
         comm::Buffer buf{this->signalBufferMem_.data(), this->signalBufferMem_.size()};
         this->service_->recv(request, buf);
-        signal = (Signal)buf.mem[0];
+        signal = (Signal)buf.data()[0];
       }
       assert(header.source < this->nbProcesses());
     } else {
@@ -843,7 +843,7 @@ public:
       Request request = this->service_->probe(this->channel_, i);
       bufSize = (size_t)this->service_->bufferSize(request);
       bufMem.resize(bufSize);
-      this->service_->recv(request, Buffer{.mem = bufMem.data(), .len = bufMem.size()});
+      this->service_->recv(request, Buffer{bufMem.data(), bufMem.size()});
       stats[i].transmissionStats.nbProcesses = this->nbProcesses();
       stats[i].unpack(bufMem);
     }

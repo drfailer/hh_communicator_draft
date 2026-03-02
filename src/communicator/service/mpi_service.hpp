@@ -122,7 +122,7 @@ public: // send ////////////////////////////////////////////////////////////////
     assert(header.typeId == testHeader.typeId);
     assert(header.bufferId == testHeader.bufferId);
 
-    checkMPI(MPI_Send(buffer.mem, (int)buffer.len, MPI_BYTE, (int)dest, tag, this->comms_[header.channel]));
+    checkMPI(MPI_Send(buffer.data(), (int)buffer.size(), MPI_BYTE, (int)dest, tag, this->comms_[header.channel]));
   }
 
   /// @brief Send a buffer to a given destination asynchronously (MPI_Isend).
@@ -143,7 +143,7 @@ public: // send ////////////////////////////////////////////////////////////////
     // ^^^ DEBUG ^^^
 
     r->comm = this->comms_[header.channel];
-    checkMPI(MPI_Isend(buffer.mem, (int)buffer.len, MPI_BYTE, (int)dest, tag, r->comm, &r->request));
+    checkMPI(MPI_Isend(buffer.data(), (int)buffer.size(), MPI_BYTE, (int)dest, tag, r->comm, &r->request));
     return r;
   }
 
@@ -156,7 +156,7 @@ public: // recv ////////////////////////////////////////////////////////////////
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPI_Status                  status;
     int                         tag = headerToTag(header);
-    checkMPI(MPI_Recv(buffer.mem, (int)buffer.len, MPI_BYTE, (int)header.source, tag, this->comms_[header.channel],
+    checkMPI(MPI_Recv(buffer.data(), (int)buffer.size(), MPI_BYTE, (int)header.source, tag, this->comms_[header.channel],
                       &status));
   }
 
@@ -169,7 +169,7 @@ public: // recv ////////////////////////////////////////////////////////////////
     int                         tag = headerToTag(header);
     MPIRequest                 *r = requestPool_.allocate();
     r->comm = this->comms_[header.channel];
-    checkMPI(MPI_Irecv(buffer.mem, (int)buffer.len, MPI_BYTE, (int)header.source, tag, r->comm, &r->request));
+    checkMPI(MPI_Irecv(buffer.data(), (int)buffer.size(), MPI_BYTE, (int)header.source, tag, r->comm, &r->request));
     return r;
   }
 
@@ -179,7 +179,7 @@ public: // recv ////////////////////////////////////////////////////////////////
   void recv(Request probeRequest, Buffer const &buffer) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPIRequest                 *r = (MPIRequest *)probeRequest;
-    checkMPI(MPI_Recv(buffer.mem, (int)buffer.len, MPI_BYTE, r->status.MPI_SOURCE, r->status.MPI_TAG, r->comm, &r->status));
+    checkMPI(MPI_Recv(buffer.data(), (int)buffer.size(), MPI_BYTE, r->status.MPI_SOURCE, r->status.MPI_TAG, r->comm, &r->status));
     requestPool_.release(r);
   }
 
@@ -191,7 +191,7 @@ public: // recv ////////////////////////////////////////////////////////////////
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPIRequest                 *r = (MPIRequest *)probeRequest;
     checkMPI(
-        MPI_Irecv(buffer.mem, (int)buffer.len, MPI_BYTE, r->status.MPI_SOURCE, r->status.MPI_TAG, r->comm, &r->request));
+        MPI_Irecv(buffer.data(), (int)buffer.size(), MPI_BYTE, r->status.MPI_SOURCE, r->status.MPI_TAG, r->comm, &r->request));
     return probeRequest;
   }
 

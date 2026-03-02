@@ -13,10 +13,18 @@ namespace comm {
 /******************************************************************************/
 
 /// @brief Buffer structure.
-struct Buffer {
-  char  *mem; ///< Pointer to the data.
-  size_t len; ///< Length of the data.
-};
+#if __cplusplus < 202002L
+  struct Buffer {
+    char  *mem; ///< Pointer to the data.
+    size_t len; ///< Length of the data.
+
+    [[nodiscard]] auto data() const { return mem; }
+    [[nodiscard]] auto size() const { return len; }
+  };
+#else
+  #include <span>
+  using Buffer = std::span<char>;
+#endif
 
 /******************************************************************************/
 /*                                   Signal                                   */
