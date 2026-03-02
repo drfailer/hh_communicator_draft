@@ -630,6 +630,10 @@ private:
               storage.typeId, storage.source,
               std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart),
               storage.package.size());
+
+      if constexpr (requires { data->postRecv(); }) {
+        data->postRecv();
+      }
       addResult(data);
     });
     ++this->connections_[storage.source].recvCount;
@@ -652,6 +656,11 @@ private:
         status = false;
         return;
       }
+
+      if constexpr (requires { data->preRecv(); }) {
+        data->preRecv();
+      }
+
       Package         package = packageMem(data);
       StorageSlot<TM> storage{
           .source = header.source,
