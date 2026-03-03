@@ -113,6 +113,8 @@ public:
   /// @param data  Pointer to the data to send.
   template <typename T>
   void sendData(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
+    if (dests.empty()) return;
+
     std::lock_guard<std::mutex> queuesLock(this->sendQueueMutex_);
     this->sendQueue_.add(SendRequest{
         .dests = dests,

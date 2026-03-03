@@ -46,7 +46,8 @@ public:
       throw std::runtime_error(oss.str());
     }
     auto dests = this->strategy_(data);
-    if (dests.size() == 1 && dests[0] == this->task_->comm()->rank()) {
+    if (dests.empty()) return;
+    else if (dests.size() == 1 && dests[0] == this->task_->comm()->rank()) {
       this->task_->addResult(data);
     } else {
       this->task_->comm()->sendData(dests, data);
