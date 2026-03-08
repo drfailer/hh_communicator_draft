@@ -639,6 +639,9 @@ private:
       addResult(data);
     });
     ++this->connections_[storage.source].recvCount;
+    // TODO: empty the std::shared_ptr<T> to reduce the reference count once done receiving.
+    // TODO: this is a bandaid solution, maybe there is a better fix?
+    storage.data = nullptr;
   }
 
   /// @brief Try to allocated a new data using the memory manager. If the
