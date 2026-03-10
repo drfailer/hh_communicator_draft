@@ -166,6 +166,7 @@ public:
       this->usedList_ = node.next;
     }
 
+    node.data = {};
     node.next = this->freeList_;
     node.prev = 0;
     this->freeList_ = idx;
