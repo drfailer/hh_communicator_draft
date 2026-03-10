@@ -116,7 +116,7 @@ public:
   virtual bool probeSuccess(Request request) = 0;
 
   /// @brief Synchronize all processes up to a certain point.
-  virtual void barrier() = 0;
+  virtual void barrier(channel_t channel = 0) = 0;
 
   /// @brief Rank accessor.
   /// @return Rank of the current process.
