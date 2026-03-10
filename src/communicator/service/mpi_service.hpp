@@ -49,6 +49,9 @@ public:
 
     checkMPI(MPI_Comm_rank(MPI_COMM_WORLD, &this->rank_));
     checkMPI(MPI_Comm_size(MPI_COMM_WORLD, &this->nbProcesses_));
+
+    // set the 0 channel to be MPI_COMM_WORLD
+    this->comms_.emplace_back(MPI_COMM_WORLD);
   }
 
   /// @brief MPI Service destructor: calls MPI_Finalize.
@@ -310,8 +313,8 @@ public: // requests ////////////////////////////////////////////////////////////
 public: // synchronization /////////////////////////////////////////////////////
 
   /// @brief Synchronize all processes up to a certain point (MPI_Barrier).
-  void barrier() override {
-    checkMPI(MPI_Barrier(MPI_COMM_WORLD));
+  void barrier(channel_t channel = 0) override {
+    checkMPI(MPI_Barrier(this->comms_[channel]));
   }
 
 public:

@@ -112,7 +112,7 @@ public:
       return infos;
     }
 
-    communicator_.service()->barrier();
+    communicator_.service()->barrier(communicator_.channel());
     if (communicator_.rank() == 0) {
       infos += comm::CommTaskStats::template extraPrintingInformation<comm::TypeMap<Types...>>(
               communicator_.gatherStats(),
