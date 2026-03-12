@@ -5,8 +5,8 @@
 #include "package.hpp"
 #include "hints.hpp"
 #include "service/comm_service.hpp"
-#include "stats.hpp"
 #include "tool/memory_manager.hpp"
+#include "profiling/communicator_profiler.hpp"
 #include "type_map.hpp"
 #include <cassert>
 #include <atomic>
@@ -49,8 +49,7 @@ public:
   Communicator(CommService *service)
       : service_(service),
         channel_(service->newChannel()),
-        stats_(TM::size, service->nbProcesses(), service->profilingEnabled()),
-        packagesCount_(service->nbProcesses(), 0) {}
+        profiler_(TM::size, service->profilingEnabled()) {}
 
 public:
   /// @brief Channel id accessor.
@@ -60,10 +59,6 @@ public:
   /// @brief Service accessor.
   /// @return service.
   CommService *service() const { return service_; }
-
-  /// @brief Profiling information accessor.
-  /// @return Profiling information container.
-  CommTaskStats const &stats() const { return stats_; }
 
   /// @brief rank accessor.
   /// @return Rank.
@@ -175,6 +170,7 @@ private:
     buffer_id_t  bufferId;  ///< Id of the buffer (buffers are sent/received separately).
     Request      request;   ///< Request.
     StorageId    storageId; ///< Id of the storage.
+    size_t       profileId; ///< Id for the profile info queue.
     int          hint;      ///< Hint tracker pointer.
   };
 
@@ -203,7 +199,7 @@ private:
   /// @param data  Data to send.
   template <typename T>
   void processSendRequest(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
-    StorageSlot<TM> storage = createSendStorage(dests, data);
+    auto [storage, packingTime] = createSendStorage(dests, data);
     Header          header(this->rank(), 0, storage.typeId, this->channel_, 0);
     StorageId       storageId = this->wh_.sendStorage.add(storage);
 
@@ -211,13 +207,15 @@ private:
       if (dest == this->rank()) {
         continue;
       }
-      this->packagesCount_[dest] += 1;
-      for (size_t i = 0; i < storage.package.data.size(); ++i) {
+      size_t bufferCount = storage.package.data.size();
+      size_t profileId = profiler_.preSend(storage.typeId, dest, packingTime, bufferCount);
+      for (size_t i = 0; i < bufferCount; ++i) {
         header.bufferId = (buffer_id_t)i;
         this->sendOps_.add(CommOperation{
             .bufferId = header.bufferId,
             .request = this->service_->sendAsync(header, dest, storage.package.data[i]),
             .storageId = storageId,
+            .profileId = profileId,
             .hint = -1,
         });
       }
@@ -232,7 +230,7 @@ private:
   void processSendQueue() {
     std::lock_guard<std::mutex> queuesLock(this->sendQueueMutex_);
 
-    this->stats_.maxSendQueueSize = std::max(this->stats_.maxSendQueueSize, this->sendQueue_.size());
+    this->profiler_.updateProfiledSize(ProfiledSize::MaxSendQueueSize, this->sendQueue_.size());
     for (auto it = this->sendQueue_.begin(); it != this->sendQueue_.end();) {
       if (this->sendThreshold_ > 0 && this->sendOps_.size() >= this->sendThreshold_) {
         break;
@@ -250,7 +248,8 @@ private:
   /// @param flush     Boolean flag that is used when the queue needs to be
   ///                  flushed.
   void processSendOpsQueue(auto addResult, bool flush = false) {
-    this->stats_.updateSendQueuesInfos(this->sendOps_.size(), this->wh_.sendStorage.size());
+    this->profiler_.updateProfiledSize(ProfiledSize::MaxSendOpsSize, this->sendOps_.size());
+    this->profiler_.updateProfiledSize(ProfiledSize::MaxSendStorageSize, this->wh_.sendStorage.size());
 
     do {
       processSendQueue();
@@ -259,6 +258,7 @@ private:
           StorageSlot<TM> &storage = this->wh_.sendStorage.at(it->storageId);
           ++storage.bufferCount;
 
+          this->profiler_.postSend(it->profileId, storage.package.size());
           if (storage.bufferCount == storage.ttlBufferCount) {
             postSend(storage, addResult);
             this->wh_.sendStorage.remove(it->storageId);
@@ -298,7 +298,7 @@ private:
   /// @param useAddResult Flag that will be used in  `postSend` to know if
   ///                     `addResult` should be used.
   template <typename T>
-  StorageSlot<TM> createSendStorage(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
+  std::pair<StorageSlot<TM>, delay_t> createSendStorage(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
     bool   useAddResult = std::find(dests.begin(), dests.end(), this->rank()) != dests.end();
     size_t nbDests = useAddResult ? dests.size() - 1 : dests.size();
 
@@ -319,10 +319,7 @@ private:
         .useAddResult = useAddResult,
         .dbgBufferReceived = {false, false, false, false},
     };
-    this->stats_.registerSendTimings(storage.typeId, dests,
-                                     std::chrono::duration_cast<std::chrono::nanoseconds>(tpackingEnd - tpackingStart),
-                                     package.size());
-    return storage;
+    return std::make_pair(storage, std::chrono::duration_cast<std::chrono::nanoseconds>(tpackingEnd - tpackingStart));
   }
 
   /******************************************************************************/
@@ -336,7 +333,8 @@ private:
   ///        request, and we start the reception. Otherwise, the request
   ///        remains in this queue until some memory is available.
   void processCreateDataQueue() {
-    this->stats_.updateCreateDataQueueInfos(this->createDataOps_.size());
+    this->profiler_.updateProfiledSize(ProfiledSize::MaxCreateDataQueueSize,
+                                      this->createDataOps_.size());
 
     for (auto it = this->createDataOps_.begin(); it != this->createDataOps_.end();) {
       if (recvData(*it)) {
@@ -352,7 +350,8 @@ private:
   ///        data is transferred to the result of the graph using `addResult`.
   /// @param addResult Function that allow to call `task->addResult`
   void processRecvOpsQueue(auto addResult) {
-    this->stats_.updateRecvQueuesInfos(this->recvOps_.size(), this->wh_.recvStorage.size());
+    this->profiler_.updateProfiledSize(ProfiledSize::MaxRecvOpsSize, this->recvOps_.size());
+    this->profiler_.updateProfiledSize(ProfiledSize::MaxRecvStorageSize, this->wh_.recvStorage.size());
 
     for (auto it = this->recvOps_.begin(); it != this->recvOps_.end();) {
       if (this->service_->requestCompleted(it->request)) {
@@ -360,7 +359,7 @@ private:
         ++storage.bufferCount;
 
         if (storage.bufferCount == storage.ttlBufferCount) {
-          postRecv(storage, addResult);
+          postRecv(storage, addResult, it->profileId);
           if (it->hint != -1) {
             hintRequestCompleted(it->hint);
           }
@@ -392,7 +391,7 @@ private:
       assert(header.source != this->rank());
 
       if (header.signal == 0) {
-        this->stats_.probeRequestCount += 1;
+        this->profiler_.incrementProfiledCounter(ProfiledCounter::ProbedRequest);
         this->createDataOps_.add(header);
         signal = Signal::Data;
         this->service_->requestRelease(request);
@@ -426,6 +425,7 @@ private:
           .bufferId = header.bufferId,
           .request = this->service_->recvAsync(header, storage.package.data[header.bufferId]),
           .storageId = storageId,
+          .profileId = this->profiler_.preRecv(header.typeId, header.source),
           .hint = hint,
       });
     }
@@ -436,7 +436,7 @@ private:
   /// @param storage   Storage slot.
   /// @param addResult Function that allow transferring the data to rest of the
   ///                  graph (calls `task->addResult`).
-  void postRecv(StorageSlot<TM> &storage, auto addResult) {
+  void postRecv(StorageSlot<TM> &storage, auto addResult, size_t profileId) {
     assert(storage.typeId < TM::size);
     TM::apply(storage.typeId, [&]<typename T>() {
       time_t tunpackingStart, tunpackingEnd;
@@ -444,10 +444,8 @@ private:
       tunpackingStart = std::chrono::system_clock::now();
       unpack(std::move(storage.package), data);
       tunpackingEnd = std::chrono::system_clock::now();
-      this->stats_.registerRecvTimings(
-              storage.typeId, storage.source,
-              std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart),
-              storage.package.size());
+      delay_t unpackingTime = std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart);
+      this->profiler_.postRecv(profileId, unpackingTime, storage.package.size());
 
       if constexpr (requires { data->postRecv(); }) {
         data->postRecv();
@@ -547,7 +545,7 @@ private:
     assert(hintIdx >= 0);
     auto &hint = this->hints_[hintIdx];
     hint.activeRequestCount -= 1;
-    this->stats_.hintedRequestCount += 1;
+    this->profiler_.incrementProfiledCounter(ProfiledCounter::HintedRequest);
   }
 
   /// @brief Initialize the hints.
@@ -629,46 +627,6 @@ private:
   void finalizeHints() {}
 
   /******************************************************************************/
-  /*                                   stats                                    */
-  /******************************************************************************/
-
-public:
-  /// @brief Sends all the profiling information to the master process.
-  void sendStats() const {
-    Header            header(this->rank(), 0, 0, this->channel_, 0);
-    std::vector<char> bufMem;
-    this->stats_.pack(bufMem);
-    this->service_->send(header, 0, Buffer{bufMem.data(), bufMem.size()});
-  }
-
-  /// @brief Gather all the profiling information.
-  /// @return List of the profiling information of each rank.
-  std::vector<CommTaskStats> gatherStats() const {
-    std::vector<char>          bufMem;
-    std::vector<CommTaskStats> stats(this->nbProcesses());
-    size_t                     bufSize;
-
-    stats[0].transmissionStats = std::move(this->stats_.transmissionStats);
-    stats[0].maxSendOpsSize = this->stats_.maxSendOpsSize;
-    stats[0].maxRecvOpsSize = this->stats_.maxRecvOpsSize;
-    stats[0].maxCreateDataQueueSize = this->stats_.maxCreateDataQueueSize;
-    stats[0].maxSendStorageSize = this->stats_.maxSendStorageSize;
-    stats[0].maxRecvStorageSize = this->stats_.maxRecvStorageSize;
-    stats[0].maxSendQueueSize = this->stats_.maxSendQueueSize;
-    stats[0].probeRequestCount = this->stats_.probeRequestCount;
-    stats[0].hintedRequestCount = this->stats_.hintedRequestCount;
-    for (rank_t i = 1; i < this->nbProcesses(); ++i) {
-      Request request = this->service_->probe(this->channel_, i);
-      bufSize = (size_t)this->service_->bufferSize(request);
-      bufMem.resize(bufSize);
-      this->service_->recv(request, Buffer{bufMem.data(), bufMem.size()});
-      stats[i].transmissionStats.nbProcesses = this->nbProcesses();
-      stats[i].unpack(bufMem);
-    }
-    return stats;
-  }
-
-  /******************************************************************************/
   /*                                 attributes                                 */
   /******************************************************************************/
 
@@ -689,10 +647,6 @@ private:
   // packages
   PackageWarehouse<TM> wh_; ///< Package warehouse that stores the data during transmission.
 
-  // stats
-  CommTaskStats       stats_;              ///< Profiling informations
-  std::vector<size_t> packagesCount_ = {}; ///< Package counters.
-
   // diconnection buffer
   std::vector<char>   signalBufferMem_; ///< Buffer memory used to send the disconnection signal.
 
@@ -702,6 +656,9 @@ private:
   // hints
   std::vector<HintTracker> hints_; ///< Hint tracker list (hint data).
   size_t sendThreshold_ = 0;       ///< Send threshold.
+
+  // profiler
+  CommunicatorProfiler profiler_;
 };
 
 } // end namespace comm

@@ -4,7 +4,6 @@
 #include "communicator.hpp"
 #include "tool/memory_manager.hpp"
 #include <hedgehog.h>
-#include "stats.hpp"
 #include <algorithm>
 #include <condition_variable>
 #include <numeric>
@@ -108,21 +107,22 @@ public:
       infos += mm_->extraPrintingInformation();
     }
 
-    if (!communicator_.service()->profilingEnabled() || communicator_.nbProcesses() == 1) {
-      return infos;
-    }
-
-    communicator_.service()->barrier(communicator_.channel());
-    if (communicator_.rank() == 0) {
-      infos += comm::CommTaskStats::template extraPrintingInformation<comm::TypeMap<Types...>>(
-              communicator_.gatherStats(),
-              communicator_.service()->startTime(),
-              communicator_.channel(),
-              communicator_.nbProcesses());
-    } else {
-      communicator_.sendStats();
+    if (communicator_.service()->profilingEnabled() && communicator_.nbProcesses() != 1) {
+      printf("TODO: add the communicator profiling info to the printed string\n");
     }
     return infos;
+
+    // communicator_.service()->barrier(communicator_.channel());
+    // if (communicator_.rank() == 0) {
+    //   infos += comm::CommTaskStats::template extraPrintingInformation<comm::TypeMap<Types...>>(
+    //           communicator_.gatherStats(),
+    //           communicator_.service()->startTime(),
+    //           communicator_.channel(),
+    //           communicator_.nbProcesses());
+    // } else {
+    //   communicator_.sendStats();
+    // }
+    // return infos;
   }
 
 public:

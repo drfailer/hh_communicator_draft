@@ -7,6 +7,7 @@
 #include <memory>
 #include <set>
 #include <vector>
+#include <hedgehog/hedgehog.h>
 
 /// @brief Hedgehog namespace
 namespace hh {
@@ -55,7 +56,7 @@ Package pack(std::shared_ptr<T> data) {
   } else if constexpr (std::is_trivially_copyable_v<T>) {
     package.data.push_back(Buffer{(char*)data.get(), sizeof(T)});
   } else {
-    throw std::invalid_argument("type " + tool::typeToStr<T>()
+    throw std::invalid_argument("type " + hh::tool::typeToStr<T>()
                                 + " does not implement `pack()` and is not trivially copyable.");
   }
   return package;
@@ -87,7 +88,7 @@ Package packageMem(std::shared_ptr<T> data) { // TODO: how to avoid sneaky copie
   } else if constexpr (std::is_trivially_copyable_v<T>) {
     return Package{.data = std::vector<Buffer>({Buffer{(char*)data.get(), sizeof(T)}})};
   } else {
-    throw std::invalid_argument("type " + tool::typeToStr<T>()
+    throw std::invalid_argument("type " + hh::tool::typeToStr<T>()
                                 + " does not implement `package()` and is not trivially copyable.");
   }
 }
@@ -109,7 +110,7 @@ void unpack(Package &&package, std::shared_ptr<T> data) {
   } else if constexpr (std::is_trivially_copyable_v<T>) {
     // there is nothing to do
   } else {
-    throw std::invalid_argument("type " + tool::typeToStr<T>()
+    throw std::invalid_argument("type " + hh::tool::typeToStr<T>()
                                 + " does not implement `unpack(Package)` and is not trivially copyable.");
   }
 }

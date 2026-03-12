@@ -3,9 +3,11 @@ TRACER_PATH=$(HOME)/Programming/projects/tracer-c/tracer/
 CC=g++
 CXXFLAGS=\
 		 -std=c++20 \
-		 -O3 \
+		 -O2 \
 		 -ggdb \
-		 -I../../../lib/hedgehog/ -I../../../src/ \
+	     -I../../../build/_deps/hedgehog-src/hedgehog/ \
+	     -I../../../build/_deps/hedgehog-src/ \
+		 -I../../../src/ \
 		 -I$(HOME)/Programming/usr/include/ \
 		 -I$(TRACER_PATH) \
 		 -I/usr/lib/x86_64-linux-gnu/openmpi/include/ \

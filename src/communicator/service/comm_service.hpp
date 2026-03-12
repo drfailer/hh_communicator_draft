@@ -2,7 +2,6 @@
 #define COMMUNICATOR_COMM_SERVICE
 #include "../protocol.hpp"
 #include "request.hpp"
-#include "../stats.hpp"
 #include <cassert>
 #include <thread>
 #include <condition_variable>

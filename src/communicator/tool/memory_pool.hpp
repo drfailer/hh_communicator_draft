@@ -1,8 +1,8 @@
 #ifndef COMMUNICATOR_TOOL_MEMORY_POOL
 #define COMMUNICATOR_TOOL_MEMORY_POOL
 #include "log.hpp"
-#include "../stats.hpp"
 #include <hedgehog.h>
+#include "../profiling/profiling_tools.hpp"
 #include "memory_manager.hpp"
 #include <cassert>
 #include <chrono>
