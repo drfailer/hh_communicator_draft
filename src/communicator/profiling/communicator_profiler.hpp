@@ -3,6 +3,8 @@
 #include "../tool/queue.hpp"
 #include "profiling_tools.hpp"
 #include <chrono>
+#include <hedgehog/hedgehog.h>
+#include <sstream>
 
 /// @brief Hedgehog namespace
 namespace hh {
@@ -10,18 +12,17 @@ namespace hh {
 namespace comm {
 
 struct PackageProfile {
-  delay_t   packingTime;
-  time_t    beginTp;
-  rank_t    rank;
-  type_id_t typeId;
-  size_t    bufferCount;
+  time_unit_t packingTime;
+  time_t      beginTp;
+  rank_t      rank;
+  type_id_t   typeId;
+  size_t      bufferCount;
 };
 
 struct ProfileInfo {
-  delay_t packingTime;
-  delay_t transmissionTime;
-  rank_t  rank;
-  size_t  packageSize;
+  time_unit_t packingTime;
+  time_unit_t transmissionTime;
+  size_t      packageSize;
 };
 
 enum class ProfiledSize : size_t {
@@ -42,13 +43,16 @@ enum class ProfiledCounter : size_t {
 
 class CommunicatorProfiler {
 public:
-  CommunicatorProfiler(size_t typeCount, bool enabled)
-      : enabled_(enabled) {
+  CommunicatorProfiler(size_t typeCount, size_t processesCount, rank_t rank, bool enabled)
+      : enabled_(enabled),
+        typeCount_(typeCount),
+        processesCount_(processesCount),
+        rank_(rank) {
     if (!enabled) {
       return;
     }
-    this->sendInfos_.resize(typeCount);
-    this->recvInfos_.resize(typeCount);
+    this->sendInfos_.resize(typeCount * processesCount);
+    this->recvInfos_.resize(typeCount * processesCount);
   }
 
 public:
@@ -92,10 +96,9 @@ public:
 
     if (profile.bufferCount == 0) {
       auto endTp = std::chrono::system_clock::now();
-      this->sendInfos_[profile.typeId].emplace_back(ProfileInfo{
+      this->sendInfos_[profile.typeId * processesCount_ + profile.rank].emplace_back(ProfileInfo{
           .packingTime = profile.packingTime,
-          .transmissionTime = std::chrono::duration_cast<std::chrono::nanoseconds>(endTp - profile.beginTp),
-          .rank = profile.rank,
+          .transmissionTime = std::chrono::duration_cast<time_unit_t>(endTp - profile.beginTp),
           .packageSize = packageSize,
       });
     }
@@ -122,12 +125,90 @@ public:
     std::unique_lock<std::mutex> lock(this->mutex_);
     auto                        &profile = this->profileQueue_.at(queueIdx);
     auto                         endTp = std::chrono::system_clock::now();
-    this->recvInfos_[profile.typeId].emplace_back(ProfileInfo{
+    this->recvInfos_[profile.typeId * processesCount_ + profile.rank].emplace_back(ProfileInfo{
         .packingTime = unpackingTime,
-        .transmissionTime = std::chrono::duration_cast<std::chrono::nanoseconds>(endTp - profile.beginTp),
-        .rank = profile.rank,
+        .transmissionTime = std::chrono::duration_cast<time_unit_t>(endTp - profile.beginTp),
         .packageSize = packageSize,
     });
+  }
+
+  template <typename TM>
+  std::string print() const {
+    std::ostringstream ss;
+
+#define PRINT_ENUM_ARRAY_ELT(arr, enm, i) ss << #i << " = " << arr[(size_t)enm::i] << "\n"
+    PRINT_ENUM_ARRAY_ELT(sizes_, ProfiledSize, MaxSendOpsSize);
+    PRINT_ENUM_ARRAY_ELT(sizes_, ProfiledSize, MaxRecvOpsSize);
+    PRINT_ENUM_ARRAY_ELT(sizes_, ProfiledSize, MaxCreateDataQueueSize);
+    PRINT_ENUM_ARRAY_ELT(sizes_, ProfiledSize, MaxSendStorageSize);
+    PRINT_ENUM_ARRAY_ELT(sizes_, ProfiledSize, MaxRecvStorageSize);
+    PRINT_ENUM_ARRAY_ELT(sizes_, ProfiledSize, MaxSendQueueSize);
+
+    PRINT_ENUM_ARRAY_ELT(counters_, ProfiledCounter, ProbedRequest);
+    PRINT_ENUM_ARRAY_ELT(counters_, ProfiledCounter, HintedRequest);
+#undef PRINT_ENUM_ARRAY_ELT
+
+    // per type stats
+    for (type_id_t typeId = 0; typeId < typeCount_; ++typeId) {
+      std::vector<time_unit_t> packTimes, unpackTimes, sendTimes, recvTimes;
+      std::vector<double>      bandWidths;
+
+      ss << typeIdToStr<TM>(typeId) << ":\n";
+
+      // per rank stats
+      for (rank_t rank = 0; rank < processesCount_; ++rank) {
+        if (rank == rank_) {
+          continue;
+        }
+        auto                                   &sendInfos = sendInfos_[typeId * processesCount_ + rank];
+        auto                                   &recvInfos = recvInfos_[typeId * processesCount_ + rank];
+        std::function<time_unit_t(ProfileInfo)> getPackingTime = [](ProfileInfo pi) { return pi.packingTime; };
+        std::function<time_unit_t(ProfileInfo)> getTransmissionTime
+            = [](ProfileInfo pi) { return pi.transmissionTime; };
+        std::function<double(ProfileInfo)> getBandWidth = [](ProfileInfo pi) {
+          double sizeMB = (double)pi.packageSize / (1024. * 1024.);
+          double transmissionTimeS = (double)pi.transmissionTime.count() / 1'000'000'000.;
+          return sizeMB / transmissionTimeS;
+        };
+        auto [sendDurAvg, sendDurStd] = computeAvgDuration(sendInfos, getTransmissionTime);
+        auto [recvDurAvg, recvDurStd] = computeAvgDuration(recvInfos, getTransmissionTime);
+        auto [bandWidthAvg, bandWidthStd] = computeAvg(sendInfos, getBandWidth);
+
+        // print per rank infos
+        ss << "\t" << rank_ << " -> " << rank << ": received = " << recvInfos.size() << "("
+           << durationToString(recvDurAvg) << ")"
+           << ", sent = " << sendInfos.size() << ", transmission time = " << durationToString(sendDurAvg) << " +- "
+           << durationToString(sendDurStd) << ", band width = " << bandWidthAvg << "MB/s +- " << bandWidthStd << "MB/s"
+           << "\n";
+
+        // update the global stats arrays
+        for (auto pi : sendInfos) {
+          packTimes.push_back(getPackingTime(pi));
+          sendTimes.push_back(getTransmissionTime(pi));
+          bandWidths.push_back(getBandWidth(pi));
+        }
+        for (auto pi : recvInfos) {
+          unpackTimes.push_back(pi.packingTime);
+          recvTimes.push_back(pi.packingTime);
+        }
+      }
+
+      // add the global stats
+      auto [packTimeAvg, packTimeStd] = computeAvgDuration(packTimes);
+      auto [unpackTimeAvg, unpackTimeStd] = computeAvgDuration(unpackTimes);
+      auto [sendTimeAvg, sendTimeStd] = computeAvgDuration(sendTimes);
+      auto [recvTimeAvg, recvTimeStd] = computeAvgDuration(recvTimes);
+      auto [bandWidthAvg, bandWidthStd] = computeAvg(bandWidths);
+
+      ss << "pack time: " << durationToString(packTimeAvg) << " +- " << durationToString(packTimeStd) << "\n"
+         << "unpack time: " << durationToString(unpackTimeAvg) << " +- " << durationToString(unpackTimeStd) << "\n"
+         << "send time: " << durationToString(sendTimeAvg) << " +- " << durationToString(sendTimeStd) << "\n"
+         << "recv time: " << durationToString(recvTimeAvg) << " +- " << durationToString(recvTimeStd) << "\n"
+         << "band width: " << bandWidthAvg << "MB/s +- " << bandWidthStd << "MB/s"
+         << "\n"
+         << "\n";
+    }
+    return ss.str();
   }
 
 private:
@@ -138,6 +219,9 @@ private:
   std::array<size_t, size_t(ProfiledCounter::COUNT_)> counters_ = {0};
   std::mutex                                          mutex_; ///< Mutex for thread-safety.
   bool                                                enabled_ = false; ///< Statistic collection enabled flag.
+  size_t                                              typeCount_ = 0; ///< Number of type managed by the communicator.
+  size_t                                              processesCount_ = 0; ///< Number of processes.
+  rank_t                                              rank_ = 0;
 };
 
 } // end namespace comm

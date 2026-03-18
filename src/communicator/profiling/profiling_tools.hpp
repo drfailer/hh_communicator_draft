@@ -1,5 +1,7 @@
 #ifndef COMMUNICATOR_PROFILING_PROFILING_TOOLS
 #define COMMUNICATOR_PROFILING_PROFILING_TOOLS
+#include "../protocol.hpp"
+#include <functional>
 
 /// @brief Hedgehog namespace
 namespace hh {
@@ -45,30 +47,76 @@ inline std::string durationToString(time_unit_t const &ns) {
 }
 
 /// @brief Compute the average duration and the standard deviation of a list of durations.
-/// @param nss List of durations.
+/// @tparam T Type of the elements.
+/// @param values List of values.
+/// @param get    Function that allow to get fields values for structs.
 /// @return Pair containing the mean and the standard deviation of the given list.
-inline std::pair<time_unit_t, time_unit_t> computeAvgDuration(std::vector<time_unit_t> nss) {
-  if (nss.size() == 0) {
+template <typename T>
+std::pair<time_unit_t, time_unit_t> computeAvgDuration(std::vector<T> const &values, std::function<time_unit_t(T)> get) {
+  if (values.size() == 0) {
     return {time_unit_t::zero(), time_unit_t::zero()};
   }
   time_unit_t sum = time_unit_t::zero(), mean = time_unit_t::zero();
   double      sd = 0;
 
-  for (auto ns : nss) {
-    sum += ns;
+  for (auto value : values) {
+    sum += get(value);
   }
-  mean = sum / (nss.size());
+  mean = sum / values.size();
 
-  for (auto ns : nss) {
-    auto diff = (double)(ns.count() - mean.count());
+  for (auto value : values) {
+    auto diff = (double)(get(value).count() - mean.count());
     sd += diff * diff;
   }
-  return {mean, time_unit_t((int64_t)std::sqrt(sd / (double)nss.size()))};
+  return {mean, time_unit_t((int64_t)std::sqrt(sd / (double)values.size()))};
+}
+
+inline std::pair<time_unit_t, time_unit_t> computeAvgDuration(std::vector<time_unit_t> const &values) {
+  if (values.size() == 0) {
+    return {time_unit_t::zero(), time_unit_t::zero()};
+  }
+  time_unit_t sum = time_unit_t::zero(), mean = time_unit_t::zero();
+  double      sd = 0;
+
+  for (auto value : values) {
+    sum += value;
+  }
+  mean = sum / values.size();
+
+  for (auto value : values) {
+    auto diff = (double)(value.count() - mean.count());
+    sd += diff * diff;
+  }
+  return {mean, time_unit_t((int64_t)std::sqrt(sd / (double)values.size()))};
 }
 
 /// @brief Compute the mean and the standard deviation of a list of values.
+/// @tparam T Type of the elements.
 /// @param values List of values.
+/// @param get    Function that allow to get fields values for structs.
 /// @return Pair containing the mean and the standard deviation of the given list.
+template <typename T>
+std::pair<double, double> computeAvg(std::vector<T> const &values, std::function<double(T)> get) {
+  if (values.size() == 0) {
+    return {0, 0};
+  }
+  double avg = 0;
+  double stddev = 0;
+  double nbElements = (double)values.size();
+
+  for (auto value : values) {
+    avg += get(value);
+  }
+  avg /= nbElements;
+
+  for (auto value : values) {
+    double diff = get(value) - avg;
+    stddev += diff * diff;
+  }
+  stddev = std::sqrt(stddev / nbElements);
+  return {avg, stddev};
+}
+
 inline std::pair<double, double> computeAvg(std::vector<double> const &values) {
   if (values.size() == 0) {
     return {0, 0};
@@ -77,12 +125,12 @@ inline std::pair<double, double> computeAvg(std::vector<double> const &values) {
   double stddev = 0;
   double nbElements = (double)values.size();
 
-  for (double value : values) {
+  for (auto value : values) {
     avg += value;
   }
   avg /= nbElements;
 
-  for (double value : values) {
+  for (auto value : values) {
     double diff = value - avg;
     stddev += diff * diff;
   }
@@ -169,6 +217,13 @@ inline void strAppend(std::string &str, auto const &...args) {
     }(),
     ...);
   str.append(oss.str() + "\\l");
+}
+
+template <typename TM>
+std::string typeIdToStr(type_id_t typeId) {
+  std::string result;
+  TM::apply(typeId, [&]<typename T>() { result = hh::tool::typeToStr<T>(); });
+  return result;
 }
 
 } // end namespace comm

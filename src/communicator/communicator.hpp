@@ -49,7 +49,7 @@ public:
   Communicator(CommService *service)
       : service_(service),
         channel_(service->newChannel()),
-        profiler_(TM::size, service->profilingEnabled()) {}
+        profiler_(TM::size, service->nbProcesses(), service->rank(), service->profilingEnabled()) {}
 
 public:
   /// @brief Channel id accessor.
@@ -63,6 +63,10 @@ public:
   /// @brief rank accessor.
   /// @return Rank.
   rank_t rank() const { return this->service_->rank(); }
+
+  /// @brief Access to the profiler.
+  /// @return profiler.
+  CommunicatorProfiler const &profiler() const { return this->profiler_; }
 
   /// @brief Number of processes accessor.
   /// @return Number of processes.
