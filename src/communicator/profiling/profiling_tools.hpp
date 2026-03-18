@@ -71,6 +71,9 @@ std::pair<time_unit_t, time_unit_t> computeAvgDuration(std::vector<T> const &val
   return {mean, time_unit_t((int64_t)std::sqrt(sd / (double)values.size()))};
 }
 
+/// @brief Compute the average duration and the standard deviation of a list of durations.
+/// @param values List of values.
+/// @return Pair containing the mean and the standard deviation of the given list.
 inline std::pair<time_unit_t, time_unit_t> computeAvgDuration(std::vector<time_unit_t> const &values) {
   if (values.size() == 0) {
     return {time_unit_t::zero(), time_unit_t::zero()};
@@ -117,6 +120,9 @@ std::pair<double, double> computeAvg(std::vector<T> const &values, std::function
   return {avg, stddev};
 }
 
+/// @brief Compute the mean and the standard deviation of a list of values.
+/// @param values List of values.
+/// @return Pair containing the mean and the standard deviation of the given list.
 inline std::pair<double, double> computeAvg(std::vector<double> const &values) {
   if (values.size() == 0) {
     return {0, 0};
