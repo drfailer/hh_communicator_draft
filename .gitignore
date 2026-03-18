@@ -1,6 +1,7 @@
 *.dot
 *.png
 *.csv
+*.transmission
 main
 prog
 .cache
@@ -47,3 +48,4 @@ cmake-build-release/
 .vscode/
 runs/
 .local/
+.gdb_history
