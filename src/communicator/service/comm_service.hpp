@@ -1,11 +1,13 @@
 #ifndef COMMUNICATOR_COMM_SERVICE
 #define COMMUNICATOR_COMM_SERVICE
 #include "../protocol.hpp"
+#include "../profiling/profiling_tools.hpp"
 #include "request.hpp"
 #include <cassert>
 #include <thread>
 #include <condition_variable>
 #include <mutex>
+#include <chrono>
 
 /// @brief Hedgehog namespace
 namespace hh {
