@@ -179,7 +179,7 @@ public:
         auto [bandWidthAvg, bandWidthStd] = computeAvg(sendInfos, getBandWidth);
 
         // print per rank infos
-        ss << "\t" << rank_ << " -> " << rank << ": received = " << recvInfos.size() << "("
+        ss << "\t" << rank_ << " -> " << rank << ": received = " << recvInfos.size() << " ("
            << durationToString(recvDurAvg) << ")"
            << ", sent = " << sendInfos.size() << ", transmission time = " << durationToString(sendDurAvg) << " +- "
            << durationToString(sendDurStd) << ", band width = " << bandWidthAvg << "MB/s +- " << bandWidthStd << "MB/s"
