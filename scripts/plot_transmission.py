@@ -37,6 +37,9 @@ def collect_data(filename):
             if len(times) == 0:
                 continue
 
+            # sort on the timestamp
+            times = sorted(times, key=lambda t:t[0])
+
             if not channel in data:
                 data[channel] = dict()
             if not source in data[channel]:
@@ -72,10 +75,14 @@ def plot_one(data, title, output_file):
     """
     fig, ax = plt.subplots(len(data.keys()), squeeze=False)
 
+    # adjust the padding
+    if len(data.keys()) > 0:
+        fig.tight_layout(pad=3.0)
+
     for idx, type_name in enumerate(data):
         xmin = [p[0] for p in data[type_name]]
         xmax = [p[0] + p[1] for p in data[type_name]]
-        ax[idx, 0].hlines(y=range(len(xmax)), xmin=xmin, xmax=xmax, linewidth=1)
+        ax[idx, 0].hlines(y=range(len(xmin)), xmin=xmin, xmax=xmax, linewidth=1)
         ax[idx, 0].set_title(type_name)
         ax[idx, 0].set_ylabel("package number")
 

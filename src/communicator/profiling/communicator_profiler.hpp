@@ -98,7 +98,7 @@ public:
 
     if (profile.bufferCount == 0) {
       auto endTp = std::chrono::system_clock::now();
-      this->sendInfos_[profile.typeId * processesCount_ + profile.rank].emplace_back(ProfileInfo{
+      this->sendInfos_[profile.typeId * processesCount_ + profile.rank].push_back(ProfileInfo{
           .timestamp = std::chrono::duration_cast<time_unit_t>(profile.beginTp - this->startTime_),
           .packingTime = profile.packingTime,
           .transmissionTime = std::chrono::duration_cast<time_unit_t>(endTp - profile.beginTp),
@@ -128,7 +128,7 @@ public:
     std::unique_lock<std::mutex> lock(this->mutex_);
     auto                        &profile = this->profileQueue_.at(queueIdx);
     auto                         endTp = std::chrono::system_clock::now();
-    this->recvInfos_[profile.typeId * processesCount_ + profile.rank].emplace_back(ProfileInfo{
+    this->recvInfos_[profile.typeId * processesCount_ + profile.rank].push_back(ProfileInfo{
         .timestamp = std::chrono::duration_cast<time_unit_t>(profile.beginTp - this->startTime_),
         .packingTime = unpackingTime,
         .transmissionTime = std::chrono::duration_cast<time_unit_t>(endTp - profile.beginTp),
