@@ -49,7 +49,7 @@ public:
   Communicator(CommService *service)
       : service_(service),
         channel_(service->newChannel()),
-        profiler_(TM::size, service->nbProcesses(), service->rank(), service->profilingEnabled()) {}
+        profiler_(TM::size, service->nbProcesses(), service->rank(), service->startTime(), service->profilingEnabled()) {}
 
 public:
   /// @brief Channel id accessor.
