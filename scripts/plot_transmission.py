@@ -6,6 +6,9 @@ from pathlib import Path
 
 TRANSMISSION_FILE_SUFFIX =  '.transmission'
 
+SOR_SEND = 0
+SOR_RECV = 1
+
 
 def parse_time(time_str):
     """
@@ -16,23 +19,19 @@ def parse_time(time_str):
     return (int(parts[0]), int(parts[1]))
 
 
-def collect_data(filename):
+def collect_data(data, filename):
     """
-    Parse the given file and returns a map containing the data:
-
-    Return:
-    data[channel][source][dest][type] = (transmission_start_time, transmission_duration)
+    Parse the given file and update the map containing the data.
     """
-    data = dict()
-
     with open(filename, "r") as file:
         for line in file:
             parts = line.split(';')
-            type_name = parts[0]
-            channel = int(parts[1])
-            source = int(parts[2])
-            dest = int(parts[3])
-            times = list(map(parse_time, parts[4:]))
+            sor = int(parts[0])
+            type_name = parts[1]
+            channel = int(parts[2])
+            source = int(parts[3])
+            dest = int(parts[4])
+            times = list(map(parse_time, parts[5:]))
 
             if len(times) == 0:
                 continue
@@ -46,9 +45,10 @@ def collect_data(filename):
                 data[channel][source] = dict()
             if not dest in data[channel][source]:
                 data[channel][source][dest] = dict()
-            data[channel][source][dest][type_name] = times
-
-    return data
+            if not type_name in data[channel][source][dest]:
+                data[channel][source][dest][type_name] = dict()
+            assert not sor in data[channel][source][dest][type_name]
+            data[channel][source][dest][type_name][sor] = times
 
 
 def parse_data_files(data_dir):
@@ -63,7 +63,7 @@ def parse_data_files(data_dir):
 
     for file in path.iterdir():
         if file.suffix == TRANSMISSION_FILE_SUFFIX:
-            data |= collect_data(file)
+            collect_data(data, file)
 
     return data
 
@@ -71,7 +71,7 @@ def parse_data_files(data_dir):
 def plot_one(data, title, output_file):
     """
     Plot the figure for the given data (transmission data for one channel and
-    one rank).
+    one rank, send delay in bleu, and receive in yellow).
     """
     fig, ax = plt.subplots(len(data.keys()), squeeze=False)
 
@@ -80,9 +80,15 @@ def plot_one(data, title, output_file):
         fig.tight_layout(pad=3.0)
 
     for idx, type_name in enumerate(data):
-        xmin = [p[0] for p in data[type_name]]
-        xmax = [p[0] + p[1] for p in data[type_name]]
-        ax[idx, 0].hlines(y=range(len(xmin)), xmin=xmin, xmax=xmax, linewidth=1)
+        # send delays
+        send_xmin = [p[0] for p in data[type_name][SOR_SEND]]
+        send_xmax = [p[0] + p[1] for p in data[type_name][SOR_SEND]]
+        ax[idx, 0].hlines(y=range(len(send_xmin)), xmin=send_xmin, xmax=send_xmax, linewidth=1, color="b")
+        # recv delays
+        recv_xmin = [p[0] for p in data[type_name][SOR_RECV]]
+        recv_xmax = [p[0] + p[1] for p in data[type_name][SOR_RECV]]
+        ax[idx, 0].hlines(y=range(len(recv_xmin)), xmin=recv_xmin, xmax=recv_xmax, linewidth=1, color="y")
+        # legend
         ax[idx, 0].set_title(type_name)
         ax[idx, 0].set_ylabel("package number")
 

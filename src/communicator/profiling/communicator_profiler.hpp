@@ -220,9 +220,9 @@ public:
   ///        using the `plot_transmission.py` script. The result is text for
   ///        now.
   ///
-  /// Format of the file: typename;channel;sender;receiver;timestamp,duration;...
+  /// Format of the file: s/r;typename;channel;source;dest;timestamp,duration;...
   ///
-  /// @param channel     Channel id.
+  /// @param channel Channel id.
   template <typename TM>
   void generateTransmissionFile(channel_t channel) const {
     std::filesystem::create_directory("transmissions");
@@ -230,10 +230,30 @@ public:
     char          sep = ';';
 
     for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
+      // send infos
       for (size_t dest = 0; dest < this->processesCount_; ++dest) {
+        auto const &infos = this->sendInfos_[typeId * this->processesCount_ + dest];
+        if (infos.empty()) {
+          continue;
+        }
+        file << 0 << sep;
         TM::apply(typeId, [&]<typename T>() { file << hh::tool::typeToStr<T>() << sep; });
         file << channel << sep << this->rank_ << sep << dest;
-        for (auto const &info : this->sendInfos_[typeId * this->processesCount_ + dest]) {
+        for (auto const &info : infos) {
+          file << sep << info.timestamp.count() << ',' << info.transmissionTime.count();
+        }
+        file << '\n';
+      }
+      // recv infos
+      for (size_t src = 0; src < this->processesCount_; ++src) {
+        auto const &infos = this->recvInfos_[typeId * this->processesCount_ + src];
+        if (infos.empty()) {
+          continue;
+        }
+        file << 1 << sep;
+        TM::apply(typeId, [&]<typename T>() { file << hh::tool::typeToStr<T>() << sep; });
+        file << channel << sep << src << sep << this->rank_;
+        for (auto const &info : infos) {
           file << sep << info.timestamp.count() << ',' << info.transmissionTime.count();
         }
         file << '\n';
