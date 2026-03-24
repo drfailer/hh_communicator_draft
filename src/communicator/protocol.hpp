@@ -2,6 +2,9 @@
 #define COMMUNICATOR_PROTOCOL
 #include <hedgehog.h>
 #include <memory>
+#if __cplusplus >= 202002L
+#include <span>
+#endif
 
 /// @brief Hedgehog namespace
 namespace hh {
@@ -22,7 +25,6 @@ namespace comm {
     [[nodiscard]] auto size() const { return len; }
   };
 #else
-  #include <span>
   using Buffer = std::span<char>;
 #endif
 
