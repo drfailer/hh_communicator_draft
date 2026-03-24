@@ -160,16 +160,15 @@ size_t writeBytes(std::vector<char> &buf, T const &data) {
 /// @brief Write a vector of data to a buffer of bytes.
 /// @tparam T Type of the data.
 /// @param buf  Buffer of bytes to write to.
-/// @param data Vector of data to write.
+/// @param data  Data to write.
+/// @param count Number of elements to write.
 /// @return Size of the buffer after the write.
 template <typename T>
-size_t writeVectorBytes(std::vector<char> &buf, std::vector<T> const &data) {
-  size_t dataCount = data.size();
+size_t writeBytes(std::vector<char> &buf, T *data, size_t count) {
+  assert(data != nullptr);
   size_t pos = buf.size();
-  buf.resize(pos + sizeof(dataCount) + sizeof(T) * dataCount);
-  std::memcpy(&buf[pos], &dataCount, sizeof(dataCount));
-  pos += sizeof(dataCount);
-  std::memcpy(&buf[pos], data.data(), sizeof(T) * dataCount);
+  buf.resize(pos + sizeof(T) * count);
+  std::memcpy(&buf[pos], data, sizeof(T) * count);
   return buf.size();
 }
 
@@ -186,20 +185,19 @@ size_t readBytes(std::vector<char> const &buf, size_t pos, T &data) {
   return pos + sizeof(T);
 }
 
-/// @brief Read some bytes into the given vector of data starting at pos.
+/// @brief Read count elements into the given buffer starting at pos.
 /// @tparam T Type of the data.
 /// @param buf  Buffer to read.
 /// @param pos  Position in the buffer to start reading.
-/// @param data Vector of data to read into.
+/// @param data  Data to read.
+/// @param count Number of elements to read.
 /// @return Position of the next data in the buffer.
 template <typename T>
-size_t readVectorBytes(std::vector<char> const &buf, size_t pos, std::vector<T> &data) {
-  size_t dataCount = 0;
-  pos = readBytes(buf, pos, dataCount);
-  data.resize(dataCount);
-  assert(pos + sizeof(T) * dataCount <= buf.size());
-  std::memcpy(data.data(), &buf[pos], sizeof(T) * dataCount);
-  return pos + sizeof(T) * dataCount;
+size_t readBytes(std::vector<char> const &buf, size_t pos, T *data, size_t count) {
+  assert(data != nullptr);
+  assert(pos + count * sizeof(T) <= buf.size());
+  std::memcpy(data, &buf[pos], sizeof(T) * count);
+  return pos + sizeof(T) * count;
 }
 
 /// @brief Helper function that appends `args` to the string. If args
