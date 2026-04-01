@@ -5,6 +5,8 @@
 #include "../stats.hpp"
 #include <cassert>
 #include <thread>
+#include <condition_variable>
+#include <mutex>
 
 /// @brief Hedgehog namespace
 namespace hh {
@@ -139,10 +141,32 @@ public:
   /// @brief Give access to the mutex to the implementation.
   /// @return mutex.
   std::mutex &mutex() { return mutex_; }
+
+  // used by the communicators to know when to terminate
+  void waitForTermination() {
+    std::unique_lock<std::mutex> lk(this->termination_mutex_);
+    this->termination_cv_.wait(lk, [&]() { return this->terminated_; });
+  }
+
+  // should be called when finish pushing data
+  void terminate() {
+    this->barrier();
+    {
+      std::unique_lock<std::mutex> lk(this->termination_mutex_);
+      this->terminated_ = true;
+    }
+    this->termination_cv_.notify_all();
+  }
+
 private:
   bool       profilingEnabled_ = false; ///< profiling flag.
   std::mutex mutex_;                    ///< mutex for synchronization.
   time_t     startTime_;                ///< Program start time point (profiling).
+
+  // termination data
+  std::mutex termination_mutex_;
+  std::condition_variable termination_cv_;
+  bool terminated_ = false;
 };
 
 } // end namespace comm

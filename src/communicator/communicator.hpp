@@ -9,6 +9,7 @@
 #include "tool/memory_manager.hpp"
 #include "type_map.hpp"
 #include <cassert>
+#include <atomic>
 #include <map>
 #include <utility>
 #include <vector>
@@ -98,15 +99,6 @@ public:
   /// @param threshold Threshold value.
   void sendThreshold(size_t threshold) { this->sendThreshold_ = threshold; }
 
-  /// @brief Returns if the queues are empty.
-  /// @return True if there are pending information, false otherwise.
-  bool hasPendingOperations() const {
-      return queueHasPendingOperations(this->sendOps_)
-          || queueHasPendingOperations(this->recvOps_)
-          || !this->sendQueue_.empty()
-          || !this->createDataOps_.empty();
-  }
-
   /// @brief Send `data` to the given `dests`.
   /// @tparam T Type of the data to send.
   /// @param dests List of destination ranks.
@@ -125,13 +117,8 @@ public:
 
   /// @brief Initialize the communicator.
   void init() {
-    this->senderPortState_ = PortState::Opened;
-    this->recverPortState_ = PortState::Opened;
-    this->connections_ = std::vector(this->nbProcesses(), Connection{true, 0, 0});
-    this->connections_[this->rank()].connected = false;
-    this->signalBufferMem_ = std::vector<char>(1 + sizeof(size_t) * this->nbProcesses());
-    this->sendCountsMap_ = std::vector<size_t>(this->nbProcesses() * this->nbProcesses(), 0);
-    this->fini_ = false;
+    this->signalBufferMem_ = std::vector<char>(1);
+    this->fini_.store(false);
 
     // TODO: we should post a recv for the disconnection signal here
 
@@ -142,11 +129,19 @@ public:
   /// @param addResult Function that gives access to the `task->addResult`
   ///                  method (this is used when receiving data).
   void run(auto addResult) {
-    while (this->senderPortState_ != PortState::Closed || this->recverPortState_ != PortState::Closed) {
-      progressSender(addResult);
-      progressRecver(addResult);
+    comm::Signal signal = comm::Signal::None;
+    comm::Header header = {0, 0, 0, 0, 0};
+
+    while (!this->fini_.load()) {
+      processSendOpsQueue(addResult);
+      recvSignal(signal, header);
+      assert(signal != comm::Signal::Disconnect);
+      processCreateDataQueue();
+      processRecvOpsQueue(addResult);
       progressHints();
     }
+    finalizeHints();
+    flush();
   }
 
   /// @brief This function must be called when the core task terminates to
@@ -160,187 +155,8 @@ public:
   ///        the counters) before terminating (this is when the communicator
   ///        thread can be joined).
   void fini() {
-    this->fini_ = true;
-    finalizeHints();
-  }
-
-private:
-  /// @brief Enum that represents the states of the sender and receiver ports
-  ///        (both the sender and the receiver are state machines).
-  enum class PortState { Opened, ClosingMaster, ClosingSlave, Closed };
-
-  /// @brief Progress the sender state machine.
-  /// @param addResult Function that allow the communicator to call the
-  ///                  `addResult` method of the corresponding task. The
-  ///                  function is used when one of the send destination is the
-  ///                  current rank. The function is only called when all the
-  ///                  network send requests are done (because we don't want
-  ///                  the data to be mutated before the network transfer is
-  ///                  completed, so we wait before sending the data to the
-  ///                  other task on the current rank).
-  void progressSender(auto addResult) {
-    switch (this->senderPortState_) {
-    case PortState::Opened:
-      processSendOpsQueue(addResult);
-      if (this->fini_) {
-        this->senderPortState_ = this->rank() == 0 ? PortState::ClosingMaster : PortState::ClosingSlave;
-      }
-      break;
-    case PortState::ClosingMaster:
-      if (allDisconnectionSignalsReceived()) {
-        processSendOpsQueue(addResult, true);
-        assert(this->sendOps_.empty());
-        sendDisconnectionSignalToSlaves();
-        processSendOpsQueue(addResult, true);
-        this->senderPortState_ = PortState::Closed;
-      } else {
-        processSendOpsQueue(addResult);
-      }
-      break;
-    case PortState::ClosingSlave:
-      assert(this->rank() != 0);
-      processSendOpsQueue(addResult, true);
-      assert(this->sendOps_.empty());
-      sendDisconnectionSignalToMaster();
-      processSendOpsQueue(addResult, true);
-      this->senderPortState_ = PortState::Closed;
-      break;
-    case PortState::Closed:
-      assert(this->sendOps_.empty());
-      break;
-    }
-  }
-
-  /// @brief Progress the receiver state machine.
-  /// @param addResult Function that allow the communicator to call the
-  ///                  `addResult` method of the corresponding task. The
-  ///                  function is used to transfer the received data to the
-  ///                  rest of the graph.
-  void progressRecver(auto addResult) {
-    comm::Signal signal = comm::Signal::None;
-    comm::Header header = {0, 0, 0, 0, 0};
-
-    switch (this->recverPortState_) {
-    case PortState::Opened:
-      recvSignal(signal, header);
-
-      switch (signal) {
-      case comm::Signal::None:
-        break;
-      case comm::Signal::Disconnect:
-        if (this->rank() == 0) {
-          recvDisconnectionSignalFromSlave(header);
-        } else {
-          recvDisconnectionSignalFromMaster();
-        }
-        break;
-      case comm::Signal::Data:
-        break;
-      }
-      processCreateDataQueue();
-      processRecvOpsQueue(addResult);
-
-      if (!isConnectedOrExpectsMorePackages() && !hasPendingOperations()) {
-        this->recverPortState_ = PortState::ClosingSlave;
-      }
-      break;
-    case PortState::ClosingMaster: // fallthrough
-    case PortState::ClosingSlave:
-      flushRecvQueueAndWarehouse();
-      this->recverPortState_ = PortState::Closed;
-      break;
-    case PortState::Closed:
-      break;
-    }
-  }
-
-private:
-  /// @brief Structure that contains connection information for a particular
-  ///        rank (used in a list).
-  struct Connection {
-    bool   connected; ///< connection flag.
-    size_t sendCount; ///< number of package sent to the destination.
-    size_t recvCount; ///< number of package received by the sender.
-  };
-
-  /// @brief Tests if all disconnection signals are received.
-  /// @return True if all senders are disconnect, false otherwise.
-  bool allDisconnectionSignalsReceived() const {
-    for (auto const &connection : this->connections_) {
-      if (connection.connected) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  /// @brief Tests if all disconnection signals are received and all the
-  ///        packages from each sender are received.
-  /// @return True if all senders are disconnect and all packages are received,
-  ///         false otherwise.
-  bool isConnectedOrExpectsMorePackages() const {
-    for (auto const &connection : this->connections_) {
-      if (connection.connected || connection.recvCount < connection.sendCount) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /// @brief Send disconnection signal and package counts to the master process
-  ///        (used by slaves sender).
-  void sendDisconnectionSignalToMaster() {
-    Header header(this->rank(), 1, 0, this->channel_, 0);
-
-    assert(this->sendOps_.empty());
-
-    this->signalBufferMem_[0] = (char)Signal::Disconnect;
-    std::memcpy(&this->signalBufferMem_[1], this->packagesCount_.data(), this->nbProcesses() * sizeof(size_t));
-    this->service_->send(header, 0, Buffer{this->signalBufferMem_.data(), this->signalBufferMem_.size()});
-  }
-
-  /// @brief Send disconnection signal and package counts to the slaves process
-  ///        (used by master sender).
-  void sendDisconnectionSignalToSlaves() {
-    Header header(this->rank(), 1, 0, this->channel_, 0);
-
-    this->signalBufferMem_[0] = (char)Signal::Disconnect;
-    for (size_t dest = 1; dest < this->nbProcesses(); ++dest) {
-      this->sendCountsMap_[dest * this->nbProcesses()] = this->packagesCount_[dest];
-      std::memcpy(&this->signalBufferMem_[1], &this->sendCountsMap_[dest * this->nbProcesses()],
-                  this->nbProcesses() * sizeof(size_t));
-      this->service_->send(header, dest, Buffer{this->signalBufferMem_.data(), this->signalBufferMem_.size()});
-    }
-  }
-
-  /// @brief Receive the disconnection signal from the slaves (used by the
-  ///        master receiver).
-  /// @param header Header of the disconnection request (used to know the source).
-  void recvDisconnectionSignalFromSlave(Header const &header) {
-    size_t *sendCounts = (size_t *)(&this->signalBufferMem_[1]);
-
-    assert(this->connections_[header.source].connected == true);
-    this->connections_[header.source].connected = false;
-    this->connections_[header.source].sendCount = sendCounts[0];
-
-    for (size_t dest = 0; dest < this->nbProcesses(); ++dest) {
-      this->sendCountsMap_[dest * this->nbProcesses() + header.source] = sendCounts[dest];
-    }
-  }
-
-  /// @brief Receive the disconnection signal from the master (used by the
-  ///        slaves receivers).
-  void recvDisconnectionSignalFromMaster() {
-    size_t *sendCounts = (size_t *)(&this->signalBufferMem_[1]);
-
-    for (size_t source = 0; source < this->nbProcesses(); ++source) {
-      if (source == this->rank()) {
-        continue;
-      }
-      assert(this->connections_[source].connected == true);
-      this->connections_[source].connected = false;
-      this->connections_[source].sendCount = sendCounts[source];
-    }
+    this->service_->waitForTermination();
+    this->fini_.store(true);
   }
 
 private:
@@ -637,8 +453,10 @@ private:
         data->postRecv();
       }
       addResult(data);
+      // TODO: empty the std::shared_ptr<T> to reduce the reference count once done receiving.
+      // TODO: this is a bandaid solution, maybe there is a better fix?
+      storage.data = std::shared_ptr<T>(nullptr);
     });
-    ++this->connections_[storage.source].recvCount;
   }
 
   /// @brief Try to allocated a new data using the memory manager. If the
@@ -679,29 +497,22 @@ private:
     return {storageId, status};
   }
 
+    /******************************************************************************/
+    /*                                   flush                                    */
+    /******************************************************************************/
+
   /// @brief Cancel the remaining received requests and clear the queue.
   ///
   /// Note: with the current implementation, the receiver is forced to receiver
   /// all the requests, which means when this function is called, the queues
   /// are necessarily empty. However, this function may be more useful if this
   /// behavior changes.
-  void flushRecvQueueAndWarehouse() {
-    if (!this->recvOps_.empty()) {
-      log::info("[", rank(), "][", channel(), "] Cancelling ", this->recvOps_.size(), " recv operations.");
-    }
+  void flush() {
     for (auto &op : this->recvOps_) {
       this->service_->requestCancel(op.request);
     }
     this->recvOps_.clear();
-
-    if (!this->createDataOps_.empty()) {
-      log::info("[", rank(), "][", channel(), "] Cancelling ", this->createDataOps_.size(), " create data operations.");
-    }
     this->createDataOps_.clear();
-
-    if (!this->wh_.recvStorage.empty()) {
-      log::info("[", rank(), "][", channel(), "] Removing ", this->wh_.recvStorage.size(), " from storage.");
-    }
     for (auto &storage : this->wh_.recvStorage) {
       assert(storage.typeId < TM::size);
       TM::apply(storage.typeId, [&]<typename T>() {
@@ -710,6 +521,11 @@ private:
       });
     }
     this->wh_.recvStorage.clear();
+    this->sendQueue_.clear();
+    for (auto &op : this->sendOps_) {
+      this->service_->requestCancel(op.request);
+    }
+    this->sendOps_.clear();
   }
 
 /******************************************************************************/
@@ -861,13 +677,10 @@ private:
   channel_t    channel_ = 0;       ///< Channel id.
 
   // progress loop data
-  PortState               senderPortState_; ///< State of the sender port.
-  PortState               recverPortState_; ///< State of the receiver port.
-  std::vector<Connection> connections_;     ///< List of connection information per rank.
-  bool                    fini_ = false;    ///< Termination flag.
+  std::atomic<bool>        fini_ = false;    ///< Termination flag.
 
   // queues
-  std::mutex                 sendQueueMutex_; ///< mutex for the send queue.
+  std::mutex           sendQueueMutex_; ///< mutex for the send queue.
   Queue<SendRequest>   sendQueue_;      ///< Queue used to limit the number of send operations.
   Queue<CommOperation> sendOps_;        ///< Queue of send operations.
   Queue<Header>        createDataOps_;  ///< Queue of create data operation (wait for available memory).
@@ -882,7 +695,6 @@ private:
 
   // diconnection buffer
   std::vector<char>   signalBufferMem_; ///< Buffer memory used to send the disconnection signal.
-  std::vector<size_t> sendCountsMap_;   ///< 2D array: [send][dest]->packageCount (used by the master process).
 
   // memory manager
   std::shared_ptr<tool::MemoryManager<Types...>> mm_ = nullptr; ///< Pointer to the memory manager.

@@ -138,9 +138,13 @@ int main(int argc, char **argv) {
         graph.pushData(A);
         graph.pushData(B);
         graph.pushData(C);
+        graph.getBlockingResult();
     }
-    service->barrier();
+
+    // TODO: this should be the "finishPushingData" method of a distributed graph
+    service->terminate();
     graph.finishPushingData();
+
     graph.waitForTermination();
     logh::info("graph terminated");
     timer_end(graph_execution);
