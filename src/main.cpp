@@ -109,6 +109,7 @@ int main(int argc, char **argv) {
       graph.pushData(data);
   }
   service->barrier();
+  service->terminate();
   graph.finishPushingData();
 
   if (service->rank() == 0) {
