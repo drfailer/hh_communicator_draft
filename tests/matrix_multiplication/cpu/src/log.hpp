@@ -6,8 +6,8 @@
  * AUTHOR: drfailer
  */
 
-#ifndef HH_LOG_H
-#define HH_LOG_H
+#ifndef LOG_H
+#define LOG_H
 #include <iostream>
 #include <sstream>
 #include <tuple>
@@ -25,25 +25,21 @@
 #define LOG_TODO stderr
 #define LOG_DBG stderr
 
-namespace hh::logh {
+namespace logh {
 
 enum class IG : int {
     Default = 0,
-    ReceiverDisconnect,
-    SenderDisconnect,
-    ReceiverEnd,
-    SenderEnd,
-    Core,
-    CoreTaskLoop,
-    CoreTerminate,
-    Comm,
-    Stats,
-    CommunicatorTaskExecute,
+    DestDB,
+    ProductState,
+    ProductTask,
+    SumState,
+    SumTask,
+    CopyTileState,
 };
-// #define HH_ACTIVE_INFO_GROUPS IG::Default, IG::ReceiverDisconnect, IG::SenderDisconnect, IG::ReceiverEnd, IG::SenderEnd, IG::Core, IG::CoreTaskLoop, IG::CoreTerminate, IG::Comm, IG::Stats, IG::CommunicatorTaskExecute
-#define HH_ACTIVE_INFO_GROUPS IG::Default
+#define ACTIVE_INFO_GROUPS IG::Default
+// #define ACTIVE_INFO_GROUPS IG::Default, IG::DestDB, IG::ProductState, IG::SumState, IG::CopyTileState, IG::ProductTask, IG::SumTask
 
-} // namespace hh::logh
+} // namespace logh
 
 /******************************************************************************/
 
@@ -55,7 +51,7 @@ enum class IG : int {
 #define MAG "\033[0;35m"
 #define CRESET "\033[0m"
 
-namespace hh::logh {
+namespace logh {
 
 template <typename... Types>
 constexpr bool is_info_group_active(IG group, Types... active_groups) {
@@ -146,42 +142,42 @@ void log(FILE *fd, char const *start, Types... msg) {
 template <typename... Types>
 void infog(IG group, std::string const &group_name, Types... msg) {
 #if defined(LOG_INFO)
-    if (is_info_group_active(group, HH_ACTIVE_INFO_GROUPS)) {
+    if (is_info_group_active(group, ACTIVE_INFO_GROUPS)) {
         log(LOG_INFO, BBLU "INFO[", group_name, "]: " CRESET, msg...);
     }
 #endif
 }
-#define HH_INFOG(group, ...) hh::logh::infog(logh::IG::group, #group, __VA_ARGS__)
+#define INFOG(group, ...) logh::infog(logh::IG::group, #group, __VA_ARGS__)
 
 template <typename... Types> void info(Types... msg) {
 #if defined(LOG_INFO)
-    if (is_info_group_active(IG::Default, HH_ACTIVE_INFO_GROUPS)) {
+    if (is_info_group_active(IG::Default, ACTIVE_INFO_GROUPS)) {
         log(LOG_INFO, BBLU "INFO: " CRESET, msg...);
     }
 #endif
 }
-#define HH_INFO(...) hh::logh::info(__VA_ARGS__)
+#define INFO(...) logh::info(__VA_ARGS__)
 
 template <typename... Types> void warn(Types... msg) {
 #if defined(LOG_WARN)
     log(LOG_WARN, BYEL "WARN: " CRESET, msg...);
 #endif
 }
-#define HH_WARN(...) hh::logh::warn(__VA_ARGS__)
+#define WARN(...) logh::warn(__VA_ARGS__)
 
 template <typename... Types> void error(Types... msg) {
 #if defined(LOG_ERR)
     log(LOG_ERR, BRED "ERROR: " CRESET, msg...);
 #endif
 }
-#define HH_ERROR(...) hh::logh::error(__VA_ARGS__)
+#define ERROR(...) logh::error(__VA_ARGS__)
 
 template <typename... Types> void todo(Types... msg) {
 #if defined(LOG_TODO)
     log(LOG_TODO, BGRN "TODO: " CRESET, msg...);
 #endif
 }
-#define HH_TODO(...) hh::logh::todo(__VA_ARGS__)
+#define TODO(...) logh::todo(__VA_ARGS__)
 
 template <typename T>
 void dbg([[maybe_unused]] std::string const &variable_name, T variable) {
@@ -193,8 +189,8 @@ void dbg([[maybe_unused]] std::string const &variable_name, T variable) {
     }
 #endif
 }
-#define HH_DBG(var) hh::logh::dbg(#var, var)
+#define DBG(var) logh::dbg(#var, var)
 
-} // namespace hh::logh
+} // namespace logh
 
 #endif

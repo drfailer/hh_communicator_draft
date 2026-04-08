@@ -3,7 +3,7 @@
 #include "../../../common/utest.h"
 #include "graph.hpp"
 #include <openblas/cblas.h>
-#include <communicator/service/mpi_service.hpp>
+#include <hedgehog_comm.h>
 
 hh::comm::rank_t GLOBAL_RANK = 0;
 
@@ -138,9 +138,13 @@ int main(int argc, char **argv) {
         graph.pushData(A);
         graph.pushData(B);
         graph.pushData(C);
+        graph.getBlockingResult();
     }
-    service->barrier();
+
+    // TODO: this should be the "finishPushingData" method of a distributed graph
+    service->terminate();
     graph.finishPushingData();
+
     graph.waitForTermination();
     logh::info("graph terminated");
     timer_end(graph_execution);

@@ -5,44 +5,32 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/lib/hedgehog/cmake_modules")
+option(BUILD_COMM_MAIN "Compiles main function for testing changes to API" OFF)
 
-set(Hedgehog_INCLUDE_DIR lib/hedgehog/)
+include(FetchContent)
+FetchContent_Declare(
+    hedgehog
+    GIT_REPOSITORY https://github.com/usnistgov/hedgehog.git
+    GIT_TAG        master
+    FIND_PACKAGE_ARGS NAMES hedgehog
+)
+FetchContent_MakeAvailable(hedgehog)
 
-# Need to defined variable Hedgehog_INCLUDE_DIR to the hedgehog path hedgehog
-find_package(Hedgehog REQUIRED)
 find_package(MPI REQUIRED)
-
-set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} ${Hedgehog_CXX_FLAGS})
 
 if (NOT MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Werror -Wuninitialized -Wconversion -g")
 	# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Werror -Wuninitialized -Wno-sign-compare -pedantic -O3")
 endif (NOT MSVC)
 
-# files
-set(source_files src/main.cpp)
+# define hedgehog::comm library
+add_library(hh_communicator INTERFACE)
+target_include_directories(hh_communicator INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src/communicator)
+target_link_libraries(hh_communicator INTERFACE hedgehog::hedgehog MPI::MPI_CXX)
+add_library(hedgehog::comm ALIAS hh_communicator)
 
 # executable
-add_executable(hh_communicator ${source_files})
-add_definitions(-DOMPI_SKIP_MPICXX)
-target_include_directories(hh_communicator
-    PUBLIC
-    lib/serializer-cpp/
-    lib/hedgehog/
-    /home/rvc1/Programming/usr/include
-    /home/rvc1/Programming/projects/clh.git/master/
-    /home/rvc1/Programming/projects/tracer-c/tracer/
-    ${MPI_INCLUDE_PATH}
-)
-target_link_directories(hh_communicator
-    PRIVATE
-    /home/rvc1/Programming/projects/clh.git/master/build/lib/
-    /home/rvc1/Programming/projects/tracer-c/build/lib/
-)
-target_link_libraries(hh_communicator
-    PRIVATE
-    clh
-    tracer
-    ${MPI_C_LIBRARIES}
-)
+if(BUILD_COMM_MAIN)
+    add_executable(hh_communicator_main src/main.cpp)
+    target_link_libraries(hh_communicator_main PUBLIC hedgehog::comm)
+endif(BUILD_COMM_MAIN)

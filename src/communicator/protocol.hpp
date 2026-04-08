@@ -1,7 +1,10 @@
 #ifndef COMMUNICATOR_PROTOCOL
 #define COMMUNICATOR_PROTOCOL
-#include "hedgehog/src/tools/meta_functions.h"
+#include <hedgehog.h>
 #include <memory>
+#if __cplusplus >= 202002L
+#include <span>
+#endif
 
 /// @brief Hedgehog namespace
 namespace hh {
@@ -13,10 +16,17 @@ namespace comm {
 /******************************************************************************/
 
 /// @brief Buffer structure.
-struct Buffer {
-  char  *mem; ///< Pointer to the data.
-  size_t len; ///< Length of the data.
-};
+#if __cplusplus < 202002L
+  struct Buffer {
+    char  *mem; ///< Pointer to the data.
+    size_t len; ///< Length of the data.
+
+    [[nodiscard]] auto data() const { return mem; }
+    [[nodiscard]] auto size() const { return len; }
+  };
+#else
+  using Buffer = std::span<char>;
+#endif
 
 /******************************************************************************/
 /*                                   Signal                                   */

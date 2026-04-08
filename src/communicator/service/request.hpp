@@ -1,7 +1,7 @@
 #ifndef COMMUNICATOR_SERVICE_REQUEST
 #define COMMUNICATOR_SERVICE_REQUEST
 #include "../tool/log.hpp"
-#include <hedgehog/hedgehog.h>
+#include <hedgehog.h>
 #include <source_location>
 #include <thread>
 #include <type_traits>

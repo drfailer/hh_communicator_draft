@@ -1,10 +1,8 @@
 #ifndef COMMUNICATOR_COMMUNICATOR_CORE_TASK
 #define COMMUNICATOR_COMMUNICATOR_CORE_TASK
-#include "../log.hpp"
 #include "communicator.hpp"
 #include "tool/memory_manager.hpp"
-#include <hedgehog/hedgehog.h>
-#include "stats.hpp"
+#include <hedgehog.h>
 #include <algorithm>
 #include <condition_variable>
 #include <numeric>
@@ -108,19 +106,8 @@ public:
       infos += mm_->extraPrintingInformation();
     }
 
-    if (!communicator_.service()->profilingEnabled() || communicator_.nbProcesses() == 1) {
-      return infos;
-    }
-
-    communicator_.service()->barrier();
-    if (communicator_.rank() == 0) {
-      infos += comm::CommTaskStats::template extraPrintingInformation<comm::TypeMap<Types...>>(
-              communicator_.gatherStats(),
-              communicator_.service()->startTime(),
-              communicator_.channel(),
-              communicator_.nbProcesses());
-    } else {
-      communicator_.sendStats();
+    if (this->communicator_.service()->profilingEnabled() && this->communicator_.nbProcesses() != 1) {
+      infos += this->communicator_.profiler().extraPrintingInformation();
     }
     return infos;
   }

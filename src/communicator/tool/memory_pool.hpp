@@ -1,8 +1,8 @@
 #ifndef COMMUNICATOR_TOOL_MEMORY_POOL
 #define COMMUNICATOR_TOOL_MEMORY_POOL
 #include "log.hpp"
-#include "../stats.hpp"
-#include "hedgehog/src/tools/meta_functions.h"
+#include <hedgehog.h>
+#include "../profiling/profiling_tools.hpp"
 #include "memory_manager.hpp"
 #include <cassert>
 #include <chrono>
@@ -202,7 +202,7 @@ public:
   template <typename T>
   std::shared_ptr<T> allocate(MemoryManagerAllocateMode mode = MemoryManagerAllocateMode::Fail,
                               std::source_location       loc = std::source_location::current()) {
-    return static_cast<SingleTypeMemoryPool<T> *>(this)->allocate(mode, loc);
+    return SingleTypeMemoryPool<T>::allocate(mode, loc);
   }
 
   /// @brief Call the release method for the type `T`.
@@ -211,7 +211,7 @@ public:
   /// @param loc  Source location.
   template <typename T>
   void release(std::shared_ptr<T> &&data, std::source_location loc = std::source_location::current()) {
-    static_cast<SingleTypeMemoryPool<T> *>(this)->release(std::move(data), loc);
+    SingleTypeMemoryPool<T>::release(std::move(data), loc);
   }
 
   /// @brief Call the fill method for the type `T`.
@@ -220,7 +220,7 @@ public:
   /// @param args  Arguments to give to the `T` constructor.
   template <typename T>
   void fill(size_t count, auto &&...args) {
-    static_cast<SingleTypeMemoryPool<T> *>(this)->fill(count, std::forward<decltype(args)>(args)...);
+    SingleTypeMemoryPool<T>::fill(count, args...);
   }
 
   /// @brief Returns the extra printing information for all the pools.
@@ -228,8 +228,7 @@ public:
   ///         dot file.
   std::string extraPrintingInformation(std::string const &eol = "\\l") const {
     std::string infos = "MemoryManager: {" + eol;
-    ([&] { infos.append("    " + static_cast<SingleTypeMemoryPool<Types> const*>(this)->extraPrintingInformation() + eol); }(),
-     ...);
+    ([&] { infos.append("    " + SingleTypeMemoryPool<Types>::extraPrintingInformation() + eol); }(),...);
     return infos + "}" + eol;
   }
 };

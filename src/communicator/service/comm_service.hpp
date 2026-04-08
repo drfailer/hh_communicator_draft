@@ -1,10 +1,13 @@
 #ifndef COMMUNICATOR_COMM_SERVICE
 #define COMMUNICATOR_COMM_SERVICE
 #include "../protocol.hpp"
+#include "../profiling/profiling_tools.hpp"
 #include "request.hpp"
-#include "../stats.hpp"
 #include <cassert>
 #include <thread>
+#include <condition_variable>
+#include <mutex>
+#include <chrono>
 
 /// @brief Hedgehog namespace
 namespace hh {
@@ -114,7 +117,7 @@ public:
   virtual bool probeSuccess(Request request) = 0;
 
   /// @brief Synchronize all processes up to a certain point.
-  virtual void barrier() = 0;
+  virtual void barrier(channel_t channel = 0) = 0;
 
   /// @brief Rank accessor.
   /// @return Rank of the current process.
@@ -139,10 +142,32 @@ public:
   /// @brief Give access to the mutex to the implementation.
   /// @return mutex.
   std::mutex &mutex() { return mutex_; }
+
+  // used by the communicators to know when to terminate
+  void waitForTermination() {
+    std::unique_lock<std::mutex> lk(this->termination_mutex_);
+    this->termination_cv_.wait(lk, [&]() { return this->terminated_; });
+  }
+
+  // should be called when finish pushing data
+  void terminate() {
+    this->barrier();
+    {
+      std::unique_lock<std::mutex> lk(this->termination_mutex_);
+      this->terminated_ = true;
+    }
+    this->termination_cv_.notify_all();
+  }
+
 private:
   bool       profilingEnabled_ = false; ///< profiling flag.
   std::mutex mutex_;                    ///< mutex for synchronization.
   time_t     startTime_;                ///< Program start time point (profiling).
+
+  // termination data
+  std::mutex termination_mutex_;
+  std::condition_variable termination_cv_;
+  bool terminated_ = false;
 };
 
 } // end namespace comm

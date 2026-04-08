@@ -1,3 +1,0 @@
-[submodule "lib/hedgehog"]
-	path = lib/hedgehog
-	url = https://github.com/usnistgov/hedgehog.git

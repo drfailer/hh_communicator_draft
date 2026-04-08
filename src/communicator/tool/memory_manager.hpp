@@ -5,7 +5,7 @@
 #include <source_location>
 #include <type_traits>
 #include <sstream>
-#include <hedgehog/hedgehog.h>
+#include <hedgehog.h>
 
 /// The memory manager is used to allocated memory on the receiver end of the
 /// communicator. It can also be used freely to control the amount of memory
@@ -178,7 +178,7 @@ struct MemoryManager final : SingleTypeMemoryManagerAbstraction<Types>... {
   template <typename T>
   std::shared_ptr<T> allocate(MemoryManagerAllocateMode mode = MemoryManagerAllocateMode::Fail,
                               std::source_location      loc = std::source_location::current()) {
-    return static_cast<SingleTypeMemoryManagerAbstraction<T> *>(this)->allocate(mode, loc);
+    return SingleTypeMemoryManagerAbstraction<T>::allocate(mode, loc);
   }
 
   /// @brief Call the `release` method of the memory manager for the given type.
@@ -187,7 +187,7 @@ struct MemoryManager final : SingleTypeMemoryManagerAbstraction<Types>... {
   /// @param loc  Source location.
   template <typename T>
   void release(std::shared_ptr<T> &&data, std::source_location loc = std::source_location::current()) {
-    static_cast<SingleTypeMemoryManagerAbstraction<T> *>(this)->release(std::move(data), loc);
+    SingleTypeMemoryManagerAbstraction<T>::release(std::move(data), loc);
   }
 
   /// @brief Collect the extra printing information of the memory managers of
@@ -197,13 +197,7 @@ struct MemoryManager final : SingleTypeMemoryManagerAbstraction<Types>... {
   /// @param loc  Source location.
   std::string extraPrintingInformation(std::string const &eol = "\\l") const {
     std::string infos = "MemoryManager: {" + eol;
-    (
-        [&] {
-          infos.append(
-              "    " + static_cast<SingleTypeMemoryManagerAbstraction<Types> const *>(this)->extraPrintingInformation()
-              + eol);
-        }(),
-        ...);
+    ([&] { infos.append("    " + SingleTypeMemoryManagerAbstraction<Types>::extraPrintingInformation()+ eol); }(),...);
     return infos + "}" + eol;
   }
 };

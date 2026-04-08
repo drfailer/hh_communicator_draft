@@ -1,6 +1,5 @@
 #ifndef COMMUNICATOR_MPI_SERVICE
 #define COMMUNICATOR_MPI_SERVICE
-#include "../../log.hpp"
 #include "../protocol.hpp"
 #include "comm_service.hpp"
 #include "request.hpp"
@@ -27,14 +26,36 @@ public:
   MPIService(int *argc, char ***argv, bool profilingEnabled = false)
       : CommService(profilingEnabled) {
     int32_t provided = 0;
-    // MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided);
-    MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided);
-    MPI_Comm_rank(MPI_COMM_WORLD, &this->rank_);
-    MPI_Comm_size(MPI_COMM_WORLD, &this->nbProcesses_);
+    int32_t isInitialized = false;
+    if(checkMPI(MPI_Initialized(&isInitialized)); !isInitialized) {
+      isInitializer_ = true;
+      checkMPI(MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided));
+    }
+    else {
+      checkMPI(MPI_Query_thread(&provided));
+    }
+
+    if(provided != MPI_THREAD_MULTIPLE and provided != MPI_THREAD_SERIALIZED) {
+      std::unordered_map<int32_t, std::string> threadMap = {
+        {MPI_THREAD_SINGLE, "MPI_THREAD_SINGLE"},
+        {MPI_THREAD_FUNNELED, "MPI_THREAD_FUNNELED"},
+        // {MPI_THREAD_SERIALIZED, "MPI_THREAD_SERIALIZED"},
+        // {MPI_THREAD_MULTIPLE, "MPI_THREAD_MULTIPLE"},
+      };
+      log::error("MPIService requires [MPI_THREAD_MULTIPLE|MPI_THREAD_SERIALIZED] but [", threadMap[provided], "] was provided!");
+      checkMPI(MPI_Abort(MPI_COMM_WORLD, 0));
+    }
+
+    checkMPI(MPI_Comm_rank(MPI_COMM_WORLD, &this->rank_));
+    checkMPI(MPI_Comm_size(MPI_COMM_WORLD, &this->nbProcesses_));
+
+    // set the 0 channel to be MPI_COMM_WORLD
+    this->comms_.emplace_back(MPI_COMM_WORLD);
   }
 
   /// @brief MPI Service destructor: calls MPI_Finalize.
-  ~MPIService() {
+  ~MPIService() override {
+    if(!isInitializer_) return;
     MPI_Finalize();
   }
 
@@ -103,7 +124,7 @@ public: // send ////////////////////////////////////////////////////////////////
     assert(header.typeId == testHeader.typeId);
     assert(header.bufferId == testHeader.bufferId);
 
-    checkMPI(MPI_Send(buffer.mem, (int)buffer.len, MPI_BYTE, (int)dest, tag, this->comms_[header.channel]));
+    checkMPI(MPI_Send(buffer.data(), (int)buffer.size(), MPI_BYTE, (int)dest, tag, this->comms_[header.channel]));
   }
 
   /// @brief Send a buffer to a given destination asynchronously (MPI_Isend).
@@ -124,7 +145,7 @@ public: // send ////////////////////////////////////////////////////////////////
     // ^^^ DEBUG ^^^
 
     r->comm = this->comms_[header.channel];
-    checkMPI(MPI_Isend(buffer.mem, (int)buffer.len, MPI_BYTE, (int)dest, tag, r->comm, &r->request));
+    checkMPI(MPI_Isend(buffer.data(), (int)buffer.size(), MPI_BYTE, (int)dest, tag, r->comm, &r->request));
     return r;
   }
 
@@ -137,7 +158,7 @@ public: // recv ////////////////////////////////////////////////////////////////
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPI_Status                  status;
     int                         tag = headerToTag(header);
-    checkMPI(MPI_Recv(buffer.mem, (int)buffer.len, MPI_BYTE, (int)header.source, tag, this->comms_[header.channel],
+    checkMPI(MPI_Recv(buffer.data(), (int)buffer.size(), MPI_BYTE, (int)header.source, tag, this->comms_[header.channel],
                       &status));
   }
 
@@ -150,7 +171,7 @@ public: // recv ////////////////////////////////////////////////////////////////
     int                         tag = headerToTag(header);
     MPIRequest                 *r = requestPool_.allocate();
     r->comm = this->comms_[header.channel];
-    checkMPI(MPI_Irecv(buffer.mem, (int)buffer.len, MPI_BYTE, (int)header.source, tag, r->comm, &r->request));
+    checkMPI(MPI_Irecv(buffer.data(), (int)buffer.size(), MPI_BYTE, (int)header.source, tag, r->comm, &r->request));
     return r;
   }
 
@@ -160,7 +181,7 @@ public: // recv ////////////////////////////////////////////////////////////////
   void recv(Request probeRequest, Buffer const &buffer) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPIRequest                 *r = (MPIRequest *)probeRequest;
-    checkMPI(MPI_Recv(buffer.mem, (int)buffer.len, MPI_BYTE, r->status.MPI_SOURCE, r->status.MPI_TAG, r->comm, &r->status));
+    checkMPI(MPI_Recv(buffer.data(), (int)buffer.size(), MPI_BYTE, r->status.MPI_SOURCE, r->status.MPI_TAG, r->comm, &r->status));
     requestPool_.release(r);
   }
 
@@ -172,7 +193,7 @@ public: // recv ////////////////////////////////////////////////////////////////
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPIRequest                 *r = (MPIRequest *)probeRequest;
     checkMPI(
-        MPI_Irecv(buffer.mem, (int)buffer.len, MPI_BYTE, r->status.MPI_SOURCE, r->status.MPI_TAG, r->comm, &r->request));
+        MPI_Irecv(buffer.data(), (int)buffer.size(), MPI_BYTE, r->status.MPI_SOURCE, r->status.MPI_TAG, r->comm, &r->request));
     return probeRequest;
   }
 
@@ -291,8 +312,8 @@ public: // requests ////////////////////////////////////////////////////////////
 public: // synchronization /////////////////////////////////////////////////////
 
   /// @brief Synchronize all processes up to a certain point (MPI_Barrier).
-  void barrier() override {
-    checkMPI(MPI_Barrier(MPI_COMM_WORLD));
+  void barrier(channel_t channel = 0) override {
+    checkMPI(MPI_Barrier(this->comms_[channel]));
   }
 
 public:
@@ -329,6 +350,7 @@ private:
   }
 
 private:
+  bool                    isInitializer_ = false;///< MPI initialized by MPIService?
   int                     rank_ = -1;            ///< MPI rank.
   int                     nbProcesses_ = -1;     ///< MPI comm size.
   RequestPool<MPIRequest> requestPool_ = {};     ///< Request memory pool to optimize request allocations.
