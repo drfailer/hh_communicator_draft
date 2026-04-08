@@ -2,6 +2,7 @@
 #define COMMUNICATOR_PROFILING_PROFILING_TOOLS
 #include "../protocol.hpp"
 #include <functional>
+#include <ostream>
 
 /// @brief Hedgehog namespace
 namespace hh {
@@ -44,6 +45,11 @@ inline std::string durationToString(time_unit_t const &ns) {
     oss << ns.count() << "ns";
   }
   return oss.str();
+}
+
+inline std::ostream &operator<<(std::ostream &os, time_unit_t time) {
+  os << durationToString(time);
+  return os;
 }
 
 /// @brief Compute the average duration and the standard deviation of a list of durations.
@@ -144,83 +150,18 @@ inline std::pair<double, double> computeAvg(std::vector<double> const &values) {
   return {avg, stddev};
 }
 
-/// @brief Write data in a buffer of bytes.
-/// @tparam T Type of the data.
-/// @param buf  Buffer of bytes to write to.
-/// @param data Data to write.
-/// @return Size of the buffer after the write.
-template <typename T>
-size_t writeBytes(std::vector<char> &buf, T const &data) {
-  size_t pos = buf.size();
-  buf.resize(pos + sizeof(T));
-  std::memcpy(&buf[pos], &data, sizeof(T));
-  return buf.size();
-}
-
-/// @brief Write a vector of data to a buffer of bytes.
-/// @tparam T Type of the data.
-/// @param buf  Buffer of bytes to write to.
-/// @param data  Data to write.
-/// @param count Number of elements to write.
-/// @return Size of the buffer after the write.
-template <typename T>
-size_t writeBytes(std::vector<char> &buf, T *data, size_t count) {
-  assert(data != nullptr);
-  size_t pos = buf.size();
-  buf.resize(pos + sizeof(T) * count);
-  std::memcpy(&buf[pos], data, sizeof(T) * count);
-  return buf.size();
-}
-
-/// @brief Read some bytes into the given data starting at pos.
-/// @tparam T Type of the data.
-/// @param buf  Buffer to read.
-/// @param pos  Position in the buffer to start reading.
-/// @param data Data to read into.
-/// @return Position of the next data in the buffer.
-template <typename T>
-size_t readBytes(std::vector<char> const &buf, size_t pos, T &data) {
-  assert(pos + sizeof(T) <= buf.size());
-  memcpy(&data, &buf[pos], sizeof(T));
-  return pos + sizeof(T);
-}
-
-/// @brief Read count elements into the given buffer starting at pos.
-/// @tparam T Type of the data.
-/// @param buf  Buffer to read.
-/// @param pos  Position in the buffer to start reading.
-/// @param data  Data to read.
-/// @param count Number of elements to read.
-/// @return Position of the next data in the buffer.
-template <typename T>
-size_t readBytes(std::vector<char> const &buf, size_t pos, T *data, size_t count) {
-  assert(data != nullptr);
-  assert(pos + count * sizeof(T) <= buf.size());
-  std::memcpy(data, &buf[pos], sizeof(T) * count);
-  return pos + sizeof(T) * count;
-}
-
-/// @brief Helper function that appends `args` to the string. If args
-///        contains a vector of values or duration, the average and mean will
-///        be appended.
-/// @param str  String to append to.
-/// @param args Content to append to the string.
-inline void strAppend(std::string &str, auto const &...args) {
-  std::ostringstream oss;
+inline void print(std::ostream &os, auto const &...args) {
   (
     [&] {
-      if constexpr (std::is_same_v<decltype(args), std::vector<double> const &>) {
-        auto avg = computeAvg(args);
-        oss << avg.first << " +- " << avg.second;
-      } else if constexpr (std::is_same_v<decltype(args), std::vector<time_unit_t> const &>) {
-        auto avg = computeAvgDuration(args);
-        oss << durationToString(avg.first) << " +- " << durationToString(avg.second);
+      if constexpr (std::is_same_v<decltype(args), std::pair<double, double> const &>) {
+        os << args.first << " +- " << args.second;
+      } else if constexpr (std::is_same_v<decltype(args), std::pair<time_unit_t, time_unit_t> const &>) {
+        os << args.first << " +- " << args.second;
       } else {
-        oss << args;
+        os << args;
       }
     }(),
     ...);
-  str.append(oss.str() + "\\l");
 }
 
 template <typename TM>
@@ -228,6 +169,37 @@ std::string typeIdToStr(type_id_t typeId) {
   std::string result;
   TM::apply(typeId, [&]<typename T>() { result = hh::tool::typeToStr<T>(); });
   return result;
+}
+
+// JSONL generation helper functions
+
+template <typename T>
+inline void jsonl_add_entry(std::ostream &os, std::string const &name, T value, std::string const &sep = ", ") {
+  os << '"' << name << '"' << ": " << value << sep;
+}
+
+inline void jsonl_begin_obj(std::ostream &os, std::string const &name = "") {
+  if (name.empty()) {
+    os << "{ ";
+  } else {
+    os << '"' << name << '"' << ": { ";
+  }
+}
+
+inline void jsonl_end_obj(std::ostream &os, std::string const &sep = ", ") {
+  os << " }" << sep;
+}
+
+inline void jsonl_begin_list(std::ostream &os, std::string const &name = "") {
+  if (name.empty()) {
+    os << "[ ";
+  } else {
+    os << '"' << name << '"' << ": [ ";
+  }
+}
+
+inline void jsonl_end_list(std::ostream &os, std::string const &sep = ", ") {
+  os << " ]" << sep;
 }
 
 } // end namespace comm

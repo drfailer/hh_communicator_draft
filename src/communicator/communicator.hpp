@@ -49,7 +49,7 @@ public:
   Communicator(CommService *service)
       : service_(service),
         channel_(service->newChannel()),
-        profiler_(TM::size, service->nbProcesses(), service->rank(), service->startTime(), service->profilingEnabled()) {}
+        profiler_(TM::size, service) {}
 
 public:
   /// @brief Channel id accessor.
@@ -156,6 +156,8 @@ public:
   void fini() {
     this->service_->waitForTermination();
     this->fini_.store(true);
+    this->profiler_.compile<TM>();
+    this->profiler_.template generateTransmissionFile<TM>(this->channel());
   }
 
 private:

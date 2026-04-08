@@ -107,9 +107,7 @@ public:
     }
 
     if (this->communicator_.service()->profilingEnabled() && this->communicator_.nbProcesses() != 1) {
-      using TM = comm::TypeMap<Types...>;
-      infos += this->communicator_.profiler().template print<TM>().c_str();
-      this->communicator_.profiler().template generateTransmissionFile<TM>(this->communicator_.channel());
+      infos += this->communicator_.profiler().extraPrintingInformation();
     }
     return infos;
   }
