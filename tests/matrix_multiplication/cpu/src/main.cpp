@@ -3,7 +3,7 @@
 #include "../../../common/utest.h"
 #include "graph.hpp"
 #include <openblas/cblas.h>
-#include <communicator/service/mpi_service.hpp>
+#include <hedgehog_comm.h>
 
 hh::comm::rank_t GLOBAL_RANK = 0;
 

@@ -1,6 +1,4 @@
-#include "../../../src/communicator/communicator_task.hpp"
-#include "../../../src/communicator/service/mpi_service.hpp"
-#include "../../../src/communicator/tool/memory_pool.hpp"
+#include <hedgehog_comm.h>
 #include "../../common/ap.h"
 #include "../../common/defer.h"
 #include "../../common/timer.h"

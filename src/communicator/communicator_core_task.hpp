@@ -1,6 +1,5 @@
 #ifndef COMMUNICATOR_COMMUNICATOR_CORE_TASK
 #define COMMUNICATOR_COMMUNICATOR_CORE_TASK
-#include "../log.hpp"
 #include "communicator.hpp"
 #include "tool/memory_manager.hpp"
 #include <hedgehog.h>

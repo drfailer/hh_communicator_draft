@@ -1,6 +1,5 @@
 #ifndef COMMUNICATOR_MPI_SERVICE
 #define COMMUNICATOR_MPI_SERVICE
-#include "../../log.hpp"
 #include "../protocol.hpp"
 #include "comm_service.hpp"
 #include "request.hpp"

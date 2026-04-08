@@ -3,7 +3,7 @@
 #include "../tool/queue.hpp"
 #include "profiling_tools.hpp"
 #include <chrono>
-#include <hedgehog/hedgehog.h>
+#include <hedgehog.h>
 #include <sstream>
 
 /// @brief Hedgehog namespace

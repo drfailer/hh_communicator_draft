@@ -2,6 +2,7 @@
 #include <hedgehog.h>
 #include <iostream>
 #include <mutex>
+#include <log.h>
 
 std::mutex stdout_mutex;
 
@@ -38,25 +39,25 @@ struct TestGraph1 : hh::Graph<1, int, int> {
 
     in->setLambda<int>([service](std::shared_ptr<int> data, auto self) {
       int output = *data + 1;
-      hh::logh::log(stdout, "[", service->rank(), "][in]: input = ", *data, ", output = ", output);
+      logh::info("[", service->rank(), "][in]: input = ", *data, ", output = ", output);
       *data += 1;
       self.addResult(data);
     });
     frgn1->setLambda<int>([service](std::shared_ptr<int> data, auto self) {
       int output = *data + 1;
-      hh::logh::log(stdout, "[", service->rank(), "][frng1]: input = ", *data, ", output = ", output);
+      logh::info("[", service->rank(), "][frng1]: input = ", *data, ", output = ", output);
       *data += 1;
       self.addResult(data);
     });
     frgn2->setLambda<int>([service](std::shared_ptr<int> data, auto self) {
       int output = *data * 2;
-      hh::logh::log(stdout, "[", service->rank(), "][frng2]: input = ", *data, ", output = ", output);
+      logh::info("[", service->rank(), "][frng2]: input = ", *data, ", output = ", output);
       *data *= 2;
       self.addResult(data);
     });
     out->setLambda<int>([service](std::shared_ptr<int> data, auto self) {
       int output = *data + 1;
-      hh::logh::log(stdout, "[", service->rank(), "][out]: input = ", *data, ", output = ", output);
+      logh::info("[", service->rank(), "][out]: input = ", *data, ", output = ", output);
       *data += 1;
       self.addResult(data);
     });
@@ -109,23 +110,23 @@ int main(int argc, char **argv) {
       graph.pushData(data);
   }
   service->barrier();
-  service->terminate();
-  graph.finishPushingData();
 
   if (service->rank() == 0) {
-    while (auto result = graph.getBlockingResult()) {
-      auto resultPtr = std::get<std::shared_ptr<int>>(*result);
+    for (size_t i = 0; i < 2; ++i) {
+      auto resultPtr = std::get<std::shared_ptr<int>>(*graph.getBlockingResult());
       results.push_back(*resultPtr);
       mm->release<int>(std::move(resultPtr));
     }
   }
 
+  service->terminate();
+  graph.finishPushingData();
   graph.waitForTermination();
 
   graph.createDotFile("graph_" + std::to_string(service->rank()) + ".dot");
   service->barrier();
   if (service->rank() == 0) {
-    HH_DBG(results);
+    DBG(results);
   }
   delete service;
   return 0;

@@ -1,5 +1,6 @@
 *.dot
 *.png
+*.svg
 *.csv
 *.transmission
 main

@@ -7,7 +7,7 @@
 #include <memory>
 #include <set>
 #include <vector>
-#include <hedgehog/hedgehog.h>
+#include <hedgehog.h>
 
 /// @brief Hedgehog namespace
 namespace hh {
