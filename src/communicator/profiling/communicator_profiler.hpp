@@ -231,7 +231,7 @@ public:
       print(ss, "unpack time: ", infosPerType.unpackTime, "\\l");
       print(ss, "send time: ", infosPerType.sendTime, "\\l");
       print(ss, "recv time: ", infosPerType.recvTime, "\\l");
-      print(ss, "band width: ", infosPerType.bandWidth, "\\l");
+      print(ss, "band width: ", infosPerType.bandWidth, " MB/s\\l");
       print(ss, "Transmission per rank:\\l");
 
       // per rank stats
@@ -241,7 +241,7 @@ public:
         print(ss, "[", rank_, "][", rank, "]: ");
         print(ss, "send = ", infosPerRank.sendTime, " (count = ", infosPerRank.sendCount, ") | ");
         print(ss, "recv = ", infosPerRank.recvTime, " (count = ", infosPerRank.recvCount, ") | ");
-        print(ss, "bandWidth = ", infosPerRank.bandWidth, "\\l");
+        print(ss, "bandWidth = ", infosPerRank.bandWidth, " MB/s\\l");
       }
     }
     return ss.str();
