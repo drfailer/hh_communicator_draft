@@ -48,9 +48,9 @@ public:
     auto dests = this->strategy_(data);
     if (dests.empty()) return;
     else if (dests.size() == 1 && dests[0] == this->task_->comm()->rank()) {
-      this->task_->addResult(data);
+      this->task_->addResult(std::move(data));
     } else {
-      this->task_->comm()->sendData(dests, data);
+      this->task_->comm()->sendData(dests, std::move(data));
     }
   }
 
