@@ -153,6 +153,9 @@ public:
     Node    &node = this->memory_[idx];
     iterator next{node.next, this};
 
+    // reset the data
+    node.data = {};
+
     if (node.next != 0) {
       this->memory_[node.next].prev = node.prev;
     } else {

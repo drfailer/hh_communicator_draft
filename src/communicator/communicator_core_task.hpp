@@ -1,7 +1,7 @@
 #ifndef COMMUNICATOR_COMMUNICATOR_CORE_TASK
 #define COMMUNICATOR_COMMUNICATOR_CORE_TASK
 #include "communicator.hpp"
-#include "tool/memory_manager.hpp"
+#include "memory_manager/memory_manager.hpp"
 #include <hedgehog.h>
 #include <algorithm>
 #include <condition_variable>
@@ -102,9 +102,7 @@ public:
   [[nodiscard]] std::string extraPrintingInformation() const override {
     std::string infos;
 
-    if (this->mm_) {
-      infos += mm_->extraPrintingInformation();
-    }
+    infos += mm_.extraPrintingInformation();
 
     if (this->communicator_.service()->profilingEnabled() && this->communicator_.nbProcesses() != 1) {
       infos += this->communicator_.profiler().extraPrintingInformation();
@@ -114,9 +112,10 @@ public:
 
 public:
   /// @brief Set the memory manager for the task.
-  void setMemoryManager(std::shared_ptr<comm::tool::MemoryManager<Types...>> mm) {
-      this->mm_ = mm;
-      this->communicator_.memoryManager(mm);
+  template <typename MM>
+  void setMemoryManager(std::shared_ptr<MM> mm) {
+      this->mm_.initialize(mm.get());
+      this->communicator_.memoryManager(&this->mm_);
   }
 
   /// @brief Accessor for the communicator.
@@ -126,9 +125,9 @@ public:
   }
 
 private:
-  std::thread                                          deamon_;       ///< communicator thread
-  std::shared_ptr<comm::tool::MemoryManager<Types...>> mm_;           ///< memory manager
-  comm::Communicator<Types...>                         communicator_; ///< communicator (network transfer logic)
+  std::thread                         deamon_;       ///< communicator thread
+  comm::tool::MemoryManager<Types...> mm_;           ///< memory manager
+  comm::Communicator<Types...>        communicator_; ///< communicator (network transfer logic)
 };
 
 } // end namespace core

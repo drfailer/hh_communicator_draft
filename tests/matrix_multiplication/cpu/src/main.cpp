@@ -149,6 +149,8 @@ int main(int argc, char **argv) {
     logh::info("graph terminated");
     timer_end(graph_execution);
 
+    // graph.mm->report_uses();
+
     timer_start(create_dot_files);
     graph.createDotFile("build/graph" + std::to_string(service->rank()) + ".dot", hh::ColorScheme::EXECUTION,
                         hh::StructureOptions::QUEUE);

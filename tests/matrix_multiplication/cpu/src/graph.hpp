@@ -5,8 +5,7 @@
 #include "state.hpp"
 #include "task.hpp"
 #include <openblas/cblas.h>
-#include <communicator/communicator_task.hpp>
-#include <communicator/send_strategies.hpp>
+#include <hedgehog_comm.h>
 #include <hedgehog/hedgehog.h>
 #include <vector>
 

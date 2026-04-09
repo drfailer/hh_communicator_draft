@@ -48,9 +48,9 @@ public:
     auto dests = this->strategy_(data);
     if (dests.empty()) return;
     else if (dests.size() == 1 && dests[0] == this->task_->comm()->rank()) {
-      this->task_->addResult(data);
+      this->task_->addResult(std::move(data));
     } else {
-      this->task_->comm()->sendData(dests, data);
+      this->task_->comm()->sendData(dests, std::move(data));
     }
   }
 
@@ -194,8 +194,8 @@ public:
   ///            don't inherit from the `MemoryManager` class.
   /// @param mm Memory manager
   template <typename MM>
-  void setMemoryManager(MM mm) {
-    this->coreTask_->setMemoryManager(std::make_shared<comm::tool::MemoryManager<Types...>>(mm));
+  void setMemoryManager(std::shared_ptr<MM> mm) {
+    this->coreTask_->setMemoryManager(mm);
   }
 
   /// @brief Add a new hint to the communicator.

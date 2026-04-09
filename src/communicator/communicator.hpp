@@ -5,7 +5,7 @@
 #include "package.hpp"
 #include "hints.hpp"
 #include "service/comm_service.hpp"
-#include "tool/memory_manager.hpp"
+#include "memory_manager/memory_manager.hpp"
 #include "profiling/communicator_profiler.hpp"
 #include "type_map.hpp"
 #include <cassert>
@@ -74,7 +74,7 @@ public:
 
   /// @brief Allow to the memory manager.
   /// @param mm New memory manager.
-  void memoryManager(std::shared_ptr<tool::MemoryManager<Types...>> mm) {
+  void memoryManager(tool::MemoryManager<Types...> *mm) {
     this->mm_ = mm;
   }
 
@@ -109,7 +109,7 @@ public:
     std::lock_guard<std::mutex> queuesLock(this->sendQueueMutex_);
     this->sendQueue_.add(SendRequest{
         .dests = dests,
-        .data = data,
+        .data = std::move(data),
         .typeId = TM::template idOf<T>(),
     });
   }
@@ -205,7 +205,7 @@ private:
   /// @param data  Data to send.
   template <typename T>
   void processSendRequest(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
-    auto [storage, packingTime] = createSendStorage(dests, data);
+    auto [storage, packingTime] = createSendStorage(dests, std::move(data));
     Header          header(this->rank(), 0, storage.typeId, this->channel_, 0);
     StorageId       storageId = this->wh_.sendStorage.add(storage);
 
@@ -242,7 +242,7 @@ private:
         break;
       }
       TM::apply(it->typeId, [&]<typename T>() {
-        processSendRequest(it->dests, std::get<std::shared_ptr<T>>(it->data));
+        processSendRequest(it->dests, std::move(std::get<std::shared_ptr<T>>(it->data)));
       });
       it = this->sendQueue_.remove(it);
     }
@@ -282,10 +282,11 @@ private:
   /// @param storage   Package Storage in which the data is stored.
   /// @param addResult Function that allow transferring the data to the rest of
   ///                  the graph (if `addResult` is required, it is done here).
-  void postSend(StorageSlot<TM> const &storage, auto addResult) {
+  void postSend(StorageSlot<TM> &storage, auto addResult) {
     assert(storage.typeId < TM::size);
     TM::apply(storage.typeId, [&]<typename T>() {
-      std::shared_ptr<T> data = std::get<std::shared_ptr<T>>(storage.data);
+      std::shared_ptr<T> data = std::move(std::get<std::shared_ptr<T>>(storage.data));
+      storage.data = std::shared_ptr<T>(nullptr);
       if constexpr (requires { data->postSend(); }) {
         data->postSend();
       }
@@ -320,7 +321,7 @@ private:
         .package = package,
         .bufferCount = 0,
         .ttlBufferCount = package.data.size() * nbDests,
-        .data = data,
+        .data = std::move(data),
         .typeId = TM::template idOf<T>(),
         .useAddResult = useAddResult,
         .dbgBufferReceived = {false, false, false, false},
@@ -398,7 +399,7 @@ private:
 
       if (header.signal == 0) {
         this->profiler_.incrementProfiledCounter(ProfiledCounter::ProbedRequest);
-        this->createDataOps_.add(header);
+        this->createDataOps_.add(header); // TODO: there is a bug here!
         signal = Signal::Data;
         this->service_->requestRelease(request);
       } else {
@@ -446,7 +447,7 @@ private:
     assert(storage.typeId < TM::size);
     TM::apply(storage.typeId, [&]<typename T>() {
       time_t tunpackingStart, tunpackingEnd;
-      auto data = std::get<std::shared_ptr<T>>(storage.data);
+      auto data = std::move(std::get<std::shared_ptr<T>>(storage.data));
       tunpackingStart = std::chrono::system_clock::now();
       unpack(std::move(storage.package), data);
       tunpackingEnd = std::chrono::system_clock::now();
@@ -456,10 +457,7 @@ private:
       if constexpr (requires { data->postRecv(); }) {
         data->postRecv();
       }
-      addResult(data);
-      // TODO: empty the std::shared_ptr<T> to reduce the reference count once done receiving.
-      // TODO: this is a bandaid solution, maybe there is a better fix?
-      storage.data = std::shared_ptr<T>(nullptr);
+      addResult(std::move(data));
     });
   }
 
@@ -491,7 +489,7 @@ private:
           .package = package,
           .bufferCount = 0,
           .ttlBufferCount = package.data.size(),
-          .data = data,
+          .data = std::move(data),
           .typeId = header.typeId,
           .useAddResult = false,
           .dbgBufferReceived = {false, false, false, false},
@@ -520,8 +518,7 @@ private:
     for (auto &storage : this->wh_.recvStorage) {
       assert(storage.typeId < TM::size);
       TM::apply(storage.typeId, [&]<typename T>() {
-        auto data = std::get<std::shared_ptr<T>>(storage.data);
-        this->mm_->release(std::move(data));
+        this->mm_->release(std::move(std::get<std::shared_ptr<T>>(storage.data)));
       });
     }
     this->wh_.recvStorage.clear();
@@ -657,7 +654,7 @@ private:
   std::vector<char>   signalBufferMem_; ///< Buffer memory used to send the disconnection signal.
 
   // memory manager
-  std::shared_ptr<tool::MemoryManager<Types...>> mm_ = nullptr; ///< Pointer to the memory manager.
+  tool::MemoryManager<Types...> *mm_ = nullptr; ///< Pointer to the memory manager.
 
   // hints
   std::vector<HintTracker> hints_; ///< Hint tracker list (hint data).
