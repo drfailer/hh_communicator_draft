@@ -239,6 +239,7 @@ void CopyTileState::execute(std::shared_ptr<MatrixTilePair> data) {
     mm->release(std::move(data->second));
     if (--nbCopies == 0) {
         logh::warn("copy tile state result");
+        // mm->report_uses();
         this->addResult(c);
     }
 }

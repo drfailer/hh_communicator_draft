@@ -5,6 +5,7 @@ CXXFLAGS=\
 		 -std=c++20 \
 		 -O2 \
 		 -ggdb \
+		 -DHH_COMM_DEBUG \
 	     -I../../../build/_deps/hedgehog-src/hedgehog/ \
 	     -I../../../build/_deps/hedgehog-src/ \
 		 -I../../../src/ \
