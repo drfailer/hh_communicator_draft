@@ -1,11 +1,12 @@
 #ifndef COMMUNICATOR_TOOL_MEMORY_MANAGER
 #define COMMUNICATOR_TOOL_MEMORY_MANAGER
-#include "../type_map.hpp"
+#include "../tool/log.hpp"
 #include <memory>
 #include <source_location>
 #include <type_traits>
 #include <sstream>
 #include <hedgehog.h>
+#include <stdio.h>
 
 /// The memory manager is used to allocated memory on the receiver end of the
 /// communicator. It can also be used freely to control the amount of memory
@@ -91,6 +92,12 @@ public:
   SingleTypeMemoryManagerAbstraction(SingleTypeMemoryManager<T> *mmi)
       : mmi_(mmi) {}
 
+  /// @brief Initialize from `SingleTypeMemoryManager<T>*`.
+  /// @param mmi Implementor of `SingleTypeMemoryManager<T>`.
+  void initialize(SingleTypeMemoryManager<T> *mmi) {
+    this->mmi_ = mmi;
+  }
+
   /// @brief Call the `allocate` method of the implementor (throws a runtime
   ///        error when the implementor is nullptr).
   /// @param mode Allocation mode.
@@ -140,6 +147,11 @@ private:
 /*                               MemoryManager                                */
 /******************************************************************************/
 
+template <typename MM, typename T>
+concept HasMemoryManager = requires(MM *mm) {
+    { mm->template getMemoryManager<T>() } -> std::same_as<SingleTypeMemoryManager<T> *>;
+};
+
 /// @brief Memory manager that can manage multiple types.
 ///
 /// Custom memory managers should implement the `SingleTypeMemoryManager<T>`
@@ -149,26 +161,22 @@ private:
 /// @tparam Types List of supported types.
 template <typename... Types>
 struct MemoryManager final : SingleTypeMemoryManagerAbstraction<Types>... {
-  /// @brief Construction from a list of `SingleTypeMemoryManager` pointers.
-  /// @param mmis List of `SingleTypeMemoryManager` that implements the interface
-  ///             for different types.
-  MemoryManager(SingleTypeMemoryManager<Types> *...mmis)
-      : SingleTypeMemoryManagerAbstraction<Types>(mmis)... {}
+  /// @brief Default constructor for the memory manager.
+  explicit MemoryManager() = default;
 
-  /// @brief Construction from a single type that inherits from multiple
-  ///        `SingleTypeMemoryManager`.
-  /// @tparam MMI Types of the `SingleTypeMemoryManager<Types>...` implementor.
-  /// @param mmi `SingleTypeMemoryManager<Types>...` implementor.
-  template <typename MMI>
-  MemoryManager(MMI *mmi)
-      : MemoryManager(static_cast<SingleTypeMemoryManager<Types> *>(mmi)...) {}
-
-  /// @brief Unpack the given implementer from the shared pointer.
-  /// @tparam MMI Types of the `SingleTypeMemoryManager<Types>...` implementor.
-  /// @param mmi shared pointer to a `SingleTypeMemoryManager<Types>...` implementor.
-  template <typename MMI>
-  MemoryManager(std::shared_ptr<MMI> mmi)
-      : MemoryManager(mmi.get()) {}
+  /// @brief Initialize the bases SingleTypeMemoryManager for the types handled
+  ///        by the given implementor.
+  ///        Note: we suport 2 kinds of memory manager implementors:
+  ///        - ones that inherit from SingleTypeMemoryManager for all the
+  ///          supported types.
+  ///        - ones that implemente the getMemoryManager<T>() method that
+  ///          returns a pointer to a SingleTypeMemoryManager<T>.
+  /// @tparam MM Type of the memory manager implementor.
+  /// @param mm Pointer to a memory manger implementor.
+  template <typename MM>
+  void initialize(MM *mm) {
+    (initializeForAType<Types>(mm), ...);
+  }
 
   /// @brief Call the `allocate` method of the memory manager for the given type.
   /// @tparam T Type of the data to `allocate`.
@@ -199,6 +207,24 @@ struct MemoryManager final : SingleTypeMemoryManagerAbstraction<Types>... {
     std::string infos = "MemoryManager: {" + eol;
     ([&] { infos.append("    " + SingleTypeMemoryManagerAbstraction<Types>::extraPrintingInformation()+ eol); }(),...);
     return infos + "}" + eol;
+  }
+
+private:
+  /// @brief Initialize the base SingleTypeMemoryManager for the type T.
+  /// @tparam T Type for which we need to initialize the implementor.
+  /// @param mm Pointer to a memory manger implementor (can be multi-typed).
+  template <typename T>
+  void initializeForAType(auto *mm) {
+    using MM = std::remove_pointer_t<decltype(mm)>;
+    if constexpr (std::is_base_of_v<SingleTypeMemoryManager<T>, MM>) {
+      SingleTypeMemoryManagerAbstraction<T>::initialize(
+              static_cast<SingleTypeMemoryManager<T> *>(mm));
+    } else if constexpr (HasMemoryManager<MM, T>) {
+      SingleTypeMemoryManagerAbstraction<T>::initialize(mm->template getMemoryManager<T>());
+    } else {
+      /* we don't throw an error here to allow using setMemoryManager multiple
+       * times with different memory managers for different set of types. */
+    }
   }
 };
 

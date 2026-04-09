@@ -194,8 +194,8 @@ public:
   ///            don't inherit from the `MemoryManager` class.
   /// @param mm Memory manager
   template <typename MM>
-  void setMemoryManager(MM mm) {
-    this->coreTask_->setMemoryManager(std::make_shared<comm::tool::MemoryManager<Types...>>(mm));
+  void setMemoryManager(std::shared_ptr<MM> mm) {
+    this->coreTask_->setMemoryManager(mm);
   }
 
   /// @brief Add a new hint to the communicator.

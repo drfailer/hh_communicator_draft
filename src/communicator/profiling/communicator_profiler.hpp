@@ -1,6 +1,7 @@
 #ifndef COMMUNICATOR_PROFILING_COMMUNICATOR_PROFILER
 #define COMMUNICATOR_PROFILING_COMMUNICATOR_PROFILER
 #include "../tool/queue.hpp"
+#include "../service/comm_service.hpp"
 #include "profiling_tools.hpp"
 #include <chrono>
 #include <hedgehog.h>

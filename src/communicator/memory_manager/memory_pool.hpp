@@ -1,7 +1,7 @@
 #ifndef COMMUNICATOR_TOOL_MEMORY_POOL
 #define COMMUNICATOR_TOOL_MEMORY_POOL
-#include "log.hpp"
 #include <hedgehog.h>
+#include "../tool/log.hpp"
 #include "../profiling/profiling_tools.hpp"
 #include "memory_manager.hpp"
 #include <cassert>

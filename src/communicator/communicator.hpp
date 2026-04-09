@@ -5,7 +5,7 @@
 #include "package.hpp"
 #include "hints.hpp"
 #include "service/comm_service.hpp"
-#include "tool/memory_manager.hpp"
+#include "memory_manager/memory_manager.hpp"
 #include "profiling/communicator_profiler.hpp"
 #include "type_map.hpp"
 #include <cassert>
@@ -74,7 +74,7 @@ public:
 
   /// @brief Allow to the memory manager.
   /// @param mm New memory manager.
-  void memoryManager(std::shared_ptr<tool::MemoryManager<Types...>> mm) {
+  void memoryManager(tool::MemoryManager<Types...> *mm) {
     this->mm_ = mm;
   }
 
@@ -399,7 +399,7 @@ private:
 
       if (header.signal == 0) {
         this->profiler_.incrementProfiledCounter(ProfiledCounter::ProbedRequest);
-        this->createDataOps_.add(header);
+        this->createDataOps_.add(header); // TODO: there is a bug here!
         signal = Signal::Data;
         this->service_->requestRelease(request);
       } else {
@@ -448,7 +448,6 @@ private:
     TM::apply(storage.typeId, [&]<typename T>() {
       time_t tunpackingStart, tunpackingEnd;
       auto data = std::move(std::get<std::shared_ptr<T>>(storage.data));
-      storage.data = std::shared_ptr<T>(nullptr);
       tunpackingStart = std::chrono::system_clock::now();
       unpack(std::move(storage.package), data);
       tunpackingEnd = std::chrono::system_clock::now();
@@ -519,8 +518,7 @@ private:
     for (auto &storage : this->wh_.recvStorage) {
       assert(storage.typeId < TM::size);
       TM::apply(storage.typeId, [&]<typename T>() {
-        auto data = std::move(std::get<std::shared_ptr<T>>(storage.data));
-        this->mm_->release(std::move(data));
+        this->mm_->release(std::move(std::get<std::shared_ptr<T>>(storage.data)));
       });
     }
     this->wh_.recvStorage.clear();
@@ -656,7 +654,7 @@ private:
   std::vector<char>   signalBufferMem_; ///< Buffer memory used to send the disconnection signal.
 
   // memory manager
-  std::shared_ptr<tool::MemoryManager<Types...>> mm_ = nullptr; ///< Pointer to the memory manager.
+  tool::MemoryManager<Types...> *mm_ = nullptr; ///< Pointer to the memory manager.
 
   // hints
   std::vector<HintTracker> hints_; ///< Hint tracker list (hint data).
