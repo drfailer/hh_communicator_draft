@@ -13,6 +13,7 @@
 #include <map>
 #include <utility>
 #include <vector>
+#include <bitset>
 
 // This communicator works the following way:
 // 1. Probes for incomming request (data or signal).
@@ -49,6 +50,7 @@ public:
   Communicator(CommService *service)
       : service_(service),
         channel_(service->newChannel()),
+        createDataOps_(service->nbProcesses()),
         profiler_(TM::size, service) {}
 
 public:
@@ -161,6 +163,11 @@ public:
   }
 
 private:
+  struct CreateDataOperation {
+    std::bitset<MAX_BUFFER_COUNT_PER_PACKAGE> received_buffers;
+    Header header;
+  };
+
   /// @brief Forward declaration of HintTracker.
   struct HintTracker;
 
@@ -333,6 +340,30 @@ private:
   /*                           recv queue operations                            */
   /******************************************************************************/
 
+  void addCreateDataRequest(Header const &header) {
+    static bool dbg_flag = false;
+    assert(header.source < this->createDataOps_.size());
+    auto &queue = this->createDataOps_[header.source];
+
+    for (auto data : queue) {
+      if (!data.received_buffers.test(header.bufferId)) {
+        data.received_buffers.set(header.bufferId);
+        // DEBUG: check that the mm is starving
+        if (dbg_flag == false) {
+          log::error("not enough memory");
+          dbg_flag = true;
+        }
+        return;
+      }
+    }
+    // TODO: we will change the way we receive
+    // at this point we have received a new data
+    queue.add(CreateDataOperation{
+        .received_buffers = {},
+        .header = header,
+    });
+  }
+
   /// @brief Process the `createDataQueue` that stores recv requests before the
   ///        the data is available for the reception. Here we try to allocate a
   ///        new data using the memory manager. If the memory manager returns
@@ -340,14 +371,18 @@ private:
   ///        request, and we start the reception. Otherwise, the request
   ///        remains in this queue until some memory is available.
   void processCreateDataQueue() {
-    this->profiler_.updateProfiledSize(ProfiledSize::MaxCreateDataQueueSize,
-                                      this->createDataOps_.size());
+    // TODO
+    // this->profiler_.updateProfiledSize(ProfiledSize::MaxCreateDataQueueSize,
+    //                                   this->createDataOps_.size());
 
-    for (auto it = this->createDataOps_.begin(); it != this->createDataOps_.end();) {
-      if (recvData(*it)) {
-        it = this->createDataOps_.remove(it);
-      } else {
-        it++;
+    for (rank_t rank = 0; rank < this->nbProcesses(); ++rank) {
+      auto &queue = this->createDataOps_[rank];
+      for (auto it = queue.begin(); it != queue.end();) {
+        if (recvData(it->header)) {
+          it = queue.remove(it);
+        } else {
+          it++;
+        }
       }
     }
   }
@@ -399,13 +434,14 @@ private:
 
       if (header.signal == 0) {
         this->profiler_.incrementProfiledCounter(ProfiledCounter::ProbedRequest);
-        this->createDataOps_.add(header); // TODO: there is a bug here!
+        addCreateDataRequest(header);
         signal = Signal::Data;
         this->service_->requestRelease(request);
       } else {
         comm::Buffer buf{this->signalBufferMem_.data(), this->signalBufferMem_.size()};
         this->service_->recv(request, buf);
         signal = (Signal)buf.data()[0];
+        assert(false);
       }
       assert(header.source < this->nbProcesses());
     } else {
@@ -514,7 +550,9 @@ private:
       this->service_->requestCancel(op.request);
     }
     this->recvOps_.clear();
-    this->createDataOps_.clear();
+    for (auto &queue : this->createDataOps_) {
+      queue.clear();
+    }
     for (auto &storage : this->wh_.recvStorage) {
       assert(storage.typeId < TM::size);
       TM::apply(storage.typeId, [&]<typename T>() {
@@ -641,11 +679,11 @@ private:
   std::atomic<bool>        fini_ = false;    ///< Termination flag.
 
   // queues
-  std::mutex           sendQueueMutex_; ///< mutex for the send queue.
-  Queue<SendRequest>   sendQueue_;      ///< Queue used to limit the number of send operations.
-  Queue<CommOperation> sendOps_;        ///< Queue of send operations.
-  Queue<Header>        createDataOps_;  ///< Queue of create data operation (wait for available memory).
-  Queue<CommOperation> recvOps_;        ///< Queue of recv operations.
+  std::mutex                              sendQueueMutex_; ///< mutex for the send queue.
+  Queue<SendRequest>                      sendQueue_;      ///< Queue used to limit the number of send operations.
+  Queue<CommOperation>                    sendOps_;        ///< Queue of send operations.
+  std::vector<Queue<CreateDataOperation>> createDataOps_;  ///< Queue of create data operation (wait for available memory).
+  Queue<CommOperation>                    recvOps_;        ///< Queue of recv operations.
 
   // packages
   PackageWarehouse<TM> wh_; ///< Package warehouse that stores the data during transmission.
