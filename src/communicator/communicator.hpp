@@ -42,7 +42,7 @@ public:
   Communicator(CommService *service)
       : service_(service),
         channel_(service->newChannel()),
-        createDataOps_(service->nbProcesses()),
+        createDataOps_(service->nbProcesses() * TM::size),
         profiler_(TM::size, service) {}
 
 public:
@@ -272,7 +272,7 @@ private:
     assert(storage.typeId < TM::size);
     TM::apply(storage.typeId, [&]<typename T>() {
       std::shared_ptr<T> data = std::move(std::get<std::shared_ptr<T>>(storage.data));
-      storage.data = std::shared_ptr<T>(nullptr);
+      assert(std::get<std::shared_ptr<T>>(storage.data) == nullptr);
       if constexpr (requires { data->postSend(); }) {
         data->postSend();
       }
@@ -320,18 +320,11 @@ private:
   /******************************************************************************/
 
   void registerNewRequest(Header const &header) {
-    static bool dbg_flag = false;
-    assert(header.source < this->createDataOps_.size());
-    auto &queue = this->createDataOps_[header.source];
+    auto &queue = this->createDataOps_[header.source * TM::size + header.typeId];
 
     for (auto data : queue) {
       if (!data.received_buffers.test(header.bufferId)) {
         data.received_buffers.set(header.bufferId);
-        // DEBUG: check that the mm is starving
-        if (dbg_flag == false) {
-          log::error("not enough memory");
-          dbg_flag = true;
-        }
         return;
       }
     }
@@ -353,13 +346,15 @@ private:
     size_t queueSize = 0;
 
     for (rank_t rank = 0; rank < this->nbProcesses(); ++rank) {
-      auto &queue = this->createDataOps_[rank];
-      queueSize += queue.size();
-      for (auto it = queue.begin(); it != queue.end();) {
-        if (recvData(it->header)) {
-          it = queue.remove(it);
-        } else {
-          it++;
+      for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
+        auto &queue = this->createDataOps_[rank * TM::size + typeId];
+        queueSize += queue.size();
+        for (auto it = queue.begin(); it != queue.end();) {
+          if (recvData(it->header)) {
+            it = queue.remove(it);
+          } else {
+            it++;
+          }
         }
       }
     }
