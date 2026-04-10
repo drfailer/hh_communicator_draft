@@ -60,6 +60,7 @@ public:
         ++this->stats.waitCount;
         auto wts = std::chrono::system_clock::now();
         cv.wait(poolLock, [&]() { return !memory.empty(); });
+        assert(!memory.empty());
         auto wte = std::chrono::system_clock::now();
         this->stats.waitTime += std::chrono::duration_cast<std::chrono::nanoseconds>(wte - wts);
       } break;
@@ -91,7 +92,7 @@ public:
   /// @param data Element to return to the pool.
   /// @param loc  Source location.
   void release(std::shared_ptr<T> &&data, std::source_location loc = std::source_location::current()) override {
-    std::lock_guard<std::mutex> poolLock(mutex);
+    std::unique_lock<std::mutex> poolLock(mutex);
     if (!usedMemory.contains(data)) {
       if (std::find(memory.begin(), memory.end(), data) != memory.end()) {
         log::error("data of type '", hh::tool::typeToStr<T>(),
@@ -115,8 +116,9 @@ public:
     }
     ++this->stats.releaseCount;
     memory.push_back(data);
-    cv.notify_all();
     usedMemory.erase(data);
+    poolLock.unlock();
+    cv.notify_one();
   }
 
   /// @brief Used to pre-allocated a certain number of elements at the start.

@@ -72,7 +72,7 @@ public:
     if (data == nullptr)
       return;
 
-    const auto lg = std::lock_guard(mutex_);
+    std::unique_lock<std::mutex> lck(mutex_);
     if constexpr (requires { data->postProcess(); }) {
       data->postProcess();
     }
@@ -89,7 +89,8 @@ public:
     alloc_locations_.erase((uintptr_t)data);
 #endif
     memory_.emplace_back(std::unique_ptr<T>(data));
-    cv_.notify_all();
+    lck.unlock();
+    cv_.notify_one();
   }
 
   /// @brief Implementation of the `allocate` method for the SingleTypeMemoryManager
