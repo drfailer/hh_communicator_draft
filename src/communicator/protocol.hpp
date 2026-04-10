@@ -29,17 +29,6 @@ namespace comm {
 #endif
 
 /******************************************************************************/
-/*                                   Signal                                   */
-/******************************************************************************/
-
-/// @brief Model the signal used in the requests.
-enum class Signal : std::uint8_t {
-  None,       ///< unknown signal
-  Data,       ///< the request contain some data.
-  Disconnect, ///< the request contains a disconnection signal.
-};
-
-/******************************************************************************/
 /*                                   Header                                   */
 /******************************************************************************/
 
@@ -50,8 +39,6 @@ enum class Signal : std::uint8_t {
 using channel_t = std::uint64_t;
 /// @brief Rank type.
 using rank_t = std::uint64_t;
-/// @brief Signal type.
-using signal_t = std::uint64_t;
 /// @brief Type of the type id.
 using type_id_t = std::uint64_t;
 /// @brief Type of the buffer id.
@@ -61,31 +48,26 @@ using buffer_id_t = std::uint64_t;
 struct Header {
   channel_t    channel;   ///< Channel id (which communicator task).
   rank_t       source;    ///< Source that sent the requests.
-  signal_t     signal;    ///< Signal contained in the request.
   type_id_t    typeId;    ///< Type id of the data contained in the request (if data).
   buffer_id_t  bufferId;  ///< Buffer id of the data.
 
   /// @brief constructor from all the elements.
   /// @param source    Value of the source.
-  /// @param signal    Value of the signal.
   /// @param typeId    Value of the typeId.
   /// @param channel   Value of the channel.
   /// @param bufferId  Value of the bufferId.
-  Header(rank_t source = 0, signal_t signal = 0, type_id_t typeId = 0, channel_t channel = 0,
-         buffer_id_t bufferId = 0)
+  Header(rank_t source = 0, type_id_t typeId = 0, channel_t channel = 0, buffer_id_t bufferId = 0)
       : channel(channel),
         source(source),
-        signal(signal),
         typeId(typeId),
         bufferId(bufferId) {}
 
   /// @brief enum that model the fileds of the header.
   enum Fields {
-    CHANNEL = 0,
-    SOURCE = 1,
-    SIGNAL = 2,
-    TYPE_ID = 3,
-    BUFFER_ID = 4,
+    CHANNEL,
+    SOURCE,
+    TYPE_ID,
+    BUFFER_ID,
   };
 
   /// @brief Structure that can be used to encode/decode a header into a tag.
@@ -99,9 +81,9 @@ struct Header {
   /// @return true if `this` is inferior to `other`.
   bool operator<(Header const &other) const {
     std::uint64_t thisVals[]
-        = {this->source, this->signal, this->typeId, this->channel, this->bufferId};
+        = {this->source, this->typeId, this->channel, this->bufferId};
     std::uint64_t otherVals[]
-        = {other.source, other.signal, other.typeId, other.channel, other.bufferId};
+        = {other.source, other.typeId, other.channel, other.bufferId};
 
     for (size_t i = 0; i < sizeof(thisVals) / sizeof(this->source); ++i) {
       if (thisVals[i] != otherVals[i]) {

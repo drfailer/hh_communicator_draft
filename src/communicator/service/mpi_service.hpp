@@ -64,13 +64,12 @@ public:
 private:
   /// @brief header fields infos and offset: used to encode/decode MPI tags to header.
   static constexpr Header::FieldInfo HEADER_FIELDS[]{
-      // MPI tags are at least 15 bits
+      // MPI tags are max 15 bits
       {.offset = 32, .mask = 0b1111111111111111111111111111111111111111111111111000000000000000}, // source
       {.offset = 32, .mask = 0b1111111111111111111111111111111111111111111111111000000000000000}, // channel
       // communicator data
-      {.offset = 14, .mask = 0b0000000000000000000000000000000000000000000000000100000000000000}, // signal?
-      {.offset = 11, .mask = 0b0000000000000000000000000000000000000000000000000011100000000000}, // typeid
-      {.offset = 0, .mask = 0b0000000000000000000000000000000000000000000000000000000000000011}, // buffer id
+      {.offset = 11, .mask = 0b0000000000000000000000000000000000000000000000000111100000000000}, // typeid
+      {.offset = 0, .mask =  0b0000000000000000000000000000000000000000000000000000000000000011}, // buffer id
   };
 
   /// @brief Encode the given header to an MPI tag.
@@ -78,7 +77,6 @@ private:
   /// @return MPI tag.
   static int headerToTag(Header const &header) {
     std::uint64_t tag = 0;
-    tag |= header.signal << HEADER_FIELDS[Header::SIGNAL].offset;
     tag |= header.typeId << HEADER_FIELDS[Header::TYPE_ID].offset;
     tag |= header.bufferId << HEADER_FIELDS[Header::BUFFER_ID].offset;
     assert((tag & HEADER_FIELDS[0].mask) == 0);
@@ -92,10 +90,8 @@ private:
     assert(tag >= 0);
     assert((tag & HEADER_FIELDS[0].mask) == 0);
     Header header;
-    header.signal = (tag & HEADER_FIELDS[Header::SIGNAL].mask) >> HEADER_FIELDS[Header::SIGNAL].offset;
     header.typeId = (tag & HEADER_FIELDS[Header::TYPE_ID].mask) >> HEADER_FIELDS[Header::TYPE_ID].offset;
     header.bufferId = (tag & HEADER_FIELDS[Header::BUFFER_ID].mask) >> HEADER_FIELDS[Header::BUFFER_ID].offset;
-    assert((header.signal & ~(HEADER_FIELDS[Header::SIGNAL].mask >> HEADER_FIELDS[Header::SIGNAL].offset)) == 0);
     assert((header.typeId & ~(HEADER_FIELDS[Header::TYPE_ID].mask >> HEADER_FIELDS[Header::TYPE_ID].offset)) == 0);
     assert((header.bufferId & ~(HEADER_FIELDS[Header::BUFFER_ID].mask >> HEADER_FIELDS[Header::BUFFER_ID].offset))
            == 0);
@@ -122,7 +118,6 @@ public: // send ////////////////////////////////////////////////////////////////
     int                         tag = headerToTag(header);
 
     Header testHeader = tagToHeader(tag);
-    assert(header.signal == testHeader.signal);
     assert(header.typeId == testHeader.typeId);
     assert(header.bufferId == testHeader.bufferId);
 
@@ -141,7 +136,6 @@ public: // send ////////////////////////////////////////////////////////////////
 
     // vvv DEBUG vvv
     Header testHeader = tagToHeader(tag);
-    assert(header.signal == testHeader.signal);
     assert(header.typeId == testHeader.typeId);
     assert(header.bufferId == testHeader.bufferId);
     // ^^^ DEBUG ^^^
