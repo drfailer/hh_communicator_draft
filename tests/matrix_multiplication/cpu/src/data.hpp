@@ -4,6 +4,8 @@
 #include "log.hpp"
 #include <cstddef>
 
+extern hh::comm::rank_t GLOBAL_RANK;
+
 using MT = double;
 
 enum class MatrixId {

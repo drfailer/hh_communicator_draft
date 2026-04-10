@@ -34,8 +34,7 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         mm = std::make_shared<MMType>();
         mm->fill<MatrixTile<MT, MatrixId::A>>(TM * TK, tileSize);
         mm->fill<MatrixTile<MT, MatrixId::B>>(TK * TN, tileSize);
-        // mm->fill<MatrixTile<MT, MatrixId::C>>(TM * TN, tileSize);
-        mm->fill<MatrixTile<MT, MatrixId::C>>(10, tileSize);
+        mm->fill<MatrixTile<MT, MatrixId::C>>(TM * TN, tileSize);
         mm->fill<MatrixTile<MT, MatrixId::P>>(poolSize, tileSize);
 
         auto splitTask = std::make_shared<SplitTask>(tileSize, mm, SPLIT_TASK_THREADS);

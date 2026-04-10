@@ -15,6 +15,7 @@ void SplitTask::split(std::shared_ptr<Matrix<MT, Id>> matrix) {
             auto tile = mm->template allocate<MatrixTile<MT, Id>>(hh::comm::tool::MemoryManagerAllocateMode::Wait);
             // auto tile = std::make_shared<MatrixTile<MT, Id>>(tileSize);
 
+            assert(tile->processCount == 0);
             tile->rows = std::min(tileSize, matrix->rows - row * tileSize);
             tile->cols = std::min(tileSize, matrix->cols - col * tileSize);
             tile->set(row, col, matrix->rows, matrix->cols);
