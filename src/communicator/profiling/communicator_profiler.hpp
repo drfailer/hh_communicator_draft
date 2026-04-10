@@ -227,7 +227,7 @@ public:
 
     // per type stats
     for (auto const &[typeStr, infosPerType] : this->compiledInfos_.infosPerType) {
-      print(ss, "\n=====================<", typeStr, ">=====================\\l");
+      print(ss, "\n=====================[ ", typeStr, " ]=====================\n");
       print(ss, "pack time: ", infosPerType.packTime, "\\l");
       print(ss, "unpack time: ", infosPerType.unpackTime, "\\l");
       print(ss, "send time: ", infosPerType.sendTime, "\\l");
@@ -239,7 +239,7 @@ public:
       for (rank_t rank = 0; rank < nbProcesses_; ++rank) {
         if (rank == rank_) { continue; }
         auto const &infosPerRank = infosPerType.infosPerRank[rank];
-        print(ss, "[", rank_, "][", rank, "]: ");
+        print(ss, "    [", rank_, "][", rank, "]: ");
         print(ss, "send = ", infosPerRank.sendTime, " (count = ", infosPerRank.sendCount, ") | ");
         print(ss, "recv = ", infosPerRank.recvTime, " (count = ", infosPerRank.recvCount, ") | ");
         print(ss, "bandWidth = ", infosPerRank.bandWidth, " MB/s\\l");
