@@ -82,7 +82,7 @@ Package pack(std::shared_ptr<T> data) {
 /// @throws invalid_argument
 /// @return The package memory used to receive the data.
 template <typename T>
-Package packageMem(std::shared_ptr<T> data) { // TODO: how to avoid sneaky copies here???
+Package packageMem(std::shared_ptr<T> data) {
   if constexpr (requires { data->package(); }) {
     return data->package();
   } else if constexpr (std::is_trivially_copyable_v<T>) {

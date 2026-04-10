@@ -350,12 +350,11 @@ private:
   ///        request, and we start the reception. Otherwise, the request
   ///        remains in this queue until some memory is available.
   void processCreateDataQueue() {
-    // TODO
-    // this->profiler_.updateProfiledSize(ProfiledSize::MaxCreateDataQueueSize,
-    //                                   this->createDataOps_.size());
+    size_t queueSize = 0;
 
     for (rank_t rank = 0; rank < this->nbProcesses(); ++rank) {
       auto &queue = this->createDataOps_[rank];
+      queueSize += queue.size();
       for (auto it = queue.begin(); it != queue.end();) {
         if (recvData(it->header)) {
           it = queue.remove(it);
@@ -364,6 +363,7 @@ private:
         }
       }
     }
+    this->profiler_.updateProfiledSize(ProfiledSize::MaxCreateDataQueueSize, queueSize);
   }
 
   /// @brief Process the recv operations queue. When all the buffers for a
