@@ -13,17 +13,10 @@
 #include <map>
 #include <utility>
 #include <vector>
+#include <bitset>
 
 // This communicator works the following way:
-// 1. Probes for incomming request (data or signal).
-//
-// Signal is received:
-// 2. Handle the signal:
-//   - Data: start data reception
-//   - Disconnect: disconnect the sender. Terminates when all senders are
-//                 disconnected and the core task is terminated (see hedgehog
-//                 core task termination makanism).
-//
+// 1. Probes for incomming request.
 // Data is received:
 // 2. wait for the data to be available (get memory from the pool)
 // 3. when the data is created, recv all the buffers
@@ -49,6 +42,7 @@ public:
   Communicator(CommService *service)
       : service_(service),
         channel_(service->newChannel()),
+        createDataOps_(service->nbProcesses() * TM::size),
         profiler_(TM::size, service) {}
 
 public:
@@ -116,11 +110,7 @@ public:
 
   /// @brief Initialize the communicator.
   void init() {
-    this->signalBufferMem_ = std::vector<char>(1);
     this->fini_.store(false);
-
-    // TODO: we should post a recv for the disconnection signal here
-
     initHints();
   }
 
@@ -128,13 +118,11 @@ public:
   /// @param addResult Function that gives access to the `task->addResult`
   ///                  method (this is used when receiving data).
   void run(auto addResult) {
-    comm::Signal signal = comm::Signal::None;
-    comm::Header header = {0, 0, 0, 0, 0};
+    comm::Header header = {0, 0, 0, 0};
 
     while (!this->fini_.load()) {
       processSendOpsQueue(addResult);
-      recvSignal(signal, header);
-      assert(signal != comm::Signal::Disconnect);
+      probeIncommingRequests(header);
       processCreateDataQueue();
       processRecvOpsQueue(addResult);
       progressHints();
@@ -143,16 +131,9 @@ public:
     flush();
   }
 
-  /// @brief This function must be called when the core task terminates to
-  ///        notify the communicator thread that no more data will be sent.
-  ///        When this function is called, the communicator sends a
-  ///        disconnection signal and a list of send counters (number of
-  ///        packages sent to each rank) to the master rank. When all the
-  ///        senders are disconnected, the master sends the disconnection
-  ///        signal to the receivers (with the send counters), and each
-  ///        receiver will wait for the reception of all the packages (using
-  ///        the counters) before terminating (this is when the communicator
-  ///        thread can be joined).
+  /// @brief Wait for the service termination (user calls service.terminate()),
+  ///        and terminate run loop. This function must be called in the core
+  ///        task.
   void fini() {
     this->service_->waitForTermination();
     this->fini_.store(true);
@@ -161,6 +142,11 @@ public:
   }
 
 private:
+  struct CreateDataOperation {
+    std::bitset<MAX_BUFFER_COUNT_PER_PACKAGE> received_buffers;
+    Header header;
+  };
+
   /// @brief Forward declaration of HintTracker.
   struct HintTracker;
 
@@ -206,7 +192,7 @@ private:
   template <typename T>
   void processSendRequest(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
     auto [storage, packingTime] = createSendStorage(dests, std::move(data));
-    Header          header(this->rank(), 0, storage.typeId, this->channel_, 0);
+    Header          header(this->rank(), storage.typeId, this->channel_, 0);
     StorageId       storageId = this->wh_.sendStorage.add(storage);
 
     for (auto dest : dests) {
@@ -286,7 +272,7 @@ private:
     assert(storage.typeId < TM::size);
     TM::apply(storage.typeId, [&]<typename T>() {
       std::shared_ptr<T> data = std::move(std::get<std::shared_ptr<T>>(storage.data));
-      storage.data = std::shared_ptr<T>(nullptr);
+      assert(std::get<std::shared_ptr<T>>(storage.data) == nullptr);
       if constexpr (requires { data->postSend(); }) {
         data->postSend();
       }
@@ -333,6 +319,23 @@ private:
   /*                           recv queue operations                            */
   /******************************************************************************/
 
+  void registerNewRequest(Header const &header) {
+    auto &queue = this->createDataOps_[header.source * TM::size + header.typeId];
+
+    for (auto data : queue) {
+      if (!data.received_buffers.test(header.bufferId)) {
+        data.received_buffers.set(header.bufferId);
+        return;
+      }
+    }
+    // TODO: we will change the way we receive
+    // at this point we have received a new data
+    queue.add(CreateDataOperation{
+        .received_buffers = {},
+        .header = header,
+    });
+  }
+
   /// @brief Process the `createDataQueue` that stores recv requests before the
   ///        the data is available for the reception. Here we try to allocate a
   ///        new data using the memory manager. If the memory manager returns
@@ -340,16 +343,22 @@ private:
   ///        request, and we start the reception. Otherwise, the request
   ///        remains in this queue until some memory is available.
   void processCreateDataQueue() {
-    this->profiler_.updateProfiledSize(ProfiledSize::MaxCreateDataQueueSize,
-                                      this->createDataOps_.size());
+    size_t queueSize = 0;
 
-    for (auto it = this->createDataOps_.begin(); it != this->createDataOps_.end();) {
-      if (recvData(*it)) {
-        it = this->createDataOps_.remove(it);
-      } else {
-        it++;
+    for (rank_t rank = 0; rank < this->nbProcesses(); ++rank) {
+      for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
+        auto &queue = this->createDataOps_[rank * TM::size + typeId];
+        queueSize += queue.size();
+        for (auto it = queue.begin(); it != queue.end();) {
+          if (recvData(it->header)) {
+            it = queue.remove(it);
+          } else {
+            it++;
+          }
+        }
       }
     }
+    this->profiler_.updateProfiledSize(ProfiledSize::MaxCreateDataQueueSize, queueSize);
   }
 
   /// @brief Process the recv operations queue. When all the buffers for a
@@ -380,37 +389,24 @@ private:
     }
   }
 
-  /// @brief Probe the network. When a valid message has arrived: if it
-  ///        contains a signal, then receive the signal directly (blocking),
-  ///        otherwise, add a pending recv data request to the queue.
-  /// @param signal Reference to the signal that allow to the receiver state
-  ///               machine to know if a signal or some data has arrived.
+  /// @brief Probe the network.
   /// @param header Reference to a header that is set when the probe is
   ///               successful.
-  void recvSignal(Signal &signal, Header &header) {
+  bool probeIncommingRequests(Header &header) {
     Request request = this->service_->probeAsync(this->channel_);
-
-    signal = Signal::None;
+    bool requestReceived = false;
 
     if (this->service_->probeSuccess(request)) {
+      requestReceived = true;
       header = this->service_->requestHeader(request);
       header.channel = this->channel_;
-      assert(header.source != this->rank());
-
-      if (header.signal == 0) {
-        this->profiler_.incrementProfiledCounter(ProfiledCounter::ProbedRequest);
-        this->createDataOps_.add(header); // TODO: there is a bug here!
-        signal = Signal::Data;
-        this->service_->requestRelease(request);
-      } else {
-        comm::Buffer buf{this->signalBufferMem_.data(), this->signalBufferMem_.size()};
-        this->service_->recv(request, buf);
-        signal = (Signal)buf.data()[0];
-      }
+      this->profiler_.incrementProfiledCounter(ProfiledCounter::ProbedRequest);
       assert(header.source < this->nbProcesses());
-    } else {
-      this->service_->requestRelease(request);
+      assert(header.source != this->rank());
+      registerNewRequest(header);
     }
+    this->service_->requestRelease(request);
+    return requestReceived;
   }
 
   /// @brief Try to create a storage slot for the data. If a storage slot can
@@ -514,7 +510,9 @@ private:
       this->service_->requestCancel(op.request);
     }
     this->recvOps_.clear();
-    this->createDataOps_.clear();
+    for (auto &queue : this->createDataOps_) {
+      queue.clear();
+    }
     for (auto &storage : this->wh_.recvStorage) {
       assert(storage.typeId < TM::size);
       TM::apply(storage.typeId, [&]<typename T>() {
@@ -563,7 +561,7 @@ private:
         }
 
         for (size_t i = 0; i < hint.count; ++i) {
-          if (recvData(Header(hint.source, 0, typeId, channel(), 0), hintIdx)) {
+          if (recvData(Header(hint.source, typeId, channel(), 0), hintIdx)) {
             this->hints_[hintIdx].postedRequestCount += 1;
             this->hints_[hintIdx].activeRequestCount += 1;
           }
@@ -578,7 +576,7 @@ private:
         }
 
         for (size_t i = 0; i < hint.poolSize; ++i) {
-          if (recvData(Header(hint.source, 0, typeId, channel(), 0), hintIdx)) {
+          if (recvData(Header(hint.source, typeId, channel(), 0), hintIdx)) {
             this->hints_[hintIdx].postedRequestCount += 1;
             this->hints_[hintIdx].activeRequestCount += 1;
           }
@@ -601,7 +599,7 @@ private:
         }
 
         for (size_t i = this->hints_[hintIdx].postedRequestCount; i < hint.count; ++i) {
-          if (recvData(Header(hint.source, 0, typeId, channel(), 0), hintIdx)) {
+          if (recvData(Header(hint.source, typeId, channel(), 0), hintIdx)) {
             this->hints_[hintIdx].postedRequestCount += 1;
             this->hints_[hintIdx].activeRequestCount += 1;
           }
@@ -616,7 +614,7 @@ private:
         }
 
         for (size_t i = this->hints_[hintIdx].activeRequestCount; i < hint.poolSize; ++i) {
-          if (recvData(Header(hint.source, 0, typeId, channel(), 0), hintIdx)) {
+          if (recvData(Header(hint.source, typeId, channel(), 0), hintIdx)) {
             this->hints_[hintIdx].postedRequestCount += 1;
             this->hints_[hintIdx].activeRequestCount += 1;
           }
@@ -641,17 +639,14 @@ private:
   std::atomic<bool>        fini_ = false;    ///< Termination flag.
 
   // queues
-  std::mutex           sendQueueMutex_; ///< mutex for the send queue.
-  Queue<SendRequest>   sendQueue_;      ///< Queue used to limit the number of send operations.
-  Queue<CommOperation> sendOps_;        ///< Queue of send operations.
-  Queue<Header>        createDataOps_;  ///< Queue of create data operation (wait for available memory).
-  Queue<CommOperation> recvOps_;        ///< Queue of recv operations.
+  std::mutex                              sendQueueMutex_; ///< mutex for the send queue.
+  Queue<SendRequest>                      sendQueue_;      ///< Queue used to limit the number of send operations.
+  Queue<CommOperation>                    sendOps_;        ///< Queue of send operations.
+  std::vector<Queue<CreateDataOperation>> createDataOps_;  ///< Queue of create data operation (wait for available memory).
+  Queue<CommOperation>                    recvOps_;        ///< Queue of recv operations.
 
   // packages
   PackageWarehouse<TM> wh_; ///< Package warehouse that stores the data during transmission.
-
-  // diconnection buffer
-  std::vector<char>   signalBufferMem_; ///< Buffer memory used to send the disconnection signal.
 
   // memory manager
   tool::MemoryManager<Types...> *mm_ = nullptr; ///< Pointer to the memory manager.

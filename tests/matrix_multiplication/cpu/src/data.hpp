@@ -4,6 +4,8 @@
 #include "log.hpp"
 #include <cstddef>
 
+extern hh::comm::rank_t GLOBAL_RANK;
+
 using MT = double;
 
 enum class MatrixId {
@@ -108,10 +110,10 @@ struct SumData {
 using MatrixTilePair
     = std::pair<std::shared_ptr<Matrix<MT, MatrixId::C>>, std::shared_ptr<MatrixTile<MT, MatrixId::C>>>;
 
-// using MMType = hh::comm::tool::MemoryPool<MatrixTile<MT, MatrixId::A>, MatrixTile<MT, MatrixId::B>,
-//                                     MatrixTile<MT, MatrixId::C>, MatrixTile<MT, MatrixId::P>>;
-
-using MMType = hh::comm::tool::AutomaticMemoryPool<MatrixTile<MT, MatrixId::A>, MatrixTile<MT, MatrixId::B>,
+using MMType = hh::comm::tool::MemoryPool<MatrixTile<MT, MatrixId::A>, MatrixTile<MT, MatrixId::B>,
                                     MatrixTile<MT, MatrixId::C>, MatrixTile<MT, MatrixId::P>>;
+
+// using MMType = hh::comm::tool::AutomaticMemoryPool<MatrixTile<MT, MatrixId::A>, MatrixTile<MT, MatrixId::B>,
+//                                     MatrixTile<MT, MatrixId::C>, MatrixTile<MT, MatrixId::P>>;
 
 #endif

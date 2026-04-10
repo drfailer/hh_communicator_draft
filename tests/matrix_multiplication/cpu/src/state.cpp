@@ -1,7 +1,5 @@
 #include "state.hpp"
 
-extern int GLOBAL_RANK;
-
 std::string MPIRank() {
     return "(" + std::to_string(GLOBAL_RANK) + ")";
 }
@@ -154,7 +152,7 @@ void SumState::execute(std::shared_ptr<ProductData<MT>> data) {
 
     auto &queue = queues.at(key);
 
-    if (queue.c) {
+    if (queue.c != nullptr) {
         this->addResult(std::make_shared<SumData<MT>>(p, queue.c));
         queue.c = nullptr;
     } else {
@@ -168,10 +166,11 @@ void SumState::execute(std::shared_ptr<ProductData<MT>> data) {
 }
 
 void SumState::execute(std::shared_ptr<SumData<MT>> data) {
-    logh::infog(logh::IG::SumState, "sum state", MPIRank(), " sum data received, C[", data->c->rowIdx, ",",
-                data->c->colIdx, "]");
+    auto [p, c] = *data;
+    logh::infog(logh::IG::SumState, "sum state", MPIRank(), " sum data received, C[", c->rowIdx, ",",
+                c->colIdx, "]");
 
-    auto key = std::make_pair(data->c->rowIdx, data->c->colIdx);
+    auto key = std::make_pair(c->rowIdx, c->colIdx);
     if (!queues.contains(key)) {
         logh::error("(sum data) queue does not contain key = ", key);
         return;
@@ -179,13 +178,17 @@ void SumState::execute(std::shared_ptr<SumData<MT>> data) {
 
     auto &queue = queues.at(key);
 
-    --data->p->processCount;
-    mm->release(std::move(data->p));
+    assert(c->processCount > 0);
+    assert(p->processCount > 0);
 
-    if (--data->c->processCount == 0) {
+    --c->processCount;
+    --p->processCount;
+    mm->release(std::move(p)); // try to release p
+
+    if (c->processCount == 0) {
         assert(queue.empty());
         queues.erase(key);
-        this->addResult(data->c);
+        this->addResult(std::move(c));
         if (queues.empty()) {
             logh::warn(MPIRank(), " terminate sum state");
         }
@@ -193,12 +196,12 @@ void SumState::execute(std::shared_ptr<SumData<MT>> data) {
     }
 
     if (queue.empty()) {
-        queue.c = data->c;
+        queue.c = c;
         return;
     }
 
-    auto p = queue.pop();
-    this->addResult(std::make_shared<SumData<MT>>(p, data->c));
+    p = queue.pop();
+    this->addResult(std::make_shared<SumData<MT>>(p, c));
 }
 
 /******************************************************************************/
@@ -236,6 +239,7 @@ void CopyTileState::execute(std::shared_ptr<MatrixTile<MT, MatrixId::C>> tile) {
 
 void CopyTileState::execute(std::shared_ptr<MatrixTilePair> data) {
     --data->second->processCount;
+    assert(data->second->processCount == 0);
     mm->release(std::move(data->second));
     if (--nbCopies == 0) {
         logh::warn("copy tile state result");
