@@ -42,7 +42,7 @@ public:
   Communicator(CommService *service)
       : service_(service),
         channel_(service->newChannel()),
-        createDataOps_(service->nbProcesses() * TM::size),
+        createDataOps_(service->nbProcesses(), TM::size),
         wh_(service->nbProcesses(), TM::size),
         profiler_(TM::size, service) {}
 
@@ -321,7 +321,7 @@ private:
     // create data queue (in that case, it is possible that at least one buffer
     // of the package has been received, but the memory maanger couldn't allocate
     // the data).
-    auto &queue = this->createDataOps_[header.source * TM::size + header.typeId];
+    auto &queue = this->createDataOps_(header.source, header.typeId);
     for (auto data : queue) {
       if (!data.receivedBuffers.test(header.bufferId)) {
         data.receivedBuffers.set(header.bufferId);
@@ -348,7 +348,7 @@ private:
 
     for (rank_t rank = 0; rank < this->nbProcesses(); ++rank) {
       for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
-        auto &queue = this->createDataOps_[rank * TM::size + typeId];
+        auto &queue = this->createDataOps_(rank, typeId);
         queueSize += queue.size();
         for (auto it = queue.begin(); it != queue.end();) {
           if (recvData(*it)) {
@@ -509,11 +509,9 @@ private:
       this->service_->requestCancel(op.request);
     }
     this->recvOps_.clear();
-    for (auto &queue : this->createDataOps_) {
-      queue.clear();
-    }
     for (rank_t source = 0; source < this->nbProcesses(); ++source) {
       for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
+        this->createDataOps_(source, typeId).clear();
         auto &recvStorageQueue = this->wh_.recvStorage(source, typeId);
         for (auto &storage : recvStorageQueue) {
           assert(storage.typeId < TM::size);
@@ -543,11 +541,11 @@ private:
   std::atomic<bool>        fini_ = false;    ///< Termination flag.
 
   // queues
-  std::mutex                              sendQueueMutex_; ///< mutex for the send queue.
-  Queue<SendRequest>                      sendQueue_;      ///< Queue used to limit the number of send operations.
-  Queue<CommOperation>                    sendOps_;        ///< Queue of send operations.
-  std::vector<Queue<CreateDataOperation>> createDataOps_;  ///< Queue of create data operation (wait for available memory).
-  Queue<CommOperation>                    recvOps_;        ///< Queue of recv operations.
+  std::mutex                        sendQueueMutex_; ///< mutex for the send queue.
+  Queue<SendRequest>                sendQueue_;      ///< Queue used to limit the number of send operations.
+  Queue<CommOperation>              sendOps_;        ///< Queue of send operations.
+  Table<Queue<CreateDataOperation>> createDataOps_;  ///< Queue of create data operation (wait for available memory).
+  Queue<CommOperation>              recvOps_;        ///< Queue of recv operations.
 
   // packages
   PackageWarehouse<TM> wh_; ///< Package warehouse that stores the data during transmission.
