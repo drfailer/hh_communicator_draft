@@ -27,66 +27,43 @@ public:
   virtual ~CommService() = default;
 
 public:
-  /// @brief Send a buffer to a given destination synchronously.
-  /// @param header Header of the request (see Header structure).
-  /// @param dest   Rank of the destination process.
-  /// @param buffer Buffer to send.
-  virtual void send(Header const &header, rank_t dest, Buffer const &buffer) = 0;
-
   /// @brief Send a buffer to a given destination asynchronously.
   /// @param header Header of the request (see Header structure).
   /// @param dest   Rank of the destination process.
   /// @param buffer Buffer to send.
   /// @return Send request.
-  virtual Request sendAsync(Header const &header, rank_t dest, Buffer const &buffer) = 0;
-
-  /// @brief Receive a request header and buffer synchronously.
-  /// @param header Header of the request (see Header structure).
-  /// @param buffer Buffer to receive the data.
-  virtual void recv(Header const &header, Buffer const &buffer) = 0;
+  virtual Request send(Header const &header, rank_t dest, Buffer const &buffer) = 0;
 
   /// @brief Receive a request header and buffer asynchronously.
   /// @param header Header of the request (see Header structure).
   /// @param buffer Buffer to receive the data.
   /// @return Receive request.
-  virtual Request recvAsync(Header const &header, Buffer const &buffer) = 0;
-
-  /// @brief Receive a request after a successful probe synchronously.
-  /// @param probeRequest Request returned by the probe.
-  /// @param buffer       Buffer to receive the data.
-  virtual void recv(Request probeRequest, Buffer const &buffer) = 0;
+  virtual Request recv(Header const &header, Buffer const &buffer) = 0;
 
   /// @brief Receive a request after a successful probe asynchronously.
-  /// @param probeRequest Request returned by the probe.
-  /// @param buffer       Buffer to receive the data.
+  /// @param message Request returned by the probe.
+  /// @param buffer  Buffer to receive the data.
   /// @return Receive request.
-  virtual Request recvAsync(Request probeRequest, Buffer const &buffer) = 0;
-
-  /// @brief Probe a given channel for incoming requests synchronously.
-  /// @param channel Channel to probe (each communicator task use a different
-  ///                channel, the channel is create with `newChannel`).
-  /// @return Probe request.
-  virtual Request probe(channel_t channel) = 0;
+  virtual Request recv(Request message, Buffer const &buffer) = 0;
 
   /// @brief Probe a given channel for incoming requests asynchronously.
   /// @param channel Channel to probe (each communicator task use a different
   ///                channel, the channel is create with `newChannel`).
+  /// @param extract Extract message flag.
   /// @return Probe request.
-  virtual Request probeAsync(channel_t channel) = 0;
-
-  /// @brief Probe a given channel for incoming requests sent by the given source synchronously.
-  /// @param channel Channel to probe (each communicator task use a different
-  ///                channel, the channel is create with `newChannel`).
-  /// @param source  Sender rank.
-  /// @return Probe request.
-  virtual Request probe(channel_t channel, rank_t source) = 0;
+  virtual Request probe(channel_t channel, bool extract = false) = 0;
 
   /// @brief Probe a given channel for incoming requests sent by the given source asynchronously.
   /// @param channel Channel to probe (each communicator task use a different
   ///                channel, the channel is create with `newChannel`).
   /// @param source  Sender rank.
+  /// @param extract Extract message flag.
   /// @return Probe request.
-  virtual Request probeAsync(channel_t channel, rank_t source) = 0;
+  virtual Request probe(channel_t channel, rank_t source, bool extract = false) = 0;
+
+  /// @brief Wait for request completion.
+  /// @param reqest Request to wait.
+  virtual void requestWait(Request request) = 0;
 
   /// @brief Tells if the given request is completed (asynchronous requests).
   /// @param request Request for which the completion requires to be tested.

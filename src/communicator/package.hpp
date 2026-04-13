@@ -144,26 +144,47 @@ struct StorageSlot {
 /// @tparam TM Type map type (used in the communicator).
 template <typename TM>
 struct PackageWarehouse {
+  Queue<StorageSlot<TM>>        sendStorage;         ///< Send queue.
+  Table<Queue<StorageSlot<TM>>> recvStorage;         ///< Recv queue Table(source, type).
+  size_t                        recvStorageSize = 0; ///< Recv storage size.
+
+  /// @brief Constructor
+  /// @param nbProcesses Number of processes
+  /// @param typeCount   Number of types managed by the communicator.
   PackageWarehouse(size_t nbProcesses, size_t typeCount)
       : recvStorage(nbProcesses, typeCount) {}
-  Queue<StorageSlot<TM>>        sendStorage; ///< Send queue.
-  Table<Queue<StorageSlot<TM>>> recvStorage; ///< Recv queue Table(source, type).
 
+  /// @brief Add a storage slot in the receive storage.
+  /// @tparam T type of the data to store.
+  /// @param data   Data to store.
+  /// @param source Rank of the sender of the package to which the storage slot
+  ///               is dedicated.
   template <typename T>
-  StorageId addRecvStorageSlot(std::shared_ptr<T> data, Header const &header) {
+  StorageId addRecvStorageSlot(std::shared_ptr<T> data, rank_t source) {
     Package package = packageMem(data);
+    type_id_t typeId = TM::template idOf<T>();
     assert(data != nullptr);
     assert(0 < package.bufferCount() && package.bufferCount() < MAX_BUFFER_COUNT_PER_PACKAGE);
-    return this->recvStorage(header.source, header.typeId).add(StorageSlot<TM>{
-        .source = header.source,
+    recvStorageSize += 1;
+    return this->recvStorage(source, typeId).add(StorageSlot<TM>{
+        .source = source,
         .package = package, // TODO: the compiler migh copy the package here
         .bufferCount = 0,
         .ttlBufferCount = package.data.size(),
         .data = std::move(data),
-        .typeId = header.typeId,
+        .typeId = typeId,
         .useAddResult = false,
         .receivedBuffers = {},
     });
+  }
+
+  /// @brief Remove a storage slot from the receive storage.
+  /// @param source    Source rank of the storage line.
+  /// @param typeId    Type id of the storage line.
+  /// @param storageId Id of the slot to remove in the storage line.
+  void removeRecvStorageSlot(rank_t source, type_id_t typeId, StorageId storageId) {
+    recvStorageSize -= 1;
+    this->recvStorage(source, typeId).remove(storageId);
   }
 };
 

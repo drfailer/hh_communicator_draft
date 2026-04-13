@@ -12,7 +12,7 @@
 #include <map>
 #include <utility>
 #include <vector>
-#include <bitset>
+#include <array>
 #include <optional>
 
 // This communicator works the following way:
@@ -133,7 +133,7 @@ public:
 
 private:
   struct CreateDataOperation {
-    std::bitset<MAX_BUFFER_COUNT_PER_PACKAGE> receivedBuffers;
+    std::array<Request, MAX_BUFFER_COUNT_PER_PACKAGE> receivedRequests;
     Header header;
   };
 
@@ -180,7 +180,7 @@ private:
             .source = this->rank(),
             .typeId = storage.typeId,
             .bufferId = header.bufferId,
-            .request = this->service_->sendAsync(header, dest, storage.package.data[i]),
+            .request = this->service_->send(header, dest, storage.package.data[i]),
             .storageId = storageId,
             .profileId = profileId,
         });
@@ -293,15 +293,14 @@ private:
   /*                           recv queue operations                            */
   /******************************************************************************/
 
-  void addRecvOpAndUpdateStorage(Header const &header, StorageId storageId) {
+  void addRecvOpAndUpdateStorage(Header const &header, StorageId storageId, Request request) {
     auto &storage = this->wh_.recvStorage(header.source, header.typeId).at(storageId);
     assert(storage.receivedBuffers.test(header.bufferId) == false);
     this->recvOps_.add(CommOperation{
         .source = header.source,
         .typeId = header.typeId,
         .bufferId = header.bufferId,
-        // TODO: use MPI_Imrecv
-        .request = this->service_->recvAsync(header, storage.package.data[header.bufferId]),
+        .request = this->service_->recv(request, storage.package.data[header.bufferId]),
         .storageId = storageId,
         // TODO: we need to update the profiler
         .profileId = this->profiler_.preRecv(header.typeId, header.source),
@@ -309,11 +308,11 @@ private:
     storage.receivedBuffers.set(header.bufferId);
   }
 
-  void registerNewRequest(Header const &header) {
+  void registerNewRequest(Header const &header, Request request) {
     // we first lookup in the storage to see if the reception has already
     // started for this package
     if (auto storageId = recvStorageLookup(header)) {
-      addRecvOpAndUpdateStorage(header, *storageId);
+      addRecvOpAndUpdateStorage(header, *storageId, request);
       return;
     }
 
@@ -322,19 +321,20 @@ private:
     // of the package has been received, but the memory maanger couldn't allocate
     // the data).
     auto &queue = this->createDataOps_(header.source, header.typeId);
-    for (auto data : queue) {
-      if (!data.receivedBuffers.test(header.bufferId)) {
-        data.receivedBuffers.set(header.bufferId);
+    for (auto op : queue) {
+      if (op.receivedRequests[header.bufferId] == nullptr) {
+        op.receivedRequests[header.bufferId] = request;
         return;
       }
     }
 
     // If there are no matching entries neither in the storage or the create
     // data queue, we start the reception for a new package.
-    queue.add(CreateDataOperation{
-        .receivedBuffers = {},
-        .header = header,
-    });
+    CreateDataOperation op;
+    op.header = header;
+    memset(op.receivedRequests.data(), 0, sizeof(*op.receivedRequests.data()) * op.receivedRequests.size());
+    op.receivedRequests[header.bufferId] = request;
+    queue.add(op);
   }
 
   /// @brief Process the `createDataQueue` that stores recv requests before the
@@ -368,8 +368,7 @@ private:
   /// @param addResult Function that allow to call `task->addResult`
   void processRecvOpsQueue(auto addResult) {
     this->profiler_.updateProfiledSize(ProfiledSize::MaxRecvOpsSize, this->recvOps_.size());
-    // TODO:
-    // this->profiler_.updateProfiledSize(ProfiledSize::MaxRecvStorageSize, this->wh_.recvStorage.size());
+    this->profiler_.updateProfiledSize(ProfiledSize::MaxRecvStorageSize, this->wh_.recvStorageSize);
 
     for (auto it = this->recvOps_.begin(); it != this->recvOps_.end();) {
       if (this->service_->requestCompleted(it->request)) {
@@ -378,7 +377,7 @@ private:
 
         if (storage.bufferCount == storage.ttlBufferCount) {
           postRecv(storage, addResult, it->profileId);
-          this->wh_.recvStorage(it->source, it->typeId).remove(it->storageId);
+          this->wh_.removeRecvStorageSlot(it->source, it->typeId, it->storageId);
         }
         this->service_->requestRelease(it->request);
         it = this->recvOps_.remove(it);
@@ -391,21 +390,16 @@ private:
   /// @brief Probe the network.
   /// @param header Reference to a header that is set when the probe is
   ///               successful.
-  bool probeIncommingRequests(Header &header) {
-    // TODO: use MPI_Improbe / MPI_Imrecv
-    Request request = this->service_->probeAsync(this->channel_);
-    bool requestReceived = false;
+  void probeIncommingRequests(Header &header) {
+    Request request = this->service_->probe(this->channel_, true);
 
     if (this->service_->probeSuccess(request)) {
-      requestReceived = true;
       header = this->service_->requestHeader(request);
       header.channel = this->channel_;
       assert(header.source < this->nbProcesses());
       assert(header.source != this->rank());
-      registerNewRequest(header);
+      registerNewRequest(header, request);
     }
-    this->service_->requestRelease(request);
-    return requestReceived;
   }
 
   /// @brief Try to create a storage slot for the data. If a storage slot can
@@ -422,10 +416,10 @@ private:
 
     StorageSlot<TM> &storage = this->wh_.recvStorage(header.source, header.typeId).at(*storageId);
     for (header.bufferId = 0; header.bufferId < storage.package.bufferCount(); ++header.bufferId) {
-      if (!op.receivedBuffers.test(header.bufferId)) {
+      if (op.receivedRequests[header.bufferId] == nullptr) {
           continue;
       }
-      addRecvOpAndUpdateStorage(header, *storageId);
+      addRecvOpAndUpdateStorage(header, *storageId, op.receivedRequests[header.bufferId]);
     }
     return true;
   }
@@ -489,7 +483,7 @@ private:
       if constexpr (requires { data->preRecv(); }) {
         data->preRecv();
       }
-      storageId = this->wh_.addRecvStorageSlot(std::move(data), header);
+      storageId = this->wh_.addRecvStorageSlot(std::move(data), header.source);
     });
     return storageId;
   }

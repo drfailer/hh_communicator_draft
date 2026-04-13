@@ -103,33 +103,19 @@ private:
   struct MPIRequest {
     MPI_Request request; ///< MPI request.
     MPI_Status  status;  ///< MPI status.
+    MPI_Message message; ///< MPI message.
     MPI_Comm    comm;    ///< MPI communicator (correspond to the channel id).
     int         flag;    ///< Flag used with some MPI functions such as `probe`.
   };
 
 public: // send ////////////////////////////////////////////////////////////////
 
-  /// @brief Send a buffer to a given destination synchronously (MPI_Send).
-  /// @param header Header of the request.
-  /// @param dest   Rank of the destination process.
-  /// @param buffer Buffer to send.
-  void send(Header const &header, rank_t dest, Buffer const &buffer) override {
-    std::lock_guard<std::mutex> mpiLock(this->mutex());
-    int                         tag = headerToTag(header);
-
-    Header testHeader = tagToHeader(tag);
-    assert(header.typeId == testHeader.typeId);
-    assert(header.bufferId == testHeader.bufferId);
-
-    checkMPI(MPI_Send(buffer.data(), (int)buffer.size(), MPI_BYTE, (int)dest, tag, this->comms_[header.channel]));
-  }
-
   /// @brief Send a buffer to a given destination asynchronously (MPI_Isend).
   /// @param header Header of the request.
   /// @param dest   Rank of the destination process.
   /// @param buffer Buffer to send.
   /// @return Send request.
-  Request sendAsync(Header const &header, rank_t dest, Buffer const &buffer) override {
+  Request send(Header const &header, rank_t dest, Buffer const &buffer) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
     MPIRequest                 *r = requestPool_.allocate();
     int                         tag = headerToTag(header);
@@ -147,84 +133,41 @@ public: // send ////////////////////////////////////////////////////////////////
 
 public: // recv ////////////////////////////////////////////////////////////////
 
-  /// @brief Receive a request header and buffer synchronously (MPI_Recv).
-  /// @param header Header of the request.
-  /// @param buffer Buffer to receive the data.
-  void recv(Header const &header, Buffer const &buffer) override {
-    std::lock_guard<std::mutex> mpiLock(this->mutex());
-    MPI_Status                  status;
-    int                         tag = headerToTag(header);
-    checkMPI(MPI_Recv(buffer.data(), (int)buffer.size(), MPI_BYTE, (int)header.source, tag, this->comms_[header.channel],
-                      &status));
-  }
-
   /// @brief Receive a request header and buffer asynchronously (MPI_Irecv).
   /// @param header Header of the request.
   /// @param buffer Buffer to receive the data.
   /// @return Receive request.
-  Request recvAsync(Header const &header, Buffer const &buffer) override {
+  Request recv(Header const &header, Buffer const &buffer) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
-    int                         tag = headerToTag(header);
-    MPIRequest                 *r = requestPool_.allocate();
+    int         tag = headerToTag(header);
+    MPIRequest *r = requestPool_.allocate();
     r->comm = this->comms_[header.channel];
-    checkMPI(MPI_Irecv(buffer.data(), (int)buffer.size(), MPI_BYTE, (int)header.source, tag, r->comm, &r->request));
+    checkMPI(MPI_Irecv(buffer.data(), (int)buffer.size(), MPI_BYTE,
+                       (int)header.source, tag, r->comm, &r->request));
     return r;
-  }
-
-  /// @brief Receive a request after a successful probe synchronously (MPI_Recv).
-  /// @param probeRequest Request returned by the probe.
-  /// @param buffer       Buffer to receive the data.
-  void recv(Request probeRequest, Buffer const &buffer) override {
-    std::lock_guard<std::mutex> mpiLock(this->mutex());
-    MPIRequest                 *r = (MPIRequest *)probeRequest;
-    checkMPI(MPI_Recv(buffer.data(), (int)buffer.size(), MPI_BYTE, r->status.MPI_SOURCE, r->status.MPI_TAG, r->comm, &r->status));
-    requestPool_.release(r);
   }
 
   /// @brief Receive a request after a successful probe asynchronously (MPI_Irecv).
   /// @param probeRequest Request returned by the probe.
   /// @param buffer       Buffer to receive the data.
   /// @return Receive request.
-  Request recvAsync(Request probeRequest, Buffer const &buffer) override {
+  Request recv(Request probeRequest, Buffer const &buffer) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
-    MPIRequest                 *r = (MPIRequest *)probeRequest;
-    checkMPI(
-        MPI_Irecv(buffer.data(), (int)buffer.size(), MPI_BYTE, r->status.MPI_SOURCE, r->status.MPI_TAG, r->comm, &r->request));
+    MPIRequest *r = (MPIRequest *)probeRequest;
+    checkMPI(MPI_Imrecv(buffer.data(), (int)buffer.size(), MPI_BYTE, &r->message,
+                        &r->request));
     return probeRequest;
   }
 
 public: // probe ///////////////////////////////////////////////////////////////
-
-  /// @brief Probe a given channel for incoming requests synchronously
-  ///        (MPI_Probe to MPI_ANY_SOURCE).
-  /// @param channel Channel to probe (each communicator task use a different
-  ///                channel, the channel is create with `newChannel`).
-  /// @return Probe request.
-  Request probe(channel_t channel) override {
-    return probe(channel, (rank_t)MPI_ANY_SOURCE);
-  }
 
   /// @brief Probe a given channel for incoming requests asynchronously
   ///        (MPI_Iprobe to MPI_ANY_SOURCE).
   /// @param channel Channel to probe (each communicator task use a different
   ///                channel, the channel is create with `newChannel`).
   /// @return Probe request.
-  Request probeAsync(channel_t channel) override {
-    return probeAsync(channel, (rank_t)MPI_ANY_SOURCE);
-  }
-
-  /// @brief Probe a given channel for incoming requests sent by the given
-  ///        source synchronously (MPI_Probe).
-  /// @param channel Channel to probe (each communicator task use a different
-  ///                channel, the channel is create with `newChannel`).
-  /// @param source  Sender rank.
-  /// @return Probe request.
-  Request probe(channel_t channel, rank_t source) override {
-    std::lock_guard<std::mutex> mpiLock(this->mutex());
-    MPIRequest                 *r = requestPool_.allocate();
-    r->comm = this->comms_[channel];
-    checkMPI(MPI_Probe((int)source, MPI_ANY_TAG, r->comm, &r->status));
-    return r;
+  Request probe(channel_t channel, bool extract = false) override {
+    return probe(channel, (rank_t)MPI_ANY_SOURCE, extract);
   }
 
   /// @brief Probe a given channel for incoming requests sent by the given
@@ -233,22 +176,35 @@ public: // probe ///////////////////////////////////////////////////////////////
   ///                channel, the channel is create with `newChannel`).
   /// @param source  Sender rank.
   /// @return Probe request.
-  Request probeAsync(channel_t channel, rank_t source) override {
+  Request probe(channel_t channel, rank_t source, bool extract = false) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
-    MPIRequest                 *r = requestPool_.allocate();
+    MPIRequest *r = requestPool_.allocate();
     r->comm = this->comms_[channel];
-    checkMPI(MPI_Iprobe((int)source, MPI_ANY_TAG, r->comm, &r->flag, &r->status));
+    if (extract) {
+      checkMPI(MPI_Improbe((int)source, MPI_ANY_TAG, r->comm, &r->flag, &r->message,
+                           &r->status));
+    } else {
+      checkMPI(MPI_Iprobe((int)source, MPI_ANY_TAG, r->comm, &r->flag, &r->status));
+    }
     return r;
   }
 
 public: // requests ////////////////////////////////////////////////////////////
+
+  /// @brief Wait for request completion.
+  /// @param reqest Request to wait.
+  void requestWait(Request request) override {
+    std::lock_guard<std::mutex> mpiLock(this->mutex());
+    MPIRequest *r = (MPIRequest *)request;
+    MPI_Wait(&r->request, &r->status);
+  }
 
   /// @brief Tells if the given request is completed (MPI_Test).
   /// @param request Request for which the completion requires to be tested.
   /// @return True if the request is completed, false otherwise.
   bool requestCompleted(Request request) override {
     std::lock_guard<std::mutex> mpiLock(this->mutex());
-    MPIRequest                 *r = (MPIRequest *)request;
+    MPIRequest *r = (MPIRequest *)request;
     r->flag = 0;
     checkMPI(MPI_Test(&r->request, &r->flag, &r->status));
     return r->flag != 0;
@@ -326,7 +282,7 @@ public:
   /// @return Id of the new channel.
   channel_t newChannel() override {
     std::lock_guard<std::mutex> mpiLock(mutex());
-    channel_t                   channel = comms_.size();
+    channel_t channel = comms_.size();
     comms_.push_back(MPI_Comm{});
     checkMPI(MPI_Comm_split(MPI_COMM_WORLD, (int)channel, (int)rank_, &comms_.back()));
     return channel;
