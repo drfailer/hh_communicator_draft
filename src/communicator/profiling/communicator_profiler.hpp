@@ -1,6 +1,7 @@
 #ifndef COMMUNICATOR_PROFILING_COMMUNICATOR_PROFILER
 #define COMMUNICATOR_PROFILING_COMMUNICATOR_PROFILER
 #include "../tool/queue.hpp"
+#include "../tool/table.hpp"
 #include "../service/comm_service.hpp"
 #include "profiling_tools.hpp"
 #include <chrono>
@@ -44,16 +45,12 @@ public:
   /// @param service Comm service.
   CommunicatorProfiler(size_t typeCount, CommService const *service)
       : enabled_(service->profilingEnabled()),
+        sendInfos_(typeCount, service->nbProcesses()),
+        recvInfos_(typeCount, service->nbProcesses()),
         nbTypes_(typeCount),
         nbProcesses_(service->nbProcesses()),
         rank_(service->rank()),
-        startTime_(service->startTime()) {
-    if (!enabled_) {
-      return;
-    }
-    this->sendInfos_.resize(nbTypes_ * nbProcesses_);
-    this->recvInfos_.resize(nbTypes_ * nbProcesses_);
-  }
+        startTime_(service->startTime()) {}
 
 public:
   /// @brief Updated a profiled size value.
@@ -111,7 +108,7 @@ public:
 
     if (profile.bufferCount == 0) {
       auto endTp = std::chrono::system_clock::now();
-      this->sendInfos_[profile.typeId * nbProcesses_ + profile.rank].push_back(ProfileInfo{
+      this->sendInfos_(profile.typeId, profile.rank).push_back(ProfileInfo{
           .timestamp = std::chrono::duration_cast<time_unit_t>(profile.beginTp - this->startTime_),
           .packingTime = profile.packingTime,
           .transmissionTime = std::chrono::duration_cast<time_unit_t>(endTp - profile.beginTp),
@@ -149,7 +146,7 @@ public:
     std::unique_lock<std::mutex> lock(this->mutex_);
     auto                        &profile = this->infosQueue_.at(queueIdx);
     auto                         endTp = std::chrono::system_clock::now();
-    this->recvInfos_[profile.typeId * nbProcesses_ + profile.rank].push_back(ProfileInfo{
+    this->recvInfos_(profile.typeId, profile.rank).push_back(ProfileInfo{
         .timestamp = std::chrono::duration_cast<time_unit_t>(profile.beginTp - this->startTime_),
         .packingTime = unpackingTime,
         .transmissionTime = std::chrono::duration_cast<time_unit_t>(endTp - profile.beginTp),
@@ -177,8 +174,8 @@ public:
       for (rank_t rank = 0; rank < nbProcesses_; ++rank) {
         if (rank == rank_) { continue; }
         auto &infosPerRank = infosPerType.infosPerRank[rank];
-        auto &sendInfos = sendInfos_[typeId * nbProcesses_ + rank];
-        auto &recvInfos = recvInfos_[typeId * nbProcesses_ + rank];
+        auto &sendInfos = sendInfos_(typeId, rank);
+        auto &recvInfos = recvInfos_(typeId, rank);
         infosPerRank.sendTime = computeAvgDuration(sendInfos, this->getTransmissionTime_);
         infosPerRank.recvTime = computeAvgDuration(recvInfos, this->getTransmissionTime_);
         infosPerRank.bandWidth = computeAvg(sendInfos, this->getBandWidth_);
@@ -299,7 +296,7 @@ public:
     for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
       // send infos
       for (size_t dest = 0; dest < this->nbProcesses_; ++dest) {
-        auto const &infos = this->sendInfos_[typeId * this->nbProcesses_ + dest];
+        auto const &infos = this->sendInfos_(typeId, dest);
         if (infos.empty()) { continue; }
         file << 0 << sep << typeIdToStr<TM>(typeId) << sep << channel << sep << this->rank_ << sep << dest;
         for (auto const &info : infos) {
@@ -309,7 +306,7 @@ public:
       }
       // recv infos
       for (size_t src = 0; src < this->nbProcesses_; ++src) {
-        auto const &infos = this->recvInfos_[typeId * this->nbProcesses_ + src];
+        auto const &infos = this->recvInfos_(typeId, src);
         if (infos.empty()) { continue; }
         file << 1 << sep << typeIdToStr<TM>(typeId) << sep << channel << sep << src << sep << this->rank_;
         for (auto const &info : infos) {
@@ -366,12 +363,12 @@ struct CompiledProfileInfos {
 };
 
 private: // data
+  bool                                                enabled_ = false; ///< Statistic collection enabled flag.
   Queue<InTransitPackageInfo>                         infosQueue_;      ///< Profiling infos queue.
-  std::vector<std::vector<ProfileInfo>>               sendInfos_ = {};  ///< Send infos.
-  std::vector<std::vector<ProfileInfo>>               recvInfos_ = {};  ///< Recv infos.
+  Table<std::vector<ProfileInfo>>                     sendInfos_;       ///< Send infos.
+  Table<std::vector<ProfileInfo>>                     recvInfos_;       ///< Recv infos.
   std::array<size_t, size_t(ProfiledSize::COUNT_)>    sizes_ = {0};     ///< Profiled sizes values.
   std::array<size_t, size_t(ProfiledCounter::COUNT_)> counters_ = {0};  ///< Profiled counters values.
-  bool                                                enabled_ = false; ///< Statistic collection enabled flag.
   size_t                                              nbTypes_ = 0;     ///< Number of type managed by the communicator.
   size_t                                              nbProcesses_ = 0; ///< Number of processes.
   rank_t                                              rank_ = 0;        ///< Rank of the current process.
