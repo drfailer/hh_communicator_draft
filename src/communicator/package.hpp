@@ -3,10 +3,11 @@
 #include "protocol.hpp"
 #include "type_map.hpp"
 #include "tool/queue.hpp"
+#include "tool/table.hpp"
 #include <cstring>
 #include <memory>
-#include <set>
 #include <vector>
+#include <bitset>
 #include <hedgehog.h>
 
 /// @brief Hedgehog namespace
@@ -33,6 +34,9 @@ struct Package {
     }
     return result;
   }
+
+  /// @brief Returns the number of buffers in the package.
+  size_t bufferCount() const { return data.size(); }
 };
 
 /// @param Utility function that pack the given data.
@@ -119,6 +123,9 @@ void unpack(Package &&package, std::shared_ptr<T> data) {
 /*                             Package Wharehouse                             */
 /******************************************************************************/
 
+/// @brief Type alias for the storage id.
+using StorageId = size_t;
+
 /// @brief Warehouse storage slot.
 /// @tparam TM Type map type (used in the communicator).
 template <typename TM>
@@ -130,19 +137,35 @@ struct StorageSlot {
   variant_type_t<TM> data;           ///< Variant containing the data that is sent (keep the shared_ptr alive).
   type_id_t          typeId;         ///< type of the data stored in the storage.
   bool               useAddResult;   ///< Flag used to know if the data must be transfered or released after all the buffers are sent on the network.
-  bool               dbgBufferReceived[4]; // TODO: remove
+  std::bitset<MAX_BUFFER_COUNT_PER_PACKAGE> receivedBuffers; ///< Allow to keep track of the received buffers.
 };
 
 /// @brief Package warehouse type.
 /// @tparam TM Type map type (used in the communicator).
 template <typename TM>
 struct PackageWarehouse {
-  Queue<StorageSlot<TM>> sendStorage; ///< Send queue.
-  Queue<StorageSlot<TM>> recvStorage; ///< Recv queue.
-};
+  PackageWarehouse(size_t nbProcesses, size_t typeCount)
+      : recvStorage(nbProcesses, typeCount) {}
+  Queue<StorageSlot<TM>>        sendStorage; ///< Send queue.
+  Table<Queue<StorageSlot<TM>>> recvStorage; ///< Recv queue Table(source, type).
 
-/// @brief Type alias for the storage id.
-using StorageId = size_t;
+  template <typename T>
+  StorageId addRecvStorageSlot(std::shared_ptr<T> data, Header const &header) {
+    Package package = packageMem(data);
+    assert(data != nullptr);
+    assert(0 < package.bufferCount() && package.bufferCount() < MAX_BUFFER_COUNT_PER_PACKAGE);
+    return this->recvStorage(header.source, header.typeId).add(StorageSlot<TM>{
+        .source = header.source,
+        .package = package, // TODO: the compiler migh copy the package here
+        .bufferCount = 0,
+        .ttlBufferCount = package.data.size(),
+        .data = std::move(data),
+        .typeId = header.typeId,
+        .useAddResult = false,
+        .receivedBuffers = {},
+    });
+  }
+};
 
 } // end namespace comm
 

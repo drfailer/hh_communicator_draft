@@ -24,13 +24,6 @@ enum class ProfiledSize : size_t {
   COUNT_,
 };
 
-/// @brief Profiled counters categories.
-enum class ProfiledCounter : size_t {
-  ProbedRequest, ///< Number of probed recv requests.
-  HintedRequest, ///< Number of hinted recv requests
-  COUNT_,
-};
-
 /// @brief Communicator profiler
 class CommunicatorProfiler {
 private:
@@ -62,17 +55,6 @@ public:
     }
     std::unique_lock<std::mutex> lock(this->mutex_);
     this->sizes_[size_t(size)] = std::max(this->sizes_[size_t(size)], value);
-  }
-
-  /// @brief Increment a profiled counter.
-  /// @param counter Category of counter to increment.
-  /// @param amout Amount to add to the counter.
-  void incrementProfiledCounter(ProfiledCounter counter, size_t amout = 1) {
-    if (!this->enabled_) {
-      return;
-    }
-    std::unique_lock<std::mutex> lock(this->mutex_);
-    this->counters_[size_t(counter)] += amout;
   }
 
   /// @brief Register pre send information.
@@ -217,9 +199,6 @@ public:
     PRINT_ENUM_ARRAY_ELT(sizes_, ProfiledSize, MaxSendStorageSize);
     PRINT_ENUM_ARRAY_ELT(sizes_, ProfiledSize, MaxRecvStorageSize);
     PRINT_ENUM_ARRAY_ELT(sizes_, ProfiledSize, MaxSendQueueSize);
-
-    PRINT_ENUM_ARRAY_ELT(counters_, ProfiledCounter, ProbedRequest);
-    PRINT_ENUM_ARRAY_ELT(counters_, ProfiledCounter, HintedRequest);
 #undef PRINT_ENUM_ARRAY_ELT
 
     // per type stats
@@ -250,8 +229,6 @@ public:
   std::string getInfos() {
     std::ostringstream ss;
 
-    jsonl_add_entry(ss, "probed_request_count", this->counters_[(size_t)ProfiledCounter::ProbedRequest]);
-    jsonl_add_entry(ss, "hinted_request_count", this->counters_[(size_t)ProfiledCounter::HintedRequest]);
     jsonl_add_entry(ss, "max_pending_send_count", this->sizes_[(size_t)ProfiledSize::MaxSendOpsSize]);
     jsonl_add_entry(ss, "max_pending_recv_count", this->sizes_[(size_t)ProfiledSize::MaxRecvOpsSize]);
 
@@ -368,7 +345,6 @@ private: // data
   Table<std::vector<ProfileInfo>>                     sendInfos_;       ///< Send infos.
   Table<std::vector<ProfileInfo>>                     recvInfos_;       ///< Recv infos.
   std::array<size_t, size_t(ProfiledSize::COUNT_)>    sizes_ = {0};     ///< Profiled sizes values.
-  std::array<size_t, size_t(ProfiledCounter::COUNT_)> counters_ = {0};  ///< Profiled counters values.
   size_t                                              nbTypes_ = 0;     ///< Number of type managed by the communicator.
   size_t                                              nbProcesses_ = 0; ///< Number of processes.
   rank_t                                              rank_ = 0;        ///< Rank of the current process.

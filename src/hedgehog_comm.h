@@ -14,7 +14,6 @@
 #include "communicator/communicator.hpp"
 #include "communicator/communicator_core_task.hpp"
 #include "communicator/communicator_task.hpp"
-#include "communicator/hints.hpp"
 #include "communicator/package.hpp"
 #include "communicator/protocol.hpp"
 #include "communicator/send_strategies.hpp"

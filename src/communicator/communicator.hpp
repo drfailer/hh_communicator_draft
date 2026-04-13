@@ -3,7 +3,6 @@
 #include "tool/log.hpp"
 #include "tool/queue.hpp"
 #include "package.hpp"
-#include "hints.hpp"
 #include "service/comm_service.hpp"
 #include "memory_manager/memory_manager.hpp"
 #include "profiling/communicator_profiler.hpp"
@@ -14,6 +13,7 @@
 #include <utility>
 #include <vector>
 #include <bitset>
+#include <optional>
 
 // This communicator works the following way:
 // 1. Probes for incomming request.
@@ -43,6 +43,7 @@ public:
       : service_(service),
         channel_(service->newChannel()),
         createDataOps_(service->nbProcesses() * TM::size),
+        wh_(service->nbProcesses(), TM::size),
         profiler_(TM::size, service) {}
 
 public:
@@ -70,14 +71,6 @@ public:
   /// @param mm New memory manager.
   void memoryManager(tool::MemoryManager<Types...> *mm) {
     this->mm_ = mm;
-  }
-
-  /// @brief Add a new hint.
-  /// @tparam T Type for which the hint should be used.
-  /// @param hint Hint to add to the list of hints.
-  template <typename T>
-  void addHint(hint::Hint const &hint) {
-    this->hints_.push_back(HintTracker{hint, TM::template idOf<T>()});
   }
 
   /// @brief Configure the send threshold.
@@ -111,7 +104,6 @@ public:
   /// @brief Initialize the communicator.
   void init() {
     this->fini_.store(false);
-    initHints();
   }
 
   /// @brief Run the communicator (should be called in a dedicated thread).
@@ -125,9 +117,7 @@ public:
       probeIncommingRequests(header);
       processCreateDataQueue();
       processRecvOpsQueue(addResult);
-      progressHints();
     }
-    finalizeHints();
     flush();
   }
 
@@ -143,12 +133,9 @@ public:
 
 private:
   struct CreateDataOperation {
-    std::bitset<MAX_BUFFER_COUNT_PER_PACKAGE> received_buffers;
+    std::bitset<MAX_BUFFER_COUNT_PER_PACKAGE> receivedBuffers;
     Header header;
   };
-
-  /// @brief Forward declaration of HintTracker.
-  struct HintTracker;
 
   /// @brief Structure used in the send queue when the send threshold is set.
   struct SendRequest {
@@ -159,27 +146,13 @@ private:
 
   /// @brief Structure that contains information about the communication requests.
   struct CommOperation {
+    rank_t       source;    ///< Source that sent the package.
+    type_id_t    typeId;    ///< Type id of the sent data.
     buffer_id_t  bufferId;  ///< Id of the buffer (buffers are sent/received separately).
     Request      request;   ///< Request.
     StorageId    storageId; ///< Id of the storage.
     size_t       profileId; ///< Id for the profile info queue.
-    int          hint;      ///< Hint tracker pointer.
   };
-
-  /// @brief Returns if the given queue has pending operations (do not count the
-  ///        hinted requests).
-  /// @param queue Queue to test.
-  /// @return True if the queue has non hinted pending operations, false otherwise.
-  bool queueHasPendingOperations(Queue<CommOperation> const &queue) const {
-    bool result = false;
-
-    for (auto const &op : queue) {
-      if (op.hint == -1) {
-        return true;
-      }
-    }
-    return result;
-  }
 
   /******************************************************************************/
   /*                           send queue operations                            */
@@ -204,11 +177,12 @@ private:
       for (size_t i = 0; i < bufferCount; ++i) {
         header.bufferId = (buffer_id_t)i;
         this->sendOps_.add(CommOperation{
+            .source = this->rank(),
+            .typeId = storage.typeId,
             .bufferId = header.bufferId,
             .request = this->service_->sendAsync(header, dest, storage.package.data[i]),
             .storageId = storageId,
             .profileId = profileId,
-            .hint = -1,
         });
       }
     }
@@ -310,7 +284,7 @@ private:
         .data = std::move(data),
         .typeId = TM::template idOf<T>(),
         .useAddResult = useAddResult,
-        .dbgBufferReceived = {false, false, false, false},
+        .receivedBuffers = {},
     };
     return std::make_pair(storage, std::chrono::duration_cast<std::chrono::nanoseconds>(tpackingEnd - tpackingStart));
   }
@@ -319,19 +293,46 @@ private:
   /*                           recv queue operations                            */
   /******************************************************************************/
 
-  void registerNewRequest(Header const &header) {
-    auto &queue = this->createDataOps_[header.source * TM::size + header.typeId];
+  void addRecvOpAndUpdateStorage(Header const &header, StorageId storageId) {
+    auto &storage = this->wh_.recvStorage(header.source, header.typeId).at(storageId);
+    assert(storage.receivedBuffers.test(header.bufferId) == false);
+    this->recvOps_.add(CommOperation{
+        .source = header.source,
+        .typeId = header.typeId,
+        .bufferId = header.bufferId,
+        // TODO: use MPI_Imrecv
+        .request = this->service_->recvAsync(header, storage.package.data[header.bufferId]),
+        .storageId = storageId,
+        // TODO: we need to update the profiler
+        .profileId = this->profiler_.preRecv(header.typeId, header.source),
+    });
+    storage.receivedBuffers.set(header.bufferId);
+  }
 
+  void registerNewRequest(Header const &header) {
+    // we first lookup in the storage to see if the reception has already
+    // started for this package
+    if (auto storageId = recvStorageLookup(header)) {
+      addRecvOpAndUpdateStorage(header, *storageId);
+      return;
+    }
+
+    // if there is no storage entry, we look for a corresponding entry in the
+    // create data queue (in that case, it is possible that at least one buffer
+    // of the package has been received, but the memory maanger couldn't allocate
+    // the data).
+    auto &queue = this->createDataOps_[header.source * TM::size + header.typeId];
     for (auto data : queue) {
-      if (!data.received_buffers.test(header.bufferId)) {
-        data.received_buffers.set(header.bufferId);
+      if (!data.receivedBuffers.test(header.bufferId)) {
+        data.receivedBuffers.set(header.bufferId);
         return;
       }
     }
-    // TODO: we will change the way we receive
-    // at this point we have received a new data
+
+    // If there are no matching entries neither in the storage or the create
+    // data queue, we start the reception for a new package.
     queue.add(CreateDataOperation{
-        .received_buffers = {},
+        .receivedBuffers = {},
         .header = header,
     });
   }
@@ -350,7 +351,7 @@ private:
         auto &queue = this->createDataOps_[rank * TM::size + typeId];
         queueSize += queue.size();
         for (auto it = queue.begin(); it != queue.end();) {
-          if (recvData(it->header)) {
+          if (recvData(*it)) {
             it = queue.remove(it);
           } else {
             it++;
@@ -367,19 +368,17 @@ private:
   /// @param addResult Function that allow to call `task->addResult`
   void processRecvOpsQueue(auto addResult) {
     this->profiler_.updateProfiledSize(ProfiledSize::MaxRecvOpsSize, this->recvOps_.size());
-    this->profiler_.updateProfiledSize(ProfiledSize::MaxRecvStorageSize, this->wh_.recvStorage.size());
+    // TODO:
+    // this->profiler_.updateProfiledSize(ProfiledSize::MaxRecvStorageSize, this->wh_.recvStorage.size());
 
     for (auto it = this->recvOps_.begin(); it != this->recvOps_.end();) {
       if (this->service_->requestCompleted(it->request)) {
-        StorageSlot<TM> &storage = this->wh_.recvStorage.at(it->storageId);
+        StorageSlot<TM> &storage = this->wh_.recvStorage(it->source, it->typeId).at(it->storageId);
         ++storage.bufferCount;
 
         if (storage.bufferCount == storage.ttlBufferCount) {
           postRecv(storage, addResult, it->profileId);
-          if (it->hint != -1) {
-            hintRequestCompleted(it->hint);
-          }
-          this->wh_.recvStorage.remove(it->storageId);
+          this->wh_.recvStorage(it->source, it->typeId).remove(it->storageId);
         }
         this->service_->requestRelease(it->request);
         it = this->recvOps_.remove(it);
@@ -393,6 +392,7 @@ private:
   /// @param header Reference to a header that is set when the probe is
   ///               successful.
   bool probeIncommingRequests(Header &header) {
+    // TODO: use MPI_Improbe / MPI_Imrecv
     Request request = this->service_->probeAsync(this->channel_);
     bool requestReceived = false;
 
@@ -400,7 +400,6 @@ private:
       requestReceived = true;
       header = this->service_->requestHeader(request);
       header.channel = this->channel_;
-      this->profiler_.incrementProfiledCounter(ProfiledCounter::ProbedRequest);
       assert(header.source < this->nbProcesses());
       assert(header.source != this->rank());
       registerNewRequest(header);
@@ -413,24 +412,20 @@ private:
   ///        be created, the reception of all the buffers is started.
   /// @param header Header of the request fetched by the probe.
   /// @return True if the reception has started.
-  bool recvData(Header header, int hint = -1) {
-    auto [storageId, ok] = createRecvStorage(header);
+  bool recvData(CreateDataOperation const &op) {
+    Header header = op.header;
+    auto storageId = tryCreateRecvStorage(header);
 
-    if (!ok) {
-      return false;
+    if (!storageId.has_value()) {
+        return false;
     }
 
-    StorageSlot<TM> &storage = this->wh_.recvStorage.at(storageId);
-    for (header.bufferId = 0; header.bufferId < storage.package.data.size(); ++header.bufferId) {
-      assert(storage.dbgBufferReceived[header.bufferId] == false);
-      storage.dbgBufferReceived[header.bufferId] = true;
-      this->recvOps_.add(CommOperation{
-          .bufferId = header.bufferId,
-          .request = this->service_->recvAsync(header, storage.package.data[header.bufferId]),
-          .storageId = storageId,
-          .profileId = this->profiler_.preRecv(header.typeId, header.source),
-          .hint = hint,
-      });
+    StorageSlot<TM> &storage = this->wh_.recvStorage(header.source, header.typeId).at(*storageId);
+    for (header.bufferId = 0; header.bufferId < storage.package.bufferCount(); ++header.bufferId) {
+      if (!op.receivedBuffers.test(header.bufferId)) {
+          continue;
+      }
+      addRecvOpAndUpdateStorage(header, *storageId);
     }
     return true;
   }
@@ -449,7 +444,6 @@ private:
       tunpackingEnd = std::chrono::system_clock::now();
       delay_t unpackingTime = std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart);
       this->profiler_.postRecv(profileId, unpackingTime, storage.package.size());
-
       if constexpr (requires { data->postRecv(); }) {
         data->postRecv();
       }
@@ -457,42 +451,47 @@ private:
     });
   }
 
+  // @brief lookup for existing storage
+  //
+  // MPI guaranties the reception order for the same communicator/rank/tag.
+  // Storage lines are organized by rank and type id, and the underlying MPI
+  // tag is composed by the type id and the buffer id. This means that for a
+  // same storage line, the order of reception of the buffers with the same id
+  // is guaranteed. Here, we iterate the queue in the order of reception, and
+  // we look for the first package that misses the newly received buffer.
+  //
+  // @param header Header of the request to lookup.
+  // @return Optional storage id of the storage slot that correspond to the
+  //         request.
+  std::optional<StorageId> recvStorageLookup(Header const &header) {
+    auto &storageLine = this->wh_.recvStorage(header.source, header.typeId);
+    for (auto it = storageLine.begin(); it != storageLine.end(); it++) {
+      if (!it->receivedBuffers.test(header.bufferId)) {
+        return it.idx;
+      }
+    }
+    return std::nullopt;
+  }
+
   /// @brief Try to allocated a new data using the memory manager. If the
   ///        memory manager returns a valid data, creates a new storage slot in
   ///        the warehouse.
   /// @return True and the storage id if the storage slot was created, false
   ///         and 0 otherwise.
-  std::pair<StorageId, bool> createRecvStorage(Header const &header) {
-    bool status = true;
-    StorageId storageId = 0;
-
+  std::optional<StorageId> tryCreateRecvStorage(Header const &header) {
+    std::optional<StorageId> storageId = std::nullopt;
     assert(header.typeId < TM::size);
     TM::apply(header.typeId, [&]<typename T>() {
       auto data = this->mm_->template allocate<T>();
-
       if (data == nullptr) {
-        status = false;
         return;
       }
-
       if constexpr (requires { data->preRecv(); }) {
         data->preRecv();
       }
-
-      Package         package = packageMem(data);
-      StorageSlot<TM> storage{
-          .source = header.source,
-          .package = package,
-          .bufferCount = 0,
-          .ttlBufferCount = package.data.size(),
-          .data = std::move(data),
-          .typeId = header.typeId,
-          .useAddResult = false,
-          .dbgBufferReceived = {false, false, false, false},
-      };
-      storageId = this->wh_.recvStorage.add(storage);
+      storageId = this->wh_.addRecvStorageSlot(std::move(data), header);
     });
-    return {storageId, status};
+    return storageId;
   }
 
     /******************************************************************************/
@@ -513,119 +512,24 @@ private:
     for (auto &queue : this->createDataOps_) {
       queue.clear();
     }
-    for (auto &storage : this->wh_.recvStorage) {
-      assert(storage.typeId < TM::size);
-      TM::apply(storage.typeId, [&]<typename T>() {
-        this->mm_->release(std::move(std::get<std::shared_ptr<T>>(storage.data)));
-      });
+    for (rank_t source = 0; source < this->nbProcesses(); ++source) {
+      for (type_id_t typeId = 0; typeId < TM::size; ++typeId) {
+        auto &recvStorageQueue = this->wh_.recvStorage(source, typeId);
+        for (auto &storage : recvStorageQueue) {
+          assert(storage.typeId < TM::size);
+          TM::apply(storage.typeId, [&]<typename T>() {
+            this->mm_->release(std::move(std::get<std::shared_ptr<T>>(storage.data)));
+          });
+        }
+        recvStorageQueue.clear();
+      }
     }
-    this->wh_.recvStorage.clear();
     this->sendQueue_.clear();
     for (auto &op : this->sendOps_) {
       this->service_->requestCancel(op.request);
     }
     this->sendOps_.clear();
   }
-
-/******************************************************************************/
-/*                                   hints                                    */
-/******************************************************************************/
-
-private:
-  /// @brief Tracks the number of requests for each hint.
-  struct HintTracker {
-    hint::Hint hint;               ///< Hint.
-    type_id_t typeId;              ///< Id of the data affected by the hint.
-    size_t activeRequestCount = 0; ///< Number of requests in the ops queue.
-    size_t postedRequestCount = 0; ///< Total number of posted requests.
-  };
-
-  /// @brief Notifies a hint tracker that one of its requests has been completed.
-  /// @param hintIdx Index of the hint tracker in the hint list.
-  void hintRequestCompleted(int hintIdx) {
-    assert(hintIdx >= 0);
-    auto &hint = this->hints_[hintIdx];
-    hint.activeRequestCount -= 1;
-    this->profiler_.incrementProfiledCounter(ProfiledCounter::HintedRequest);
-  }
-
-  /// @brief Initialize the hints.
-  void initHints() {
-    for (int hintIdx = 0; hintIdx < (int)this->hints_.size(); ++hintIdx) {
-      switch (this->hints_[hintIdx].hint.type) {
-      case hint::HintType::RecvCountFrom: {
-        auto &hint = this->hints_[hintIdx].hint.data.recvCountFrom;
-        auto typeId = this->hints_[hintIdx].typeId;
-        if (hint.source == rank()) {
-          continue;
-        }
-
-        for (size_t i = 0; i < hint.count; ++i) {
-          if (recvData(Header(hint.source, typeId, channel(), 0), hintIdx)) {
-            this->hints_[hintIdx].postedRequestCount += 1;
-            this->hints_[hintIdx].activeRequestCount += 1;
-          }
-        }
-      } break;
-      case hint::HintType::ContinuousRecvFrom: {
-        auto &hint = this->hints_[hintIdx].hint.data.continuousRecvFrom;
-        auto typeId = this->hints_[hintIdx].typeId;
-
-        if (hint.source == rank()) {
-          continue;
-        }
-
-        for (size_t i = 0; i < hint.poolSize; ++i) {
-          if (recvData(Header(hint.source, typeId, channel(), 0), hintIdx)) {
-            this->hints_[hintIdx].postedRequestCount += 1;
-            this->hints_[hintIdx].activeRequestCount += 1;
-          }
-        }
-      } break;
-      }
-    }
-  }
-
-  /// @brief Progress the hints.
-  void progressHints() {
-    for (int hintIdx = 0; hintIdx < (int)this->hints_.size(); ++hintIdx) {
-      switch (this->hints_[hintIdx].hint.type) {
-      case hint::HintType::RecvCountFrom: {
-        auto &hint = this->hints_[hintIdx].hint.data.recvCountFrom;
-        auto typeId = this->hints_[hintIdx].typeId;
-
-        if (hint.source == rank()) {
-          continue;
-        }
-
-        for (size_t i = this->hints_[hintIdx].postedRequestCount; i < hint.count; ++i) {
-          if (recvData(Header(hint.source, typeId, channel(), 0), hintIdx)) {
-            this->hints_[hintIdx].postedRequestCount += 1;
-            this->hints_[hintIdx].activeRequestCount += 1;
-          }
-        }
-      } break;
-      case hint::HintType::ContinuousRecvFrom: {
-        auto &hint = this->hints_[hintIdx].hint.data.continuousRecvFrom;
-        auto typeId = this->hints_[hintIdx].typeId;
-
-        if (hint.source == rank()) {
-          continue;
-        }
-
-        for (size_t i = this->hints_[hintIdx].activeRequestCount; i < hint.poolSize; ++i) {
-          if (recvData(Header(hint.source, typeId, channel(), 0), hintIdx)) {
-            this->hints_[hintIdx].postedRequestCount += 1;
-            this->hints_[hintIdx].activeRequestCount += 1;
-          }
-        }
-      } break;
-      }
-    }
-  }
-
-  /// @brief Finalize the hints.
-  void finalizeHints() {}
 
   /******************************************************************************/
   /*                                 attributes                                 */
@@ -651,8 +555,6 @@ private:
   // memory manager
   tool::MemoryManager<Types...> *mm_ = nullptr; ///< Pointer to the memory manager.
 
-  // hints
-  std::vector<HintTracker> hints_; ///< Hint tracker list (hint data).
   size_t sendThreshold_ = 0;       ///< Send threshold.
 
   // profiler

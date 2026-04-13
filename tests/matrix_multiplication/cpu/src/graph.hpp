@@ -55,31 +55,8 @@ struct MMGraph : hh::Graph<MMGraphIO> {
         auto copyTileState = std::make_shared<CopyTileStateManager>(std::make_shared<CopyTileState>(mm, TM, TN, RANK));
         auto copyTileTask = std::make_shared<CopyTileTask>(COPY_TILE_TASK_THREADS);
 
-        // HINTS ///////////////////////////////////////////////////////////////
-
-        // // recv count
-        // distributeTask->addHint<MatrixTile<MT, MatrixId::A>>(hh::comm::hint::recvCountFrom(0, 400));
-        // distributeTask->addHint<MatrixTile<MT, MatrixId::B>>(hh::comm::hint::recvCountFrom(0, 100));
-        // distributeTask->addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(0, 100));
-        // if (service->rank() == 0) {
-        //     gatherTask->addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(1, 100));
-        //     gatherTask->addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(2, 100));
-        //     gatherTask->addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::recvCountFrom(3, 100));
-        // }
-
-        // continuous recv
-        distributeTask->addHint<MatrixTile<MT, MatrixId::A>>(hh::comm::hint::continuousRecvFrom(0, 6));
-        distributeTask->addHint<MatrixTile<MT, MatrixId::B>>(hh::comm::hint::continuousRecvFrom(0, 2));
-        distributeTask->addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::continuousRecvFrom(0, 2));
-        if (service->rank() == 0) {
-            gatherTask->addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::continuousRecvFrom(1, 1));
-            gatherTask->addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::continuousRecvFrom(2, 1));
-            gatherTask->addHint<MatrixTile<MT, MatrixId::C>>(hh::comm::hint::continuousRecvFrom(3, 1));
-        }
-
-        distributeTask->sendThreshold(100);
-
-        ////////////////////////////////////////////////////////////////////////
+        // sent packages threashold
+        // distributeTask->sendThreshold(100);
 
         distributeTask->strategy<MatrixTile<MT, MatrixId::A>>([NB_PROCESSES, TN](auto tile) {
             std::vector<hh::comm::rank_t> dests = {(hh::comm::rank_t)(tile->rowIdx * TN % NB_PROCESSES)};
