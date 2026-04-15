@@ -27,6 +27,9 @@ public:
   virtual ~CommService() = default;
 
 public:
+  constexpr static size_t MAX_PACKAGE_BUFFER_COUNT = 4;
+
+public:
   /// @brief Send a buffer to a given destination asynchronously.
   /// @param header Header of the request (see Header structure).
   /// @param dest   Rank of the destination process.

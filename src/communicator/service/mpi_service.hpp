@@ -16,8 +16,6 @@ namespace hh {
 /// @brief Communicator namespace
 namespace comm {
 
-constexpr size_t MAX_BUFFER_COUNT_PER_PACKAGE = 4;
-
 /// @brief Implementation of hte MPI service backend.
 class MPIService : public CommService {
 public:

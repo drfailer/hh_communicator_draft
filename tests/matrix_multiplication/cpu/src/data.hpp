@@ -76,16 +76,10 @@ struct MatrixTile {
     }
 
     hh::comm::Package package() {
-        return hh::comm::Package{.data = {
-                                     hh::comm::Buffer{(char *)this, 8 * 8},
-                                     hh::comm::Buffer{(char *)mem, tileSize * tileSize * sizeof(*mem)},
-                                 }};
+        return {hh::comm::Buffer{(char *)this, 8 * 8}, hh::comm::Buffer{(char *)mem, tileSize * tileSize * sizeof(*mem)}};
     }
     hh::comm::Package pack() {
-        return hh::comm::Package{.data = {
-                                     hh::comm::Buffer{(char *)this, 8 * 8},
-                                     hh::comm::Buffer{(char *)mem, tileSize * tileSize * sizeof(*mem)},
-                                 }};
+        return {hh::comm::Buffer{(char *)this, 8 * 8}, hh::comm::Buffer{(char *)mem, tileSize * tileSize * sizeof(*mem)}};
     }
     void unpack(hh::comm::Package &&) {}
 

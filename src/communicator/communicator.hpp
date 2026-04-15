@@ -133,7 +133,7 @@ public:
 
 private:
   struct CreateDataOperation {
-    std::array<Request, MAX_BUFFER_COUNT_PER_PACKAGE> receivedRequests;
+    std::array<Request, CommService::MAX_PACKAGE_BUFFER_COUNT> receivedRequests;
     Header header;
   };
 
@@ -172,7 +172,7 @@ private:
       if (dest == this->rank()) {
         continue;
       }
-      size_t bufferCount = storage.package.data.size();
+      size_t bufferCount = storage.package.bufferCount;
       size_t profileId = profiler_.preSend(storage.typeId, dest, packingTime, bufferCount);
       for (size_t i = 0; i < bufferCount; ++i) {
         header.bufferId = (buffer_id_t)i;
@@ -180,7 +180,7 @@ private:
             .source = this->rank(),
             .typeId = storage.typeId,
             .bufferId = header.bufferId,
-            .request = this->service_->send(header, dest, storage.package.data[i]),
+            .request = this->service_->send(header, dest, storage.package.buffers[i]),
             .storageId = storageId,
             .profileId = profileId,
         });
@@ -273,14 +273,14 @@ private:
     time_t  tpackingStart = std::chrono::system_clock::now();
     Package package = pack(data);
     time_t  tpackingEnd = std::chrono::system_clock::now();
-    assert(package.data.size() <= 4);
+    size_t bufferCount = package.bufferCount;
 
     // create the storage slot
     StorageSlot<TM> storage = {
         .source = this->rank(),
-        .package = package,
+        .package = std::move(package),
         .bufferCount = 0,
-        .ttlBufferCount = package.data.size() * nbDests,
+        .ttlBufferCount = bufferCount * nbDests,
         .data = std::move(data),
         .typeId = TM::template idOf<T>(),
         .useAddResult = useAddResult,
@@ -300,7 +300,7 @@ private:
         .source = header.source,
         .typeId = header.typeId,
         .bufferId = header.bufferId,
-        .request = this->service_->recv(request, storage.package.data[header.bufferId]),
+        .request = this->service_->recv(request, storage.package.buffers[header.bufferId]),
         .storageId = storageId,
         // TODO: we need to update the profiler
         .profileId = this->profiler_.preRecv(header.typeId, header.source),
@@ -415,7 +415,7 @@ private:
     }
 
     StorageSlot<TM> &storage = this->wh_.recvStorage(header.source, header.typeId).at(*storageId);
-    for (header.bufferId = 0; header.bufferId < storage.package.bufferCount(); ++header.bufferId) {
+    for (header.bufferId = 0; header.bufferId < storage.package.bufferCount; ++header.bufferId) {
       if (op.receivedRequests[header.bufferId] == nullptr) {
           continue;
       }

@@ -2,11 +2,13 @@
 #define COMMUNICATOR_PACKAGE
 #include "protocol.hpp"
 #include "type_map.hpp"
+#include "service/comm_service.hpp"
 #include "tool/queue.hpp"
 #include "tool/table.hpp"
 #include <cstring>
 #include <memory>
 #include <vector>
+#include <initializer_list>
 #include <bitset>
 #include <hedgehog.h>
 
@@ -23,20 +25,40 @@ namespace comm {
 ///        the communicator tark. A package is a list of buffers, and a buffer
 ///        is a pointer and an length.
 struct Package {
-  std::vector<Buffer> data; ///< list of buffer
+  Buffer buffers[CommService::MAX_PACKAGE_BUFFER_COUNT] = {}; ///< List of buffers.
+  size_t bufferCount = 0;                                     ///< Number of buffers.
+
+  /// @brief Default constructor.
+  Package() = default;
+
+  /// @brief Variadic constructor.
+  /// @param bufferList List of buffers.
+  Package(auto &&...bufferList)
+      : buffers(std::forward<decltype(bufferList)>(bufferList)...),
+        bufferCount(sizeof...(bufferList)) {
+    static_assert(sizeof...(bufferList) < CommService::MAX_PACKAGE_BUFFER_COUNT,
+            "try to construct package with too many buffers");
+  }
+
+  /// @brief Constructor from initializer list.
+  /// @param bufferList Initializer list of buffers.
+  Package(std::initializer_list<Buffer> bufferList) {
+    assert(bufferList.size() < CommService::MAX_PACKAGE_BUFFER_COUNT);
+    for (auto buffer : bufferList) {
+      this->buffers[this->bufferCount] = buffer;
+      this->bufferCount += 1;
+    }
+  }
 
   /// @brief Compute the total size if the package (used to determin the
   ///         bandwidth in the profiling information).
   size_t size() const {
     size_t result = 0;
-    for (auto const &buffer : this->data) {
-      result += buffer.size();
+    for (size_t i = 0; i < this->bufferCount; ++i) {
+      result += this->buffers[i].size();
     }
     return result;
   }
-
-  /// @brief Returns the number of buffers in the package.
-  size_t bufferCount() const { return data.size(); }
 };
 
 /// @param Utility function that pack the given data.
@@ -58,7 +80,7 @@ Package pack(std::shared_ptr<T> data) {
   if constexpr (requires { data->pack(); }) {
     package = data->pack();
   } else if constexpr (std::is_trivially_copyable_v<T>) {
-    package.data.push_back(Buffer{(char*)data.get(), sizeof(T)});
+    package = {Buffer{(char*)data.get(), sizeof(T)}};
   } else {
     throw std::invalid_argument("type " + hh::tool::typeToStr<T>()
                                 + " does not implement `pack()` and is not trivially copyable.");
@@ -137,7 +159,7 @@ struct StorageSlot {
   variant_type_t<TM> data;           ///< Variant containing the data that is sent (keep the shared_ptr alive).
   type_id_t          typeId;         ///< type of the data stored in the storage.
   bool               useAddResult;   ///< Flag used to know if the data must be transfered or released after all the buffers are sent on the network.
-  std::bitset<MAX_BUFFER_COUNT_PER_PACKAGE> receivedBuffers; ///< Allow to keep track of the received buffers.
+  std::bitset<CommService::MAX_PACKAGE_BUFFER_COUNT> receivedBuffers; ///< Allow to keep track of the received buffers.
 };
 
 /// @brief Package warehouse type.
@@ -162,15 +184,17 @@ struct PackageWarehouse {
   template <typename T>
   StorageId addRecvStorageSlot(std::shared_ptr<T> data, rank_t source) {
     Package package = packageMem(data);
+    size_t bufferCount = package.bufferCount;
     type_id_t typeId = TM::template idOf<T>();
+
     assert(data != nullptr);
-    assert(0 < package.bufferCount() && package.bufferCount() < MAX_BUFFER_COUNT_PER_PACKAGE);
-    recvStorageSize += 1;
+    assert(0 < bufferCount && bufferCount < CommService::MAX_PACKAGE_BUFFER_COUNT);
+    this->recvStorageSize += 1;
     return this->recvStorage(source, typeId).add(StorageSlot<TM>{
         .source = source,
-        .package = package, // TODO: the compiler migh copy the package here
+        .package = std::move(package),
         .bufferCount = 0,
-        .ttlBufferCount = package.data.size(),
+        .ttlBufferCount = bufferCount,
         .data = std::move(data),
         .typeId = typeId,
         .useAddResult = false,
