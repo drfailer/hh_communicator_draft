@@ -40,6 +40,8 @@ public:
       : enabled_(service->profilingEnabled()),
         sendInfos_(typeCount, service->nbProcesses()),
         recvInfos_(typeCount, service->nbProcesses()),
+        packTimes_(typeCount),
+        unpackTimes_(typeCount),
         nbTypes_(typeCount),
         nbProcesses_(service->nbProcesses()),
         rank_(service->rank()),
@@ -57,19 +59,31 @@ public:
     this->sizes_[size_t(size)] = std::max(this->sizes_[size_t(size)], value);
   }
 
+  /// @brief Register a packing time for a tipe.
+  /// @param typeId Type packed.
+  /// @param time   Packing time.
+  void registerPackTime(type_id_t typeId, time_unit_t time) {
+    this->packTimes_[typeId].push_back(time);
+  }
+
+  /// @brief Register an unpacking time for a tipe.
+  /// @param typeId Type unpacked.
+  /// @param time   Unpacking time.
+  void registerUnpackTime(type_id_t typeId, time_unit_t time) {
+    this->unpackTimes_[typeId].push_back(time);
+  }
+
   /// @brief Register pre send information.
   /// @param typeId Id of the send type.
   /// @param dest Destination rank.
-  /// @param packingTime Packing time.
   /// @param bufferCount Number of buffers in the package.
   /// @return Index of the entry in the profile queue.
-  size_t preSend(type_id_t typeId, rank_t dest, delay_t packingTime, size_t bufferCount) {
+  size_t preSend(type_id_t typeId, rank_t dest, size_t bufferCount) {
     if (!this->enabled_) {
       return 0;
     }
     std::unique_lock<std::mutex> lock(this->mutex_);
     return this->infosQueue_.add(InTransitPackageInfo{
-        .packingTime = packingTime,
         .beginTp = std::chrono::system_clock::now(),
         .rank = dest,
         .typeId = typeId,
@@ -92,7 +106,6 @@ public:
       auto endTp = std::chrono::system_clock::now();
       this->sendInfos_(profile.typeId, profile.rank).push_back(ProfileInfo{
           .timestamp = std::chrono::duration_cast<time_unit_t>(profile.beginTp - this->startTime_),
-          .packingTime = profile.packingTime,
           .transmissionTime = std::chrono::duration_cast<time_unit_t>(endTp - profile.beginTp),
           .packageSize = packageSize,
       });
@@ -109,7 +122,6 @@ public:
     }
     std::unique_lock<std::mutex> lock(this->mutex_);
     return this->infosQueue_.add(InTransitPackageInfo{
-        .packingTime = {},
         .beginTp = std::chrono::system_clock::now(),
         .rank = source,
         .typeId = typeId,
@@ -119,9 +131,8 @@ public:
 
   /// @brief Register post recv information.
   /// @param queueIdx Index in the profile queue.
-  /// @param unpackingTime Unpacking time.
   /// @param packageSize Size of the package in bytes.
-  void postRecv(size_t queueIdx, delay_t unpackingTime, size_t packageSize) {
+  void postRecv(size_t queueIdx, size_t packageSize) {
     if (!this->enabled_) {
       return;
     }
@@ -130,7 +141,6 @@ public:
     auto                         endTp = std::chrono::system_clock::now();
     this->recvInfos_(profile.typeId, profile.rank).push_back(ProfileInfo{
         .timestamp = std::chrono::duration_cast<time_unit_t>(profile.beginTp - this->startTime_),
-        .packingTime = unpackingTime,
         .transmissionTime = std::chrono::duration_cast<time_unit_t>(endTp - profile.beginTp),
         .packageSize = packageSize,
     });
@@ -144,7 +154,7 @@ public:
 
     // per type stats
     for (type_id_t typeId = 0; typeId < nbTypes_; ++typeId) {
-      std::vector<time_unit_t> packTimes, unpackTimes, sendTimes, recvTimes;
+      std::vector<time_unit_t> sendTimes, recvTimes;
       std::vector<double>      bandWidth;
       std::string typeStr = typeIdToStr<TM>(typeId);
 
@@ -166,19 +176,17 @@ public:
 
         // update the global stats arrays
         for (auto pi : sendInfos) {
-          packTimes.push_back(pi.packingTime);
           sendTimes.push_back(pi.transmissionTime);
           bandWidth.push_back(this->getBandWidth_(pi));
         }
         for (auto pi : recvInfos) {
-          unpackTimes.push_back(pi.packingTime);
-          recvTimes.push_back(pi.packingTime);
+          recvTimes.push_back(pi.transmissionTime);
         }
       }
 
       // add the global stats
-      infosPerType.packTime = computeAvgDuration(packTimes);
-      infosPerType.unpackTime = computeAvgDuration(unpackTimes);
+      infosPerType.packTime = computeAvgDuration(this->packTimes_[typeId]);
+      infosPerType.unpackTime = computeAvgDuration(this->unpackTimes_[typeId]);
       infosPerType.sendTime = computeAvgDuration(sendTimes);
       infosPerType.recvTime = computeAvgDuration(recvTimes);
       infosPerType.bandWidth = computeAvg(bandWidth);
@@ -298,7 +306,6 @@ private: // type definitions
 
 /// @brief Profiling information of a transiting package (common to sender and receiver).
 struct InTransitPackageInfo {
-  time_unit_t packingTime; ///< Packing/Upacking time.
   time_t      beginTp;     ///< Transmission start timestamp.
   rank_t      rank;        ///< Rank (sender or receiver).
   type_id_t   typeId;      ///< Type id.
@@ -308,7 +315,6 @@ struct InTransitPackageInfo {
 /// @brief Profiling information of a received/sent package (common to sender and receiver).
 struct ProfileInfo {
   time_unit_t timestamp;        ///< Transmission timestamp.
-  time_unit_t packingTime;      ///< Packing/Unpacking time.
   time_unit_t transmissionTime; ///< Transmission duration.
   size_t      packageSize;      ///< Package size in bytes.
 };
@@ -344,6 +350,8 @@ private: // data
   Queue<InTransitPackageInfo>                         infosQueue_;      ///< Profiling infos queue.
   Table<std::vector<ProfileInfo>>                     sendInfos_;       ///< Send infos.
   Table<std::vector<ProfileInfo>>                     recvInfos_;       ///< Recv infos.
+  std::vector<std::vector<time_unit_t>>               packTimes_;       ///< Pack times.
+  std::vector<std::vector<time_unit_t>>               unpackTimes_;     ///< Unpack Times.
   std::array<size_t, size_t(ProfiledSize::COUNT_)>    sizes_ = {0};     ///< Profiled sizes values.
   size_t                                              nbTypes_ = 0;     ///< Number of type managed by the communicator.
   size_t                                              nbProcesses_ = 0; ///< Number of processes.
@@ -353,7 +361,6 @@ private: // data
   std::mutex                                          mutex_;           ///< Mutex for thread-safety.
 
 private: // callbacks used for computing averages and standard deviation
-  std::function<time_unit_t(ProfileInfo)> getPackingTime_ = [](ProfileInfo pi) { return pi.packingTime; };
   std::function<time_unit_t(ProfileInfo)> getTransmissionTime_ = [](ProfileInfo pi) { return pi.transmissionTime; };
   std::function<double(ProfileInfo)> getBandWidth_ = [](ProfileInfo pi) {
     double sizeMB = (double)pi.packageSize / (1024. * 1024.);

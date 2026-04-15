@@ -24,6 +24,13 @@ using delay_t = std::chrono::duration<long int, std::ratio<1, 1000000000>>;
 /*                              helper functions                              */
 /******************************************************************************/
 
+/// @brief Helper function to compute a duration.
+/// @param begin Begin time point.
+/// @param end   End time point.
+inline time_unit_t computeDuration(time_t begin, time_t end) {
+  return std::chrono::duration_cast<time_unit_t>(end - begin);
+}
+
 /// @brief Generate the string corresponding to the given time.
 /// @brief ns Time to transform to string.
 /// @return Sring in which the time is writen.

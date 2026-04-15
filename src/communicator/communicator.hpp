@@ -164,16 +164,16 @@ private:
   /// @param data  Data to send.
   template <typename T>
   void processSendRequest(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
-    auto [storage, packingTime] = createSendStorage(dests, std::move(data));
-    Header          header(this->rank(), storage.typeId, this->channel_, 0);
-    StorageId       storageId = this->wh_.sendStorage.add(storage);
+    auto      storage = createSendStorage(dests, std::move(data));
+    Header    header(this->rank(), storage.typeId, this->channel_, 0);
+    StorageId storageId = this->wh_.sendStorage.add(storage);
 
     for (auto dest : dests) {
       if (dest == this->rank()) {
         continue;
       }
       size_t bufferCount = storage.package.bufferCount;
-      size_t profileId = profiler_.preSend(storage.typeId, dest, packingTime, bufferCount);
+      size_t profileId = profiler_.preSend(storage.typeId, dest, bufferCount);
       for (size_t i = 0; i < bufferCount; ++i) {
         header.bufferId = (buffer_id_t)i;
         this->sendOps_.add(CommOperation{
@@ -265,7 +265,7 @@ private:
   /// @param useAddResult Flag that will be used in  `postSend` to know if
   ///                     `addResult` should be used.
   template <typename T>
-  std::pair<StorageSlot<TM>, delay_t> createSendStorage(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
+  StorageSlot<TM> createSendStorage(std::vector<rank_t> const &dests, std::shared_ptr<T> data) {
     bool   useAddResult = std::find(dests.begin(), dests.end(), this->rank()) != dests.end();
     size_t nbDests = useAddResult ? dests.size() - 1 : dests.size();
 
@@ -274,20 +274,22 @@ private:
     Package package = pack(data);
     time_t  tpackingEnd = std::chrono::system_clock::now();
     size_t bufferCount = package.bufferCount;
+    type_id_t typeId = TM::template idOf<T>();
+
+    this->profiler_.registerPackTime(typeId, computeDuration(tpackingStart, tpackingEnd));
 
     // create the storage slot
-    StorageSlot<TM> storage = {
+    return StorageSlot<TM>{
         .source = this->rank(),
         .package = std::move(package),
         .bufferCount = 0,
         .ttlBufferCount = bufferCount * nbDests,
         .data = std::move(data),
-        .typeId = TM::template idOf<T>(),
+        .typeId = typeId,
         .useAddResult = useAddResult,
         .receivedBuffers = {},
         .profileId = 0, // unused for the sender
     };
-    return std::make_pair(storage, std::chrono::duration_cast<std::chrono::nanoseconds>(tpackingEnd - tpackingStart));
   }
 
   /******************************************************************************/
@@ -436,8 +438,8 @@ private:
       tunpackingStart = std::chrono::system_clock::now();
       unpack(std::move(storage.package), data);
       tunpackingEnd = std::chrono::system_clock::now();
-      delay_t unpackingTime = std::chrono::duration_cast<std::chrono::nanoseconds>(tunpackingEnd - tunpackingStart);
-      this->profiler_.postRecv(profileId, unpackingTime, storage.package.size());
+      this->profiler_.registerUnpackTime(storage.typeId, computeDuration(tunpackingStart, tunpackingEnd));
+      this->profiler_.postRecv(profileId, storage.package.size());
       if constexpr (requires { data->postRecv(); }) {
         data->postRecv();
       }
