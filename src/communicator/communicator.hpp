@@ -285,6 +285,7 @@ private:
         .typeId = TM::template idOf<T>(),
         .useAddResult = useAddResult,
         .receivedBuffers = {},
+        .profileId = 0, // unused for the sender
     };
     return std::make_pair(storage, std::chrono::duration_cast<std::chrono::nanoseconds>(tpackingEnd - tpackingStart));
   }
@@ -302,8 +303,7 @@ private:
         .bufferId = header.bufferId,
         .request = this->service_->recv(request, storage.package.buffers[header.bufferId]),
         .storageId = storageId,
-        // TODO: we need to update the profiler
-        .profileId = this->profiler_.preRecv(header.typeId, header.source),
+        .profileId = storage.profileId,
     });
     storage.receivedBuffers.set(header.bufferId);
   }
@@ -483,7 +483,9 @@ private:
       if constexpr (requires { data->preRecv(); }) {
         data->preRecv();
       }
-      storageId = this->wh_.addRecvStorageSlot(std::move(data), header.source);
+      storageId = this->wh_.addRecvStorageSlot(
+              std::move(data), header.source,
+              this->profiler_.preRecv(header.typeId, header.source));
     });
     return storageId;
   }

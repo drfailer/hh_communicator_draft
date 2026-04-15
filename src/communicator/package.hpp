@@ -160,6 +160,7 @@ struct StorageSlot {
   type_id_t          typeId;         ///< type of the data stored in the storage.
   bool               useAddResult;   ///< Flag used to know if the data must be transfered or released after all the buffers are sent on the network.
   std::bitset<CommService::MAX_PACKAGE_BUFFER_COUNT> receivedBuffers; ///< Allow to keep track of the received buffers.
+  size_t profileId; ///< Profiler entry id.
 };
 
 /// @brief Package warehouse type.
@@ -182,7 +183,7 @@ struct PackageWarehouse {
   /// @param source Rank of the sender of the package to which the storage slot
   ///               is dedicated.
   template <typename T>
-  StorageId addRecvStorageSlot(std::shared_ptr<T> data, rank_t source) {
+  StorageId addRecvStorageSlot(std::shared_ptr<T> data, rank_t source, size_t profileId) {
     Package package = packageMem(data);
     size_t bufferCount = package.bufferCount;
     type_id_t typeId = TM::template idOf<T>();
@@ -199,6 +200,7 @@ struct PackageWarehouse {
         .typeId = typeId,
         .useAddResult = false,
         .receivedBuffers = {},
+        .profileId = profileId,
     });
   }
 
